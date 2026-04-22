@@ -237,13 +237,14 @@ ul {
 
 .hero__logo,
 .sidebar__logo {
-  border-radius: 22px;
-  object-fit: cover;
+  display: block;
+  width: 100%;
+  object-fit: contain;
 }
 
 .hero__logo {
   width: 100%;
-  max-width: 240px;
+  max-width: 460px;
 }
 
 .app-shell {
@@ -269,8 +270,7 @@ ul {
 }
 
 .sidebar__logo {
-  width: 56px;
-  height: 56px;
+  width: min(100%, 220px);
 }
 
 .sidebar__nav {

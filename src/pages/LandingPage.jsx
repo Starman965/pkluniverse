@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import pklUniverseLogo from '../../pkl_universe_logo.png';
 
 export default function LandingPage() {
   return (
@@ -23,7 +24,7 @@ export default function LandingPage() {
         </div>
 
         <div className="hero__panel">
-          <img alt="Blackhawk logo" className="hero__logo" src="./logo.jpg" />
+          <img alt="PKL Universe logo" className="hero__logo" src={pklUniverseLogo} />
           <ul className="feature-list">
             <li>Club-aware, team-scoped Firebase model</li>
             <li>Hash routing for GitHub Pages</li>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { listMemberships } from '../lib/data';
+import pklUniverseLogo from '../../pkl_universe_logo.png';
 
 const teamRoutes = [
   { label: 'Dashboard', to: '' },
@@ -47,9 +48,9 @@ export default function AppShell() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar__brand">
-          <img alt="Blackhawk logo" className="sidebar__logo" src="./logo.jpg" />
+          <img alt="PKL Universe logo" className="sidebar__logo" src={pklUniverseLogo} />
           <div>
-            <p className="eyebrow">Blackhawk Club App</p>
+            <p className="eyebrow">PKL Universe</p>
             <h1>Team workspace</h1>
           </div>
         </div>
