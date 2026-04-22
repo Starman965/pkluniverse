@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { createTeam, joinTeamByCode, listMemberships } from '../lib/data';
@@ -13,30 +13,23 @@ export default function OnboardingPage() {
   const [busyAction, setBusyAction] = useState('');
   const [memberships, setMemberships] = useState([]);
 
-  useEffect(() => {
-    let ignore = false;
-
+  const loadMemberships = useCallback(async () => {
     if (!user?.uid || !isFirebaseConfigured) {
       setMemberships([]);
-      return undefined;
+      return;
     }
 
-    listMemberships(user.uid)
-      .then((items) => {
-        if (!ignore) {
-          setMemberships(items);
-        }
-      })
-      .catch((error) => {
-        if (!ignore) {
-          setErrorMessage(error.message ?? 'Unable to load your teams yet.');
-        }
-      });
-
-    return () => {
-      ignore = true;
-    };
+    try {
+      const items = await listMemberships(user.uid);
+      setMemberships(items);
+    } catch (error) {
+      setErrorMessage(error.message ?? 'Unable to load your teams yet.');
+    }
   }, [isFirebaseConfigured, user?.uid]);
+
+  useEffect(() => {
+    loadMemberships();
+  }, [loadMemberships]);
 
   async function handleCreateTeam(event) {
     event.preventDefault();

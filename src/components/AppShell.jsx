@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { listMemberships } from '../lib/data';
@@ -18,31 +18,35 @@ export default function AppShell() {
   const { signOutUser, user } = useAuth();
   const { clubSlug, teamSlug } = useParams();
   const [memberships, setMemberships] = useState([]);
+  const [membershipError, setMembershipError] = useState('');
 
-  useEffect(() => {
-    let ignore = false;
-
+  const loadMemberships = useCallback(async () => {
     if (!user?.uid) {
       setMemberships([]);
-      return undefined;
+      setMembershipError('');
+      return;
     }
 
-    listMemberships(user.uid)
-      .then((items) => {
-        if (!ignore) {
-          setMemberships(items);
-        }
-      })
-      .catch(() => {
-        if (!ignore) {
-          setMemberships([]);
-        }
-      });
+    try {
+      const items = await listMemberships(user.uid);
+      setMemberships(items);
+      setMembershipError('');
+    } catch (error) {
+      setMembershipError(error.message ?? 'Unable to load your teams yet.');
+    }
+  }, [user?.uid]);
+
+  useEffect(() => {
+    loadMemberships();
+
+    const intervalId = window.setInterval(() => {
+      loadMemberships();
+    }, 10000);
 
     return () => {
-      ignore = true;
+      window.clearInterval(intervalId);
     };
-  }, [user?.uid]);
+  }, [clubSlug, loadMemberships, teamSlug]);
 
   return (
     <div className="app-shell">
@@ -58,7 +62,13 @@ export default function AppShell() {
         <div className="sidebar__section">
           <p className="sidebar__label">Active team</p>
           <div className="team-switcher">
-            {memberships.length === 0 ? (
+            {membershipError ? (
+              <p className="sidebar__empty">
+                Team list is still syncing. Refresh after your Firestore index finishes building.
+              </p>
+            ) : null}
+
+            {memberships.length === 0 && !membershipError ? (
               <p className="sidebar__empty">No teams yet. Create one or join with a code.</p>
             ) : null}
 
