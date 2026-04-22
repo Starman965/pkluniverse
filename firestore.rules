@@ -28,6 +28,10 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read, create, update: if isSelf(uid);
+
+      match /memberships/{membershipId} {
+        allow read, create, update: if isSelf(uid);
+      }
     }
 
     match /clubs/{clubId} {

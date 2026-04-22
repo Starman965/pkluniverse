@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { listMemberships } from '../lib/data';
+import { getMembership, getTeam, listMemberships } from '../lib/data';
 import pklUniverseLogo from '../../pkl_universe_logo.png';
 
 const teamRoutes = [
@@ -29,12 +29,33 @@ export default function AppShell() {
 
     try {
       const items = await listMemberships(user.uid);
+
+      if (!items.length && clubSlug && teamSlug) {
+        const [team, membership] = await Promise.all([
+          getTeam(clubSlug, teamSlug),
+          getMembership(clubSlug, teamSlug, user.uid),
+        ]);
+
+        if (team && membership) {
+          setMemberships([
+            {
+              clubSlug,
+              role: membership.role,
+              teamName: team.name ?? membership.teamName ?? teamSlug,
+              teamSlug,
+            },
+          ]);
+          setMembershipError('');
+          return;
+        }
+      }
+
       setMemberships(items);
       setMembershipError('');
     } catch (error) {
       setMembershipError(error.message ?? 'Unable to load your teams yet.');
     }
-  }, [user?.uid]);
+  }, [clubSlug, teamSlug, user?.uid]);
 
   useEffect(() => {
     loadMemberships();

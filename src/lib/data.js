@@ -1,7 +1,6 @@
 import {
   deleteField,
   collection,
-  collectionGroup,
   doc,
   getDoc,
   getDocs,
@@ -39,6 +38,45 @@ function makeJoinCode(seed) {
   const normalizedSeed = seed.replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 3) || 'PKL';
   const random = Math.random().toString(36).slice(2, 6).toUpperCase();
   return `${normalizedSeed}${random}`;
+}
+
+function splitDisplayName(displayName, email = '') {
+  const trimmedDisplayName = (displayName ?? '').trim();
+
+  if (!trimmedDisplayName) {
+    return {
+      firstName: '',
+      lastName: '',
+      fullName: email || 'New player',
+    };
+  }
+
+  const parts = trimmedDisplayName.split(/\s+/);
+  const firstName = parts[0] ?? '';
+  const lastName = parts.slice(1).join(' ');
+
+  return {
+    firstName,
+    fullName: buildFullName(firstName, lastName) || trimmedDisplayName,
+    lastName,
+  };
+}
+
+async function syncMembershipSummary({ clubSlug, role, teamName, teamSlug, uid }) {
+  const membershipSummaryRef = doc(db, 'users', uid, 'memberships', `${clubSlug}_${teamSlug}`);
+
+  await setDoc(
+    membershipSummaryRef,
+    {
+      clubSlug,
+      role,
+      teamName,
+      teamSlug,
+      uid,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
 }
 
 export async function syncUserProfile(user) {
@@ -82,15 +120,20 @@ export async function ensureClub() {
 async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
   const playerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'players', user.uid);
   const membershipPlayerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'playerLinks', user.uid);
+  const { firstName, fullName, lastName } = splitDisplayName(user.displayName, user.email);
 
   await setDoc(
     playerRef,
     {
+      active: true,
       createdAt: serverTimestamp(),
       createdBy: user.uid,
       displayName: user.displayName ?? user.email ?? 'New player',
       email: user.email ?? '',
-      isActive: true,
+      firstName,
+      fullName,
+      lastName,
+      skillLevel: '',
       teamId,
       teamName,
       uid: user.uid,
@@ -177,6 +220,14 @@ export async function createTeam({ teamName, user }) {
     updatedAt: serverTimestamp(),
   });
 
+  await syncMembershipSummary({
+    clubSlug: club.slug,
+    role: 'captain',
+    teamName: trimmedName,
+    teamSlug,
+    uid: user.uid,
+  });
+
   await setDoc(
     doc(db, 'users', user.uid),
     {
@@ -244,6 +295,14 @@ export async function joinTeamByCode({ code, user }) {
     });
   }
 
+  await syncMembershipSummary({
+    clubSlug: club.slug,
+    role: membershipSnapshot.exists() ? membershipSnapshot.data().role ?? 'member' : 'member',
+    teamName: team.name,
+    teamSlug: team.slug,
+    uid: user.uid,
+  });
+
   await setDoc(
     doc(db, 'users', user.uid),
     {
@@ -260,11 +319,11 @@ export async function joinTeamByCode({ code, user }) {
 export async function listMemberships(uid) {
   requireDb();
 
+  const membershipSummariesRef = collection(db, 'users', uid, 'memberships');
+  const membershipSummariesSnapshot = await getDocs(membershipSummariesRef);
   const memberships = [];
-  const membershipQuery = query(collectionGroup(db, 'members'), where('uid', '==', uid));
-  const membershipSnapshot = await getDocs(membershipQuery);
 
-  membershipSnapshot.forEach((snapshot) => {
+  membershipSummariesSnapshot.forEach((snapshot) => {
     const data = snapshot.data();
     memberships.push({
       clubSlug: data.clubSlug,
@@ -302,7 +361,17 @@ export async function getMembership(clubSlug, teamSlug, uid) {
     return null;
   }
 
-  return snapshot.data();
+  const data = snapshot.data();
+
+  await syncMembershipSummary({
+    clubSlug: data.clubSlug,
+    role: data.role,
+    teamName: data.teamName,
+    teamSlug: data.teamSlug,
+    uid,
+  });
+
+  return data;
 }
 
 function normalizeNullableNumber(value) {
