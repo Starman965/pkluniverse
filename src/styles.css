@@ -219,6 +219,13 @@ ul {
   gap: 0.9rem;
 }
 
+.roster-form {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+}
+
 .membership-card,
 .detail-card {
   display: grid;
@@ -233,6 +240,74 @@ ul {
 .detail-card span {
   color: #9fb6d8;
   font-size: 0.9rem;
+}
+
+.entity-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.entity-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1rem;
+}
+
+.entity-card--column {
+  display: grid;
+  justify-content: start;
+}
+
+.entity-card span {
+  color: #9fb6d8;
+  font-size: 0.9rem;
+}
+
+.status-badge {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #d3deef;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.status-badge--active {
+  background: rgba(53, 204, 143, 0.18);
+  color: #9ee8c6;
+}
+
+.choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}
+
+.choice-button {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+}
+
+.choice-button--active {
+  background: rgba(77, 124, 255, 0.18);
+  border-color: rgba(77, 124, 255, 0.32);
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 48px;
 }
 
 .hero__logo,

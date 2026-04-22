@@ -1,14 +1,28 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getMembership, getTeam } from '../lib/data';
+import {
+  getMembership,
+  getTeam,
+  listGames,
+  listPlayers,
+  saveGame,
+  savePlayer,
+  setAvailability,
+} from '../lib/data';
 import TeamPageTemplate from './TeamPageTemplate';
+
+function canManageRole(role) {
+  return role === 'captain' || role === 'coCaptain';
+}
 
 export function TeamDashboardPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
   const [team, setTeam] = useState(null);
   const [membership, setMembership] = useState(null);
+  const [playerCount, setPlayerCount] = useState(0);
+  const [gameCount, setGameCount] = useState(0);
 
   useEffect(() => {
     let ignore = false;
@@ -16,17 +30,23 @@ export function TeamDashboardPage() {
     Promise.all([
       getTeam(clubSlug, teamSlug),
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+      listPlayers(clubSlug, teamSlug),
+      listGames(clubSlug, teamSlug),
     ])
-      .then(([teamData, membershipData]) => {
+      .then(([teamData, membershipData, players, games]) => {
         if (!ignore) {
           setTeam(teamData);
           setMembership(membershipData);
+          setPlayerCount(players.length);
+          setGameCount(games.length);
         }
       })
       .catch(() => {
         if (!ignore) {
           setTeam(null);
           setMembership(null);
+          setPlayerCount(0);
+          setGameCount(0);
         }
       });
 
@@ -60,6 +80,14 @@ export function TeamDashboardPage() {
             <span>Status</span>
             <strong>{team?.status ?? 'Unknown'}</strong>
           </div>
+          <div className="detail-card">
+            <span>Players</span>
+            <strong>{playerCount}</strong>
+          </div>
+          <div className="detail-card">
+            <span>Matchups</span>
+            <strong>{gameCount}</strong>
+          </div>
         </div>
       </section>
 
@@ -76,44 +104,428 @@ export function TeamDashboardPage() {
 }
 
 export function RosterPage() {
+  const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
+  const [players, setPlayers] = useState([]);
+  const [membership, setMembership] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [form, setForm] = useState({
+    active: true,
+    dupr: '',
+    firstName: '',
+    lastName: '',
+    skillLevel: '',
+  });
+
+  const canManage = canManageRole(membership?.role);
+
+  async function loadRosterData() {
+    const [playerData, membershipData] = await Promise.all([
+      listPlayers(clubSlug, teamSlug),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+    ]);
+
+    setPlayers(playerData);
+    setMembership(membershipData);
+  }
+
+  useEffect(() => {
+    loadRosterData().catch((loadError) => {
+      setError(loadError.message ?? 'Unable to load the roster yet.');
+    });
+  }, [clubSlug, teamSlug, user?.uid]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await savePlayer({
+        ...form,
+        clubSlug,
+        teamSlug,
+        user,
+      });
+      setForm({
+        active: true,
+        dupr: '',
+        firstName: '',
+        lastName: '',
+        skillLevel: '',
+      });
+      setMessage('Player saved to the team roster.');
+      await loadRosterData();
+    } catch (submitError) {
+      setError(submitError.message ?? 'Unable to save that player.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <TeamPageTemplate
-      description="Roster management will stay manual in the first release. Players can self-link to a profile, while captains and co-captains can reconcile duplicates or edit roster details."
-      nextSteps={[
-        'Create the team roster collection and player-link documents.',
-        'Build manual add, edit, and link flows.',
-        'Add role-aware controls for captain and co-captain editing.',
-      ]}
-      title="Roster"
-    />
+    <div className="page-grid">
+      <section className="card">
+        <p className="eyebrow">Roster</p>
+        <h1>Team players</h1>
+        <p>
+          This page now reads live roster records from Firestore. Captains and co-captains can add
+          players manually while the hybrid identity model still allows later user-linking.
+        </p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
+
+        {canManage ? (
+          <form className="roster-form" onSubmit={handleSubmit}>
+            <label className="field">
+              <span>First name</span>
+              <input
+                onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))}
+                value={form.firstName}
+              />
+            </label>
+            <label className="field">
+              <span>Last name</span>
+              <input
+                onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))}
+                value={form.lastName}
+              />
+            </label>
+            <label className="field">
+              <span>DUPR</span>
+              <input
+                onChange={(event) => setForm((current) => ({ ...current, dupr: event.target.value }))}
+                placeholder="4.25"
+                value={form.dupr}
+              />
+            </label>
+            <label className="field">
+              <span>Skill level</span>
+              <input
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, skillLevel: event.target.value }))
+                }
+                placeholder="Intermediate"
+                value={form.skillLevel}
+              />
+            </label>
+            <label className="checkbox-field">
+              <input
+                checked={form.active}
+                onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))}
+                type="checkbox"
+              />
+              <span>Active player</span>
+            </label>
+            <button className="button" disabled={saving} type="submit">
+              {saving ? 'Saving player...' : 'Add player'}
+            </button>
+          </form>
+        ) : (
+          <div className="notice notice--info">
+            Captains and co-captains can add or edit players. Your current role is{' '}
+            <strong>{membership?.role ?? 'member'}</strong>.
+          </div>
+        )}
+      </section>
+
+      <section className="card">
+        <p className="eyebrow">Current roster</p>
+        {players.length > 0 ? (
+          <div className="entity-list">
+            {players.map((player) => (
+              <div key={player.id} className="entity-card">
+                <div>
+                  <strong>{player.fullName || 'Unnamed player'}</strong>
+                  <span>
+                    {player.skillLevel || 'Skill TBD'}
+                    {typeof player.dupr === 'number' ? ` · DUPR ${player.dupr.toFixed(2)}` : ''}
+                  </span>
+                </div>
+                <span className={`status-badge ${player.active ? 'status-badge--active' : ''}`}>
+                  {player.active ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p>No players saved yet.</p>
+        )}
+      </section>
+    </div>
   );
 }
 
 export function SchedulePage() {
+  const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
+  const [games, setGames] = useState([]);
+  const [membership, setMembership] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [form, setForm] = useState({
+    isoDate: '',
+    location: '',
+    opponent: '',
+    timeLabel: '',
+  });
+
+  const canManage = canManageRole(membership?.role);
+
+  async function loadScheduleData() {
+    const [gameData, membershipData] = await Promise.all([
+      listGames(clubSlug, teamSlug),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+    ]);
+
+    setGames(gameData);
+    setMembership(membershipData);
+  }
+
+  useEffect(() => {
+    loadScheduleData().catch((loadError) => {
+      setError(loadError.message ?? 'Unable to load matchups yet.');
+    });
+  }, [clubSlug, teamSlug, user?.uid]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await saveGame({
+        ...form,
+        clubSlug,
+        teamSlug,
+        user,
+      });
+      setForm({
+        isoDate: '',
+        location: '',
+        opponent: '',
+        timeLabel: '',
+      });
+      setMessage('Matchup added to the schedule.');
+      await loadScheduleData();
+    } catch (submitError) {
+      setError(submitError.message ?? 'Unable to save that matchup.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <TeamPageTemplate
-      description="Schedule entries and results will be team-specific so each team can run independently, even if other teams in the club do not use the app."
-      nextSteps={[
-        'Create schedule and game models under the team document path.',
-        'Add manual schedule entry and result updates.',
-        'Tie standings calculations to team-managed result data.',
-      ]}
-      title="Schedule and standings"
-    />
+    <div className="page-grid">
+      <section className="card">
+        <p className="eyebrow">Schedule</p>
+        <h1>Upcoming matchups</h1>
+        <p>
+          Schedule records are now live in Firestore. Standings will build from these same
+          team-managed results once score entry is added.
+        </p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
+
+        {canManage ? (
+          <form className="roster-form" onSubmit={handleSubmit}>
+            <label className="field">
+              <span>Date</span>
+              <input
+                onChange={(event) => setForm((current) => ({ ...current, isoDate: event.target.value }))}
+                type="date"
+                value={form.isoDate}
+              />
+            </label>
+            <label className="field">
+              <span>Opponent</span>
+              <input
+                onChange={(event) => setForm((current) => ({ ...current, opponent: event.target.value }))}
+                placeholder="Falcons"
+                value={form.opponent}
+              />
+            </label>
+            <label className="field">
+              <span>Location</span>
+              <input
+                onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
+                placeholder="Blackhawk Country Club"
+                value={form.location}
+              />
+            </label>
+            <label className="field">
+              <span>Time label</span>
+              <input
+                onChange={(event) => setForm((current) => ({ ...current, timeLabel: event.target.value }))}
+                placeholder="10:00 AM PT"
+                value={form.timeLabel}
+              />
+            </label>
+            <button className="button" disabled={saving} type="submit">
+              {saving ? 'Saving matchup...' : 'Add matchup'}
+            </button>
+          </form>
+        ) : (
+          <div className="notice notice--info">
+            Captains and co-captains manage the schedule. Your current role is{' '}
+            <strong>{membership?.role ?? 'member'}</strong>.
+          </div>
+        )}
+      </section>
+
+      <section className="card">
+        <p className="eyebrow">Saved schedule</p>
+        {games.length > 0 ? (
+          <div className="entity-list">
+            {games.map((game) => (
+              <div key={game.id} className="entity-card entity-card--column">
+                <strong>{game.opponent || 'Opponent TBD'}</strong>
+                <span>
+                  {game.isoDate || game.dateLabel || 'Date TBD'} · {game.timeLabel || 'Time TBD'}
+                </span>
+                <span>{game.location || 'Location TBD'}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p>No matchups saved yet.</p>
+        )}
+      </section>
+    </div>
   );
 }
 
 export function AvailabilityPage() {
+  const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
+  const [games, setGames] = useState([]);
+  const [membership, setMembership] = useState(null);
+  const [updatingGameId, setUpdatingGameId] = useState('');
+  const [error, setError] = useState('');
+
+  async function loadAvailabilityData() {
+    const [gameData, membershipData] = await Promise.all([
+      listGames(clubSlug, teamSlug),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+    ]);
+
+    setGames(gameData);
+    setMembership(membershipData);
+  }
+
+  useEffect(() => {
+    loadAvailabilityData().catch((loadError) => {
+      setError(loadError.message ?? 'Unable to load availability yet.');
+    });
+  }, [clubSlug, teamSlug, user?.uid]);
+
+  async function updateAvailability(gameId, status) {
+    setUpdatingGameId(gameId);
+    setError('');
+
+    try {
+      await setAvailability({
+        clubSlug,
+        gameId,
+        playerId: membership?.playerId,
+        status,
+        teamSlug,
+        user,
+      });
+      await loadAvailabilityData();
+    } catch (updateError) {
+      setError(updateError.message ?? 'Unable to update availability.');
+    } finally {
+      setUpdatingGameId('');
+    }
+  }
+
   return (
-    <TeamPageTemplate
-      description="Availability will move from the open player dropdown to authenticated, player-linked updates so each member only updates their own status."
-      nextSteps={[
-        'Read the signed-in member player link.',
-        'Render upcoming games with availability controls.',
-        'Restrict writes to the signed-in user or team leadership.',
-      ]}
-      title="Availability"
-    />
+    <div className="page-grid">
+      <section className="card">
+        <p className="eyebrow">Availability</p>
+        <h1>Your responses</h1>
+        <p>
+          Availability now reads and writes against the authenticated member&apos;s linked player
+          record, replacing the old open player selector.
+        </p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+
+        {!membership?.playerId ? (
+          <div className="notice notice--warning">
+            Your account is not linked to a player record for this team yet.
+          </div>
+        ) : null}
+      </section>
+
+      <section className="card">
+        <p className="eyebrow">Upcoming schedule</p>
+        {games.length > 0 ? (
+          <div className="entity-list">
+            {games.map((game) => {
+              const currentStatus = membership?.playerId
+                ? game.attendance?.[membership.playerId] ?? 'unknown'
+                : 'unknown';
+              const summary = Object.values(game.attendance ?? {}).reduce(
+                (counts, status) => {
+                  if (status === 'in') {
+                    counts.in += 1;
+                  } else if (status === 'out') {
+                    counts.out += 1;
+                  }
+                  return counts;
+                },
+                { in: 0, out: 0 },
+              );
+
+              return (
+                <div key={game.id} className="entity-card entity-card--column">
+                  <strong>{game.opponent || 'Opponent TBD'}</strong>
+                  <span>
+                    {game.isoDate || game.dateLabel || 'Date TBD'} · {game.timeLabel || 'Time TBD'}
+                  </span>
+                  <span>{game.location || 'Location TBD'}</span>
+                  <span>
+                    Team summary: {summary.in} in · {summary.out} out
+                  </span>
+                  <div className="choice-row">
+                    {[
+                      { label: 'In', value: 'in' },
+                      { label: 'Out', value: 'out' },
+                      { label: 'Unknown', value: 'unknown' },
+                    ].map((choice) => (
+                      <button
+                        key={choice.value}
+                        className={`choice-button ${currentStatus === choice.value ? 'choice-button--active' : ''}`}
+                        disabled={!membership?.playerId || updatingGameId === game.id}
+                        onClick={() => updateAvailability(game.id, choice.value)}
+                        type="button"
+                      >
+                        {updatingGameId === game.id && currentStatus === choice.value
+                          ? 'Saving...'
+                          : choice.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p>No scheduled matchups yet.</p>
+        )}
+      </section>
+    </div>
   );
 }
 
