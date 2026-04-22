@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { listMemberships } from '../lib/data';
 
 const teamRoutes = [
   { label: 'Dashboard', to: '' },
@@ -11,14 +13,35 @@ const teamRoutes = [
   { label: 'Admin', to: 'admin' },
 ];
 
-const sampleMemberships = [
-  { label: 'Blackhawk / Hawks', clubSlug: 'blackhawk', teamSlug: 'hawks' },
-  { label: 'Blackhawk / Falcons', clubSlug: 'blackhawk', teamSlug: 'falcons' },
-];
-
 export default function AppShell() {
   const { signOutUser, user } = useAuth();
   const { clubSlug, teamSlug } = useParams();
+  const [memberships, setMemberships] = useState([]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    if (!user?.uid) {
+      setMemberships([]);
+      return undefined;
+    }
+
+    listMemberships(user.uid)
+      .then((items) => {
+        if (!ignore) {
+          setMemberships(items);
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setMemberships([]);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [user?.uid]);
 
   return (
     <div className="app-shell">
@@ -34,17 +57,24 @@ export default function AppShell() {
         <div className="sidebar__section">
           <p className="sidebar__label">Active team</p>
           <div className="team-switcher">
-            {sampleMemberships.map((membership) => {
+            {memberships.length === 0 ? (
+              <p className="sidebar__empty">No teams yet. Create one or join with a code.</p>
+            ) : null}
+
+            {memberships.map((membership) => {
               const active =
                 membership.clubSlug === clubSlug && membership.teamSlug === teamSlug;
 
               return (
                 <NavLink
-                  key={membership.label}
+                  key={`${membership.clubSlug}-${membership.teamSlug}`}
                   className={`team-pill ${active ? 'team-pill--active' : ''}`}
                   to={`/c/${membership.clubSlug}/t/${membership.teamSlug}`}
                 >
-                  {membership.label}
+                  <strong>{membership.teamName}</strong>
+                  <span className="team-pill__meta">
+                    {membership.clubSlug} · {membership.role}
+                  </span>
                 </NavLink>
               );
             })}

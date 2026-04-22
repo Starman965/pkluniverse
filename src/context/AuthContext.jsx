@@ -7,6 +7,7 @@ import {
   signOut,
 } from 'firebase/auth';
 import { auth, googleProvider, isFirebaseConfigured } from '../lib/firebase';
+import { syncUserProfile } from '../lib/data';
 
 const AuthContext = createContext(null);
 
@@ -39,6 +40,16 @@ export function AuthProvider({ children }) {
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (!user || !isFirebaseConfigured) {
+      return;
+    }
+
+    syncUserProfile(user).catch((error) => {
+      setAuthError(error.message ?? 'Unable to sync your user profile.');
+    });
+  }, [user]);
 
   async function signInWithGoogle() {
     if (!auth || !googleProvider) {

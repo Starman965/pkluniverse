@@ -1,8 +1,88 @@
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { createTeam, joinTeamByCode, listMemberships } from '../lib/data';
 
 export default function OnboardingPage() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isFirebaseConfigured, signInWithGoogle, user } = useAuth();
+  const navigate = useNavigate();
+  const [teamName, setTeamName] = useState('');
+  const [joinCode, setJoinCode] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [busyAction, setBusyAction] = useState('');
+  const [memberships, setMemberships] = useState([]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    if (!user?.uid || !isFirebaseConfigured) {
+      setMemberships([]);
+      return undefined;
+    }
+
+    listMemberships(user.uid)
+      .then((items) => {
+        if (!ignore) {
+          setMemberships(items);
+        }
+      })
+      .catch((error) => {
+        if (!ignore) {
+          setErrorMessage(error.message ?? 'Unable to load your teams yet.');
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [isFirebaseConfigured, user?.uid]);
+
+  async function handleCreateTeam(event) {
+    event.preventDefault();
+
+    if (!isAuthenticated) {
+      await signInWithGoogle();
+      return;
+    }
+
+    setBusyAction('create');
+    setErrorMessage('');
+    setStatusMessage('');
+
+    try {
+      const result = await createTeam({ teamName, user });
+      setStatusMessage(`Team created. Share join code ${result.joinCode} with players.`);
+      navigate(`/c/${result.clubSlug}/t/${result.teamSlug}`);
+    } catch (error) {
+      setErrorMessage(error.message ?? 'Unable to create the team right now.');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
+  async function handleJoinTeam(event) {
+    event.preventDefault();
+
+    if (!isAuthenticated) {
+      await signInWithGoogle();
+      return;
+    }
+
+    setBusyAction('join');
+    setErrorMessage('');
+    setStatusMessage('');
+
+    try {
+      const result = await joinTeamByCode({ code: joinCode, user });
+      setStatusMessage('Team joined successfully.');
+      navigate(`/c/${result.clubSlug}/t/${result.teamSlug}`);
+    } catch (error) {
+      setErrorMessage(error.message ?? 'Unable to join that team right now.');
+    } finally {
+      setBusyAction('');
+    }
+  }
 
   return (
     <div className="page-grid">
@@ -15,43 +95,90 @@ export default function OnboardingPage() {
         </p>
 
         <div className="action-grid">
-          <div className="mini-card">
+          <form className="mini-card form-card" onSubmit={handleCreateTeam}>
             <h2>Create team</h2>
             <p>
-              Intended for club admins or approved organizers. The first implementation will
-              create the team, captain membership, and starter settings in Firestore.
+              Start with the team name. The app will create the Blackhawk club if it does not
+              exist yet, then create the team, join code, captain membership, and linked player
+              profile.
             </p>
-            <Link className="button" to="/c/blackhawk/t/hawks">
-              View created team shell
-            </Link>
-          </div>
+            <label className="field">
+              <span>Team name</span>
+              <input
+                onChange={(event) => setTeamName(event.target.value)}
+                placeholder="Hawks"
+                type="text"
+                value={teamName}
+              />
+            </label>
+            <button
+              className="button"
+              disabled={!isFirebaseConfigured || busyAction === 'create'}
+              type="submit"
+            >
+              {busyAction === 'create' ? 'Creating team...' : 'Create team'}
+            </button>
+          </form>
 
-          <div className="mini-card">
+          <form className="mini-card form-card" onSubmit={handleJoinTeam}>
             <h2>Join with code</h2>
             <p>
               Players sign in, enter a captain-managed code or link, then link themselves to a
               team roster profile.
             </p>
-            <Link className="button button--ghost" to="/c/blackhawk/t/falcons">
-              View joined team shell
-            </Link>
-          </div>
+            <label className="field">
+              <span>Join code</span>
+              <input
+                onChange={(event) => setJoinCode(event.target.value)}
+                placeholder="HAWK7F2"
+                type="text"
+                value={joinCode}
+              />
+            </label>
+            <button
+              className="button button--ghost"
+              disabled={!isFirebaseConfigured || busyAction === 'join'}
+              type="submit"
+            >
+              {busyAction === 'join' ? 'Joining team...' : 'Join team'}
+            </button>
+          </form>
         </div>
+
+        {statusMessage ? <div className="notice notice--success">{statusMessage}</div> : null}
+        {errorMessage ? <div className="notice notice--error">{errorMessage}</div> : null}
       </section>
 
       <section className="card">
-        <p className="eyebrow">State of this scaffold</p>
-        <ul className="feature-list">
-          <li>Hash-routed pages are wired for GitHub Pages.</li>
-          <li>Protected team routes are ready for Firebase auth.</li>
-          <li>Club-aware URLs use club and team slugs.</li>
-          <li>Real Firestore create/join flows are the next implementation step.</li>
-        </ul>
+        <p className="eyebrow">Your teams</p>
+        {memberships.length > 0 ? (
+          <div className="membership-list">
+            {memberships.map((membership) => (
+              <Link
+                key={`${membership.clubSlug}-${membership.teamSlug}`}
+                className="membership-card"
+                to={`/c/${membership.clubSlug}/t/${membership.teamSlug}`}
+              >
+                <strong>{membership.teamName}</strong>
+                <span>
+                  {membership.clubSlug} · {membership.role}
+                </span>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <ul className="feature-list">
+            <li>Hash-routed pages are wired for GitHub Pages.</li>
+            <li>Protected team routes are ready for Firebase auth.</li>
+            <li>Google users are synced into Firestore on sign-in.</li>
+            <li>Create and join now use real Firestore writes.</li>
+          </ul>
+        )}
 
         <div className="notice notice--info">
           {isAuthenticated
-            ? 'You are signed in, so once Firebase is configured we can replace these scaffold links with the real create/join flows.'
-            : 'You can explore the scaffold now, then enable Firebase to turn onboarding into a real flow.'}
+            ? 'You are signed in. The next major step is tightening rules and replacing the placeholder team pages with live roster, schedule, news, and availability data.'
+            : 'Sign in with Google first so the app can create your user profile and attach you to a team membership.'}
         </div>
       </section>
     </div>

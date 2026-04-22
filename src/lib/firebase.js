@@ -5,6 +5,8 @@ import {
   getAuth,
   setPersistence,
 } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -20,10 +22,14 @@ export const isFirebaseConfigured = Object.values(firebaseConfig).every(Boolean)
 let app = null;
 let auth = null;
 let googleProvider = null;
+let db = null;
+let storage = null;
 
 if (isFirebaseConfigured) {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
+  db = getFirestore(app);
+  storage = getStorage(app);
   googleProvider = new GoogleAuthProvider();
   googleProvider.setCustomParameters({ prompt: 'select_account' });
   setPersistence(auth, browserLocalPersistence).catch(() => {
@@ -31,4 +37,4 @@ if (isFirebaseConfigured) {
   });
 }
 
-export { app, auth, googleProvider, firebaseConfig };
+export { app, auth, db, firebaseConfig, googleProvider, storage };

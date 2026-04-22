@@ -84,7 +84,8 @@ textarea {
 
 .hero__content,
 .hero__panel,
-.stack {
+.stack,
+.form-card {
   display: grid;
   gap: 1rem;
 }
@@ -104,6 +105,25 @@ textarea {
 
 .action-grid {
   align-items: stretch;
+}
+
+.field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.field input {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  padding: 0.9rem 1rem;
+}
+
+.field input:focus {
+  outline: 2px solid rgba(77, 124, 255, 0.45);
+  outline-offset: 1px;
 }
 
 .button {
@@ -193,6 +213,28 @@ ul {
   color: #d9e5f5;
 }
 
+.membership-list,
+.detail-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.membership-card,
+.detail-card {
+  display: grid;
+  gap: 0.2rem;
+  border-radius: 16px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1rem;
+}
+
+.membership-card span,
+.detail-card span {
+  color: #9fb6d8;
+  font-size: 0.9rem;
+}
+
 .hero__logo,
 .sidebar__logo {
   border-radius: 22px;
@@ -252,12 +294,20 @@ ul {
 .team-pill {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
+  display: grid;
+  gap: 0.2rem;
 }
 
 .team-pill--active,
 .nav-link--active {
   background: rgba(77, 124, 255, 0.18);
   border: 1px solid rgba(77, 124, 255, 0.32);
+}
+
+.team-pill__meta,
+.sidebar__empty {
+  font-size: 0.85rem;
+  color: #9fb6d8;
 }
 
 .content {

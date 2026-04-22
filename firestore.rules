@@ -1,0 +1,76 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function memberPath(clubId, teamId) {
+      return /databases/$(database)/documents/clubs/$(clubId)/teams/$(teamId)/members/$(request.auth.uid);
+    }
+
+    function memberDoc(clubId, teamId) {
+      return get(memberPath(clubId, teamId));
+    }
+
+    function isTeamMember(clubId, teamId) {
+      return signedIn() && exists(memberPath(clubId, teamId));
+    }
+
+    function hasTeamRole(clubId, teamId, roles) {
+      return isTeamMember(clubId, teamId) && memberDoc(clubId, teamId).data.role in roles;
+    }
+
+    match /users/{uid} {
+      allow read, create, update: if isSelf(uid);
+    }
+
+    match /clubs/{clubId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update: if signedIn();
+
+      match /admins/{uid} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
+
+      match /teams/{teamId} {
+        allow read: if isTeamMember(clubId, teamId);
+        allow create: if signedIn() && request.resource.data.createdBy == request.auth.uid;
+        allow update: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+
+        match /members/{uid} {
+          allow read: if isTeamMember(clubId, teamId);
+          allow create: if signedIn() && request.resource.data.uid == uid;
+          allow update: if isSelf(uid) || hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+        }
+
+        match /players/{playerId} {
+          allow read: if isTeamMember(clubId, teamId);
+          allow create, update: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']) || isSelf(playerId);
+        }
+
+        match /playerLinks/{uid} {
+          allow read: if isSelf(uid) || hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+          allow create, update: if isSelf(uid) || hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+        }
+
+        match /games/{gameId} {
+          allow read: if isTeamMember(clubId, teamId);
+          allow create, update: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+        }
+
+        match /newsPosts/{postId} {
+          allow read: if isTeamMember(clubId, teamId);
+          allow create, update: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+        }
+      }
+    }
+  }
+}

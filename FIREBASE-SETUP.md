@@ -14,6 +14,17 @@ In Firebase, create:
 
 Cloud Functions can wait until we need trusted server-side actions such as guarded team creation or role repair flows.
 
+## Rules files now in the repo
+
+The project now includes starter Firebase config files:
+
+- `firebase.json`
+- `firestore.rules`
+- `firestore.indexes.json`
+- `storage.rules`
+
+These are only local source files until you deploy them to Firebase. They do not automatically change your live project.
+
 ## What you need to put in `.env`
 
 Copy `.env.example` to `.env` and fill in:
@@ -73,4 +84,4 @@ When you are ready, send me:
 
 1. Confirmation that the new Firebase project exists
 2. The Firebase web app config values, or confirmation that you added them to `.env`
-3. Whether you want me to scaffold initial Firestore rules and indexes next
+3. Confirmation that you want to deploy the starter Firestore and Storage rules once we finish testing the flow
