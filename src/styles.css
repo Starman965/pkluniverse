@@ -343,6 +343,23 @@ ul {
   margin-top: 1rem;
 }
 
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.team-logo-preview {
+  display: block;
+  width: min(100%, 420px);
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1rem;
+}
+
 .result-editor {
   display: grid;
   gap: 0.75rem;

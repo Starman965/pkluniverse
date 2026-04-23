@@ -11,6 +11,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, isFirebaseConfigured, storage } from './firebase';
@@ -58,6 +59,12 @@ function buildNewsImagePath({ clubSlug, postId, teamSlug, fileName }) {
   return `clubs/${clubSlug}/teams/${teamSlug}/news/${postId}/${Date.now()}-${safeBaseName}${extension}`;
 }
 
+function buildTeamLogoPath({ clubSlug, teamSlug, fileName }) {
+  const safeBaseName = sanitizeFileBaseName(fileName);
+  const extension = getFileExtension(fileName);
+  return `clubs/${clubSlug}/teams/${teamSlug}/branding/${Date.now()}-${safeBaseName}${extension}`;
+}
+
 async function uploadNewsImage({ clubSlug, file, postId, teamSlug }) {
   if (!storage) {
     throw new Error('Firebase Storage is not configured yet.');
@@ -76,6 +83,26 @@ async function uploadNewsImage({ clubSlug, file, postId, teamSlug }) {
   return {
     imagePath,
     imageUrl: await getDownloadURL(imageRef),
+  };
+}
+
+async function uploadTeamLogo({ clubSlug, file, teamSlug }) {
+  if (!storage) {
+    throw new Error('Firebase Storage is not configured yet.');
+  }
+
+  const logoPath = buildTeamLogoPath({
+    clubSlug,
+    fileName: file?.name,
+    teamSlug,
+  });
+  const logoRef = ref(storage, logoPath);
+
+  await uploadBytes(logoRef, file);
+
+  return {
+    logoPath,
+    logoUrl: await getDownloadURL(logoRef),
   };
 }
 
@@ -243,6 +270,7 @@ export async function createTeam({ teamName, user }) {
     createdBy: user.uid,
     createdByEmail: user.email ?? '',
     joinCode,
+    logoPath: '',
     logoUrl: '',
     name: trimmedName,
     slug: teamSlug,
@@ -423,6 +451,110 @@ export async function getMembership(clubSlug, teamSlug, uid) {
   });
 
   return data;
+}
+
+async function syncTeamNameReferences({ clubSlug, teamName, teamSlug }) {
+  const membersRef = collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'members');
+  const membersSnapshot = await getDocs(membersRef);
+
+  if (membersSnapshot.empty) {
+    return;
+  }
+
+  const batch = writeBatch(db);
+
+  membersSnapshot.docs.forEach((entry) => {
+    const data = entry.data();
+    const uid = data.uid ?? entry.id;
+
+    batch.update(entry.ref, {
+      teamName,
+      updatedAt: serverTimestamp(),
+    });
+
+    batch.set(
+      doc(db, 'users', uid, 'memberships', `${clubSlug}_${teamSlug}`),
+      {
+        clubSlug,
+        role: data.role ?? 'member',
+        teamName,
+        teamSlug,
+        uid,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  });
+
+  await batch.commit();
+}
+
+export async function updateTeamSettings({
+  clubSlug,
+  logoFile,
+  status = 'active',
+  teamName,
+  teamSlug,
+}) {
+  requireDb();
+
+  const normalizedName = teamName.trim();
+
+  if (!normalizedName) {
+    throw new Error('Enter a team name.');
+  }
+
+  const teamRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug);
+  const teamSnapshot = await getDoc(teamRef);
+
+  if (!teamSnapshot.exists()) {
+    throw new Error('That team could not be found.');
+  }
+
+  const currentTeam = teamSnapshot.data();
+  let uploadedLogo = null;
+
+  if (logoFile) {
+    uploadedLogo = await uploadTeamLogo({
+      clubSlug,
+      file: logoFile,
+      teamSlug,
+    });
+  }
+
+  await updateDoc(teamRef, {
+    logoPath: uploadedLogo?.logoPath ?? currentTeam.logoPath ?? '',
+    logoUrl: uploadedLogo?.logoUrl ?? currentTeam.logoUrl ?? '',
+    name: normalizedName,
+    status,
+    updatedAt: serverTimestamp(),
+  });
+
+  if (uploadedLogo?.logoPath && currentTeam.logoPath && currentTeam.logoPath !== uploadedLogo.logoPath) {
+    await deleteStoragePath(currentTeam.logoPath);
+  }
+
+  if ((currentTeam.name ?? '') !== normalizedName) {
+    await syncTeamNameReferences({
+      clubSlug,
+      teamName: normalizedName,
+      teamSlug,
+    });
+  }
+}
+
+export async function rotateTeamJoinCode({ clubSlug, teamSlug }) {
+  requireDb();
+
+  const nextJoinCode = makeJoinCode(teamSlug);
+  const teamRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug);
+
+  await updateDoc(teamRef, {
+    joinCode: nextJoinCode,
+    updatedAt: serverTimestamp(),
+  });
+
+  return nextJoinCode;
 }
 
 function normalizeNullableNumber(value) {

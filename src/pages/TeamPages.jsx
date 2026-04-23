@@ -10,11 +10,13 @@ import {
   listGames,
   listNewsPosts,
   listPlayers,
+  rotateTeamJoinCode,
   saveGame,
   saveGamePairings,
   saveNewsPost,
   savePlayer,
   setAvailability,
+  updateTeamSettings,
 } from '../lib/data';
 import TeamPageTemplate from './TeamPageTemplate';
 
@@ -72,6 +74,32 @@ function formatAttendanceStatus(status) {
   }
 
   return 'Unknown';
+}
+
+function validateSquareImage(file) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      const { naturalHeight, naturalWidth } = image;
+      URL.revokeObjectURL(objectUrl);
+
+      if (naturalWidth === naturalHeight) {
+        resolve();
+        return;
+      }
+
+      reject(new Error('Upload a square logo image, such as 512x512 or 1024x1024.'));
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('That logo file could not be read as an image.'));
+    };
+
+    image.src = objectUrl;
+  });
 }
 
 function StandingsSummary({ games }) {
@@ -1388,16 +1416,166 @@ export function NewsPage() {
 }
 
 export function SettingsPage() {
+  const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
+  const [team, setTeam] = useState(null);
+  const [membership, setMembership] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [form, setForm] = useState({
+    logoFile: null,
+    teamName: '',
+  });
+
+  const canManage = canManageRole(membership?.role);
+
+  async function loadSettingsData() {
+    const [teamData, membershipData] = await Promise.all([
+      getTeam(clubSlug, teamSlug),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+    ]);
+
+    setTeam(teamData);
+    setMembership(membershipData);
+    setForm({
+      logoFile: null,
+      teamName: teamData?.name ?? '',
+    });
+  }
+
+  useEffect(() => {
+    loadSettingsData().catch((loadError) => {
+      setError(loadError.message ?? 'Unable to load team settings yet.');
+    });
+  }, [clubSlug, teamSlug, user?.uid]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      if (form.logoFile) {
+        await validateSquareImage(form.logoFile);
+      }
+
+      await updateTeamSettings({
+        clubSlug,
+        logoFile: form.logoFile,
+        teamName: form.teamName,
+        teamSlug,
+      });
+      setMessage('Team settings saved.');
+      await loadSettingsData();
+    } catch (submitError) {
+      setError(submitError.message ?? 'Unable to save team settings.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRotateJoinCode() {
+    setRotating(true);
+    setError('');
+    setMessage('');
+
+    try {
+      const nextJoinCode = await rotateTeamJoinCode({ clubSlug, teamSlug });
+      setMessage(`Join code rotated to ${nextJoinCode}.`);
+      await loadSettingsData();
+    } catch (rotateError) {
+      setError(rotateError.message ?? 'Unable to rotate the join code.');
+    } finally {
+      setRotating(false);
+    }
+  }
+
   return (
-    <TeamPageTemplate
-      description="Team settings will hold branding, team metadata, join settings, and member role management."
-      nextSteps={[
-        'Persist team profile fields including logo URL and slug.',
-        'Add join-code rotation and membership role controls.',
-        'Expose safe self-service team settings to captains and co-captains.',
-      ]}
-      title="Settings"
-    />
+    <div className="page-grid">
+      <section className="card">
+        <p className="eyebrow">Settings</p>
+        <h1>Team profile</h1>
+        <p>
+          Update the saved team profile and rotate the join code players use from the onboarding
+          flow.
+        </p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
+
+        <div className="detail-grid">
+          <div className="detail-card">
+            <span>Team slug</span>
+            <strong>{team?.slug ?? teamSlug}</strong>
+          </div>
+          <div className="detail-card">
+            <span>Current join code</span>
+            <strong>{team?.joinCode ?? 'Not available yet'}</strong>
+          </div>
+          <div className="detail-card">
+            <span>Status</span>
+            <strong>{team?.status ?? 'Unknown'}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="card">
+        <p className="eyebrow">Branding</p>
+        {canManage ? (
+          <form className="roster-form" onSubmit={handleSubmit}>
+            <label className="field">
+              <span>Team name</span>
+              <input
+                onChange={(event) => setForm((current) => ({ ...current, teamName: event.target.value }))}
+                value={form.teamName}
+              />
+            </label>
+            <label className="field">
+              <span>Square logo upload</span>
+              <input
+                accept="image/*"
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, logoFile: event.target.files?.[0] ?? null }))
+                }
+                type="file"
+              />
+            </label>
+            <div className="notice notice--info">
+              Upload a square team logo, for example `512x512` or `1024x1024`. Leaving this blank
+              keeps the current logo.
+            </div>
+            <div className="settings-actions">
+              <button className="button" disabled={saving} type="submit">
+                {saving ? 'Saving settings...' : 'Save settings'}
+              </button>
+              <button
+                className="button button--ghost"
+                disabled={rotating}
+                onClick={handleRotateJoinCode}
+                type="button"
+              >
+                {rotating ? 'Rotating code...' : 'Rotate join code'}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="notice notice--info">
+            Captains and co-captains can edit team settings. Your current role is{' '}
+            <strong>{membership?.role ?? 'member'}</strong>.
+          </div>
+        )}
+      </section>
+
+      {team?.logoUrl ? (
+        <section className="card">
+          <p className="eyebrow">Logo preview</p>
+          <img alt={`${team.name ?? 'Team'} logo`} className="team-logo-preview" src={team.logoUrl} />
+        </section>
+      ) : null}
+    </div>
   );
 }
 
