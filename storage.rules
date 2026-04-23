@@ -6,9 +6,31 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function memberPath(clubId, teamId) {
+      return /databases/(default)/documents/clubs/$(clubId)/teams/$(teamId)/members/$(request.auth.uid);
+    }
+
+    function isTeamMember(clubId, teamId) {
+      return signedIn() && firestore.exists(memberPath(clubId, teamId));
+    }
+
+    function hasTeamRole(clubId, teamId, roles) {
+      return isTeamMember(clubId, teamId)
+        && firestore.get(memberPath(clubId, teamId)).data.role in roles;
+    }
+
+    match /clubs/{clubId}/teams/{teamId}/news/{postId}/{fileName} {
+      allow read: if isTeamMember(clubId, teamId);
+      allow write: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+    }
+
+    match /clubs/{clubId}/teams/{teamId}/branding/{fileName} {
+      allow read: if isTeamMember(clubId, teamId);
+      allow write: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+    }
+
     match /{allPaths=**} {
-      allow read: if signedIn();
-      allow write: if signedIn();
+      allow read, write: if false;
     }
   }
 }

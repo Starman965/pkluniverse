@@ -26,8 +26,39 @@ service cloud.firestore {
       return isTeamMember(clubId, teamId) && memberDoc(clubId, teamId).data.role in roles;
     }
 
+    function isManager(clubId, teamId) {
+      return hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+    }
+
+    function safeSelfMembershipUpdate(uid) {
+      return isSelf(uid)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.clubId == resource.data.clubId
+        && request.resource.data.clubSlug == resource.data.clubSlug
+        && request.resource.data.teamId == resource.data.teamId
+        && request.resource.data.teamSlug == resource.data.teamSlug
+        && request.resource.data.teamName == resource.data.teamName
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.joinedAt == resource.data.joinedAt;
+    }
+
+    function safeSelfPlayerWrite(playerId, teamId) {
+      return isSelf(playerId)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.teamId == teamId;
+    }
+
+    function safeSelfPlayerLinkWrite(uid, teamId) {
+      return isSelf(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.teamId == teamId
+        && request.resource.data.playerId == uid;
+    }
+
     match /users/{uid} {
-      allow read, create, update: if isSelf(uid);
+      allow read, create: if isSelf(uid);
+      allow update: if isSelf(uid) && request.resource.data.uid == resource.data.uid;
 
       match /memberships/{membershipId} {
         allow read, create, update: if isSelf(uid);
@@ -36,8 +67,10 @@ service cloud.firestore {
 
     match /clubs/{clubId} {
       allow read: if signedIn();
-      allow create: if signedIn();
-      allow update: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.slug == clubId
+        && request.resource.data.status == 'active';
+      allow update: if false;
 
       match /admins/{uid} {
         allow read: if signedIn();
@@ -45,34 +78,48 @@ service cloud.firestore {
       }
 
       match /teams/{teamId} {
-        allow read: if isTeamMember(clubId, teamId);
-        allow create: if signedIn() && request.resource.data.createdBy == request.auth.uid;
-        allow update: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.clubId == clubId
+          && request.resource.data.slug == teamId
+          && request.resource.data.status == 'active';
+        allow update: if isManager(clubId, teamId)
+          && request.resource.data.clubId == resource.data.clubId
+          && request.resource.data.slug == resource.data.slug
+          && request.resource.data.createdBy == resource.data.createdBy;
 
         match /members/{uid} {
           allow read: if isTeamMember(clubId, teamId);
-          allow create: if signedIn() && request.resource.data.uid == uid;
-          allow update: if isSelf(uid) || hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+          allow create: if signedIn()
+            && request.auth.uid == uid
+            && request.resource.data.uid == uid
+            && request.resource.data.clubId == clubId
+            && request.resource.data.teamId == teamId
+            && request.resource.data.teamSlug == teamId
+            && request.resource.data.role in ['captain', 'member']
+            && request.resource.data.status == 'active';
+          allow update: if safeSelfMembershipUpdate(uid) || isManager(clubId, teamId);
         }
 
         match /players/{playerId} {
           allow read: if isTeamMember(clubId, teamId);
-          allow create, update: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']) || isSelf(playerId);
+          allow create, update: if isManager(clubId, teamId) || safeSelfPlayerWrite(playerId, teamId);
         }
 
         match /playerLinks/{uid} {
-          allow read: if isSelf(uid) || hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
-          allow create, update: if isSelf(uid) || hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+          allow read: if isSelf(uid) || isManager(clubId, teamId);
+          allow create, update: if safeSelfPlayerLinkWrite(uid, teamId) || isManager(clubId, teamId);
         }
 
         match /games/{gameId} {
           allow read: if isTeamMember(clubId, teamId);
-          allow create, update: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+          allow create, update: if isManager(clubId, teamId);
         }
 
         match /newsPosts/{postId} {
           allow read: if isTeamMember(clubId, teamId);
-          allow create, update, delete: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+          allow create, update, delete: if isManager(clubId, teamId);
         }
       }
     }

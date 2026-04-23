@@ -25,6 +25,17 @@ The project now includes starter Firebase config files:
 
 These are only local source files until you deploy them to Firebase. They do not automatically change your live project.
 
+The current repo rules are now hardened around the app's team-scoped paths:
+
+- Firestore membership docs no longer allow unrestricted self-updates
+- Team reads stay available for signed-in users so join-by-code can work
+- Storage only allows team members to read team files
+- Storage writes are limited to captains and co-captains under:
+  - `clubs/{clubId}/teams/{teamId}/news/...`
+  - `clubs/{clubId}/teams/{teamId}/branding/...`
+
+When you are ready to apply them, deploy both Firestore and Storage rules to Firebase.
+
 ## What you need to put in `.env`
 
 Copy `.env.example` to `.env` and fill in:
