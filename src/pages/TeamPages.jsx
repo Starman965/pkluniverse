@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
+  PLAYER_SKILL_LEVELS,
   buildPairingSummary,
   buildStandingsSummary,
   deleteNewsPost,
@@ -117,6 +118,17 @@ function formatRoleLabel(role) {
   }
 
   return 'Member';
+}
+
+function createEmptyRosterForm() {
+  return {
+    active: true,
+    dupr: '',
+    firstName: '',
+    lastName: '',
+    playerId: '',
+    skillLevel: '',
+  };
 }
 
 function StandingsSummary({ games }) {
@@ -253,17 +265,13 @@ export function RosterPage() {
   const [players, setPlayers] = useState([]);
   const [membership, setMembership] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [updatingPlayerId, setUpdatingPlayerId] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [form, setForm] = useState({
-    active: true,
-    dupr: '',
-    firstName: '',
-    lastName: '',
-    skillLevel: '',
-  });
+  const [form, setForm] = useState(createEmptyRosterForm());
 
   const canManage = canManageRole(membership?.role);
+  const editingPlayer = players.find((player) => player.id === form.playerId) ?? null;
 
   async function loadRosterData() {
     const [playerData, membershipData] = await Promise.all([
@@ -295,19 +303,61 @@ export function RosterPage() {
         teamSlug,
         user,
       });
-      setForm({
-        active: true,
-        dupr: '',
-        firstName: '',
-        lastName: '',
-        skillLevel: '',
-      });
-      setMessage('Player saved to the team roster.');
+      setForm(createEmptyRosterForm());
+      setMessage(editingPlayer ? 'Player changes saved.' : 'Player saved to the team roster.');
       await loadRosterData();
     } catch (submitError) {
       setError(submitError.message ?? 'Unable to save that player.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  function startEditing(player) {
+    setError('');
+    setMessage('');
+    setForm({
+      active: player.active,
+      dupr: typeof player.dupr === 'number' ? String(player.dupr) : '',
+      firstName: player.firstName ?? '',
+      lastName: player.lastName ?? '',
+      playerId: player.id,
+      skillLevel: PLAYER_SKILL_LEVELS.includes(player.skillLevel) ? player.skillLevel : '',
+    });
+  }
+
+  function cancelEditing() {
+    setError('');
+    setMessage('');
+    setForm(createEmptyRosterForm());
+  }
+
+  async function toggleActiveStatus(player) {
+    setUpdatingPlayerId(player.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await savePlayer({
+        active: !player.active,
+        clubSlug,
+        dupr: typeof player.dupr === 'number' ? String(player.dupr) : '',
+        firstName: player.firstName ?? '',
+        lastName: player.lastName ?? '',
+        playerId: player.id,
+        skillLevel: PLAYER_SKILL_LEVELS.includes(player.skillLevel) ? player.skillLevel : '',
+        teamSlug,
+        user,
+      });
+      if (form.playerId === player.id) {
+        setForm((current) => ({ ...current, active: !player.active }));
+      }
+      setMessage(player.active ? 'Player deactivated.' : 'Player reactivated.');
+      await loadRosterData();
+    } catch (updateError) {
+      setError(updateError.message ?? 'Unable to update that player right now.');
+    } finally {
+      setUpdatingPlayerId('');
     }
   }
 
@@ -350,13 +400,19 @@ export function RosterPage() {
             </label>
             <label className="field">
               <span>Skill level</span>
-              <input
+              <select
                 onChange={(event) =>
                   setForm((current) => ({ ...current, skillLevel: event.target.value }))
                 }
-                placeholder="Intermediate"
                 value={form.skillLevel}
-              />
+              >
+                <option value="">Select skill level</option>
+                {PLAYER_SKILL_LEVELS.map((skillLevel) => (
+                  <option key={skillLevel} value={skillLevel}>
+                    {skillLevel}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="checkbox-field">
               <input
@@ -366,9 +422,22 @@ export function RosterPage() {
               />
               <span>Active player</span>
             </label>
-            <button className="button" disabled={saving} type="submit">
-              {saving ? 'Saving player...' : 'Add player'}
-            </button>
+            <div className="settings-actions">
+              <button className="button" disabled={saving} type="submit">
+                {saving
+                  ? editingPlayer
+                    ? 'Saving changes...'
+                    : 'Saving player...'
+                  : editingPlayer
+                    ? 'Save changes'
+                    : 'Add player'}
+              </button>
+              {editingPlayer ? (
+                <button className="button button--ghost" onClick={cancelEditing} type="button">
+                  Cancel edit
+                </button>
+              ) : null}
+            </div>
           </form>
         ) : (
           <div className="notice notice--info">
@@ -390,10 +459,36 @@ export function RosterPage() {
                     {player.skillLevel || 'Skill TBD'}
                     {typeof player.dupr === 'number' ? ` · DUPR ${player.dupr.toFixed(2)}` : ''}
                   </span>
+                  {player.email ? <span>Linked account: {player.email}</span> : null}
                 </div>
-                <span className={`status-badge ${player.active ? 'status-badge--active' : ''}`}>
-                  {player.active ? 'Active' : 'Inactive'}
-                </span>
+                <div className="roster-card__actions">
+                  <span className={`status-badge ${player.active ? 'status-badge--active' : ''}`}>
+                    {player.active ? 'Active' : 'Inactive'}
+                  </span>
+                  {canManage ? (
+                    <div className="choice-row">
+                      <button
+                        className="choice-button"
+                        onClick={() => startEditing(player)}
+                        type="button"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="choice-button"
+                        disabled={updatingPlayerId === player.id}
+                        onClick={() => toggleActiveStatus(player)}
+                        type="button"
+                      >
+                        {updatingPlayerId === player.id
+                          ? 'Saving...'
+                          : player.active
+                            ? 'Deactivate'
+                            : 'Reactivate'}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>

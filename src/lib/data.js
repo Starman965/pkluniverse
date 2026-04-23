@@ -22,6 +22,14 @@ const DEFAULT_CLUB = {
   slug: 'blackhawk',
 };
 
+export const PLAYER_SKILL_LEVELS = [
+  'Beginner',
+  'Low Intermediate',
+  'Intermediate',
+  'Advanced',
+  'Professional',
+];
+
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
     throw new Error('Firebase is not configured yet.');
@@ -211,24 +219,37 @@ async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
   const playerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'players', user.uid);
   const membershipPlayerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'playerLinks', user.uid);
   const { firstName, fullName, lastName } = splitDisplayName(user.displayName, user.email);
+  const playerSnapshot = await getDoc(playerRef);
+  const existingPlayer = playerSnapshot.exists() ? playerSnapshot.data() : null;
+  const existingFirstName = (existingPlayer?.firstName ?? '').trim();
+  const existingLastName = (existingPlayer?.lastName ?? '').trim();
+  const existingFullName = (existingPlayer?.fullName ?? '').trim();
+  const normalizedExistingSkillLevel = normalizeSkillLevel(existingPlayer?.skillLevel ?? '');
+  const payload = {
+    active: existingPlayer?.active !== false,
+    displayName: user.displayName ?? user.email ?? existingPlayer?.displayName ?? 'New player',
+    email: user.email ?? existingPlayer?.email ?? '',
+    firstName: existingFirstName || firstName,
+    fullName:
+      existingFullName ||
+      buildFullName(existingFirstName || firstName, existingLastName || lastName) ||
+      fullName,
+    lastName: existingLastName || lastName,
+    skillLevel: normalizedExistingSkillLevel,
+    teamId,
+    teamName,
+    uid: user.uid,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (!playerSnapshot.exists()) {
+    payload.createdAt = serverTimestamp();
+    payload.createdBy = user.uid;
+  }
 
   await setDoc(
     playerRef,
-    {
-      active: true,
-      createdAt: serverTimestamp(),
-      createdBy: user.uid,
-      displayName: user.displayName ?? user.email ?? 'New player',
-      email: user.email ?? '',
-      firstName,
-      fullName,
-      lastName,
-      skillLevel: '',
-      teamId,
-      teamName,
-      uid: user.uid,
-      updatedAt: serverTimestamp(),
-    },
+    payload,
     { merge: true },
   );
 
@@ -676,6 +697,18 @@ function normalizeNullableNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeSkillLevel(value) {
+  const trimmed = (value ?? '').trim();
+
+  if (!trimmed) {
+    return '';
+  }
+
+  return (
+    PLAYER_SKILL_LEVELS.find((option) => option.toLowerCase() === trimmed.toLowerCase()) ?? ''
+  );
+}
+
 function buildFullName(firstName, lastName) {
   return [firstName, lastName].filter(Boolean).join(' ').trim();
 }
@@ -779,24 +812,30 @@ export async function savePlayer({
     throw new Error('Enter at least a first or last name for the player.');
   }
 
+  const normalizedSkillLevel = normalizeSkillLevel(skillLevel);
+
+  if (skillLevel?.trim() && !normalizedSkillLevel) {
+    throw new Error('Choose a valid skill level from the list.');
+  }
+
   const nextPlayerId = playerId || slugify(fullName) || `player-${Date.now()}`;
   const playerRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'players', nextPlayerId);
+  const payload = {
+    active,
+    dupr: normalizeNullableNumber(dupr),
+    firstName: trimmedFirstName,
+    fullName,
+    lastName: trimmedLastName,
+    skillLevel: normalizedSkillLevel,
+    updatedAt: serverTimestamp(),
+  };
 
-  await setDoc(
-    playerRef,
-    {
-      active,
-      createdAt: serverTimestamp(),
-      createdBy: user?.uid ?? '',
-      dupr: normalizeNullableNumber(dupr),
-      firstName: trimmedFirstName,
-      fullName,
-      lastName: trimmedLastName,
-      skillLevel: skillLevel.trim(),
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
+  if (!playerId) {
+    payload.createdAt = serverTimestamp();
+    payload.createdBy = user?.uid ?? '';
+  }
+
+  await setDoc(playerRef, payload, { merge: true });
 
   return nextPlayerId;
 }
