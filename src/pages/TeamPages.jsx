@@ -66,6 +66,22 @@ function buildPairingDrafts(games) {
   }, {});
 }
 
+function assignPlayerToNextOpenPairingSlot(pairings, playerId) {
+  const nextPairings = pairings.map((pairing) => ({
+    ...pairing,
+    playerIds: [...pairing.playerIds],
+  }));
+
+  for (const pairing of nextPairings) {
+    if (pairing.playerIds.length < 2) {
+      pairing.playerIds = [...pairing.playerIds, playerId];
+      return nextPairings;
+    }
+  }
+
+  return nextPairings;
+}
+
 function formatMatchupLabel(game) {
   return `${game.opponent || 'Opponent TBD'} · ${game.isoDate || game.dateLabel || 'Date TBD'}`;
 }
@@ -877,10 +893,14 @@ export function PairingsPage() {
         ? draft.rosterPlayerIds.filter((id) => id !== playerId)
         : [...draft.rosterPlayerIds, playerId];
       const selectedIds = new Set(rosterPlayerIds);
-      const pairings = draft.pairings.map((pairing) => ({
+      let pairings = draft.pairings.map((pairing) => ({
         ...pairing,
         playerIds: pairing.playerIds.filter((id) => selectedIds.has(id)),
       }));
+
+      if (!exists) {
+        pairings = assignPlayerToNextOpenPairingSlot(pairings, playerId);
+      }
 
       setError('');
       return {
@@ -1012,7 +1032,10 @@ export function PairingsPage() {
             <p className="eyebrow">Roster pool</p>
             {canManage ? (
               <>
-                <p>Select up to eight active players for this matchup. Availability is shown as a guide.</p>
+                <p>
+                  Select up to eight active players for this matchup. Clicking a player adds them to
+                  the pool and auto-fills the next open court slot. Availability is shown as a guide.
+                </p>
                 <div className="pairing-pool">
                   {activePlayers.map((player) => {
                     const selected = activeDraft?.rosterPlayerIds.includes(player.id);
