@@ -30,6 +30,10 @@ service cloud.firestore {
       return hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
     }
 
+    function isCaptain(clubId, teamId) {
+      return hasTeamRole(clubId, teamId, ['captain']);
+    }
+
     function safeSelfMembershipUpdate(uid) {
       return isSelf(uid)
         && request.resource.data.uid == resource.data.uid
@@ -41,6 +45,34 @@ service cloud.firestore {
         && request.resource.data.role == resource.data.role
         && request.resource.data.status == resource.data.status
         && request.resource.data.joinedAt == resource.data.joinedAt;
+    }
+
+    function safeManagerMembershipSync(uid, clubId, teamId) {
+      return isManager(clubId, teamId)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.clubId == resource.data.clubId
+        && request.resource.data.clubSlug == resource.data.clubSlug
+        && request.resource.data.teamId == resource.data.teamId
+        && request.resource.data.teamSlug == resource.data.teamSlug
+        && request.resource.data.playerId == resource.data.playerId
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.joinedAt == resource.data.joinedAt;
+    }
+
+    function safeCaptainRoleUpdate(uid, clubId, teamId) {
+      return isCaptain(clubId, teamId)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.clubId == resource.data.clubId
+        && request.resource.data.clubSlug == resource.data.clubSlug
+        && request.resource.data.teamId == resource.data.teamId
+        && request.resource.data.teamSlug == resource.data.teamSlug
+        && request.resource.data.playerId == resource.data.playerId
+        && request.resource.data.teamName == resource.data.teamName
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.joinedAt == resource.data.joinedAt
+        && resource.data.role in ['member', 'coCaptain']
+        && request.resource.data.role in ['member', 'coCaptain'];
     }
 
     function safeSelfPlayerWrite(playerId, teamId) {
@@ -99,7 +131,9 @@ service cloud.firestore {
             && request.resource.data.teamSlug == teamId
             && request.resource.data.role in ['captain', 'member']
             && request.resource.data.status == 'active';
-          allow update: if safeSelfMembershipUpdate(uid) || isManager(clubId, teamId);
+          allow update: if safeSelfMembershipUpdate(uid)
+            || safeManagerMembershipSync(uid, clubId, teamId)
+            || safeCaptainRoleUpdate(uid, clubId, teamId);
         }
 
         match /players/{playerId} {

@@ -122,10 +122,22 @@ function splitDisplayName(displayName, email = '') {
   const trimmedDisplayName = (displayName ?? '').trim();
 
   if (!trimmedDisplayName) {
+    const emailLocalPart = (email ?? '').split('@')[0] ?? '';
+    const emailParts = emailLocalPart
+      .split(/[._-]+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const firstName = emailParts[0] ?? '';
+    const lastName = emailParts
+      .slice(1)
+      .join(' ')
+      .trim();
+    const fullName = buildFullName(firstName, lastName);
+
     return {
-      firstName: '',
-      lastName: '',
-      fullName: email || 'New player',
+      firstName,
+      lastName,
+      fullName: fullName || email || 'New player',
     };
   }
 
@@ -430,7 +442,7 @@ export async function getTeam(clubSlug, teamSlug) {
   return snapshot.data();
 }
 
-export async function getMembership(clubSlug, teamSlug, uid) {
+export async function getMembership(clubSlug, teamSlug, uid, user = null) {
   requireDb();
 
   const membershipRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'members', uid);
@@ -450,7 +462,57 @@ export async function getMembership(clubSlug, teamSlug, uid) {
     uid,
   });
 
+  if (user?.uid === uid) {
+    await ensurePlayerProfile({
+      clubId: clubSlug,
+      teamId: teamSlug,
+      teamName: data.teamName ?? teamSlug,
+      user,
+    });
+  }
+
   return data;
+}
+
+export async function listTeamMembers(clubSlug, teamSlug) {
+  requireDb();
+
+  const membersRef = collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'members');
+  const snapshot = await getDocs(membersRef);
+  const members = snapshot.docs.map((entry) => {
+    const data = entry.data();
+
+    return {
+      clubSlug: data.clubSlug ?? clubSlug,
+      id: entry.id,
+      joinedAtMs: normalizeTimestampMs(data.joinedAt),
+      playerId: data.playerId ?? '',
+      role: data.role ?? 'member',
+      status: data.status ?? 'active',
+      teamName: data.teamName ?? '',
+      teamSlug: data.teamSlug ?? teamSlug,
+      uid: data.uid ?? entry.id,
+    };
+  });
+
+  const roleOrder = {
+    captain: 0,
+    coCaptain: 1,
+    member: 2,
+  };
+
+  members.sort((left, right) => {
+    const leftOrder = roleOrder[left.role] ?? 99;
+    const rightOrder = roleOrder[right.role] ?? 99;
+
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+
+    return (left.uid ?? '').localeCompare(right.uid ?? '');
+  });
+
+  return members;
 }
 
 async function syncTeamNameReferences({ clubSlug, teamName, teamSlug }) {
@@ -557,6 +619,54 @@ export async function rotateTeamJoinCode({ clubSlug, teamSlug }) {
   return nextJoinCode;
 }
 
+export async function updateTeamMemberRole({
+  clubSlug,
+  role,
+  targetUid,
+  teamSlug,
+}) {
+  requireDb();
+
+  if (!['member', 'coCaptain'].includes(role)) {
+    throw new Error('That role change is not supported.');
+  }
+
+  const membershipRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'members', targetUid);
+  const membershipSnapshot = await getDoc(membershipRef);
+
+  if (!membershipSnapshot.exists()) {
+    throw new Error('That team member could not be found.');
+  }
+
+  const membership = membershipSnapshot.data();
+
+  if ((membership.role ?? '') === 'captain') {
+    throw new Error('Captain reassignment is not supported here yet.');
+  }
+
+  const batch = writeBatch(db);
+
+  batch.update(membershipRef, {
+    role,
+    updatedAt: serverTimestamp(),
+  });
+
+  batch.set(
+    doc(db, 'users', targetUid, 'memberships', `${clubSlug}_${teamSlug}`),
+    {
+      clubSlug,
+      role,
+      teamName: membership.teamName ?? '',
+      teamSlug,
+      uid: targetUid,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  await batch.commit();
+}
+
 function normalizeNullableNumber(value) {
   if (value === null || value === undefined || value === '') {
     return null;
@@ -633,6 +743,7 @@ export async function listPlayers(clubSlug, teamSlug) {
     return {
       active: data.active !== false,
       dupr: normalizeNullableNumber(data.dupr),
+      email: data.email ?? '',
       firstName,
       fullName: data.fullName ?? buildFullName(firstName, lastName),
       id: entry.id,

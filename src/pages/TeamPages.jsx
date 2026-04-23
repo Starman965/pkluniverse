@@ -10,18 +10,23 @@ import {
   listGames,
   listNewsPosts,
   listPlayers,
+  listTeamMembers,
   rotateTeamJoinCode,
   saveGame,
   saveGamePairings,
   saveNewsPost,
   savePlayer,
   setAvailability,
+  updateTeamMemberRole,
   updateTeamSettings,
 } from '../lib/data';
-import TeamPageTemplate from './TeamPageTemplate';
 
 function canManageRole(role) {
   return role === 'captain' || role === 'coCaptain';
+}
+
+function isCaptainRole(role) {
+  return role === 'captain';
 }
 
 function formatRecord(wins, losses, ties) {
@@ -102,6 +107,18 @@ function validateSquareImage(file) {
   });
 }
 
+function formatRoleLabel(role) {
+  if (role === 'coCaptain') {
+    return 'Co-captain';
+  }
+
+  if (role === 'captain') {
+    return 'Captain';
+  }
+
+  return 'Member';
+}
+
 function StandingsSummary({ games }) {
   const standings = useMemo(() => buildStandingsSummary(games), [games]);
 
@@ -156,7 +173,7 @@ export function TeamDashboardPage() {
 
     Promise.all([
       getTeam(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
       listPlayers(clubSlug, teamSlug),
       listGames(clubSlug, teamSlug),
     ])
@@ -251,7 +268,7 @@ export function RosterPage() {
   async function loadRosterData() {
     const [playerData, membershipData] = await Promise.all([
       listPlayers(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
 
     setPlayers(playerData);
@@ -410,7 +427,7 @@ export function SchedulePage() {
   async function loadScheduleData() {
     const [gameData, membershipData] = await Promise.all([
       listGames(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
 
     setGames(gameData);
@@ -697,7 +714,7 @@ export function PairingsPage() {
     const [gameData, playerData, membershipData] = await Promise.all([
       listGames(clubSlug, teamSlug),
       listPlayers(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
 
     setGames(gameData);
@@ -1045,7 +1062,7 @@ export function AvailabilityPage() {
   async function loadAvailabilityData() {
     const [gameData, membershipData] = await Promise.all([
       listGames(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
 
     setGames(gameData);
@@ -1182,7 +1199,7 @@ export function NewsPage() {
   async function loadNewsData() {
     const [posts, membershipData] = await Promise.all([
       listNewsPosts(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
 
     setNewsPosts(posts);
@@ -1434,7 +1451,7 @@ export function SettingsPage() {
   async function loadSettingsData() {
     const [teamData, membershipData] = await Promise.all([
       getTeam(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
 
     setTeam(teamData);
@@ -1580,15 +1597,136 @@ export function SettingsPage() {
 }
 
 export function AdminPage() {
+  const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
+  const [members, setMembers] = useState([]);
+  const [players, setPlayers] = useState([]);
+  const [membership, setMembership] = useState(null);
+  const [updatingUid, setUpdatingUid] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const canManageMembership = isCaptainRole(membership?.role);
+  const playerMap = useMemo(() => new Map(players.map((player) => [player.id, player])), [players]);
+
+  async function loadAdminData() {
+    const [memberData, playerData, membershipData] = await Promise.all([
+      listTeamMembers(clubSlug, teamSlug),
+      listPlayers(clubSlug, teamSlug),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
+    ]);
+
+    setMembers(memberData);
+    setPlayers(playerData);
+    setMembership(membershipData);
+  }
+
+  useEffect(() => {
+    loadAdminData().catch((loadError) => {
+      setError(loadError.message ?? 'Unable to load team admin data yet.');
+    });
+  }, [clubSlug, teamSlug, user?.uid]);
+
+  async function handleRoleChange(memberRecord, nextRole) {
+    setUpdatingUid(memberRecord.uid);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateTeamMemberRole({
+        clubSlug,
+        role: nextRole,
+        targetUid: memberRecord.uid,
+        teamSlug,
+      });
+      setMessage(
+        `${memberRecord.uid === user?.uid ? 'Your' : 'Member'} role updated to ${formatRoleLabel(nextRole).toLowerCase()}.`,
+      );
+      await loadAdminData();
+    } catch (updateError) {
+      setError(updateError.message ?? 'Unable to update that team role.');
+    } finally {
+      setUpdatingUid('');
+    }
+  }
+
   return (
-    <TeamPageTemplate
-      description="The first version keeps club administration lightweight. This area is for team-level admin tasks, while club-admin recovery tools stay restricted and minimal."
-      nextSteps={[
-        'Separate team-level admin actions from club-admin utilities.',
-        'Show pairings management to captains and co-captains.',
-        'Add safety checks around captain assignment and team archival.',
-      ]}
-      title="Admin"
-    />
+    <div className="page-grid">
+      <section className="card">
+        <p className="eyebrow">Admin</p>
+        <h1>Team roles</h1>
+        <p>
+          Use this area to review team memberships and appoint or remove co-captains. Captain
+          reassignment stays out of scope for this first admin slice.
+        </p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
+      </section>
+
+      <section className="card">
+        <p className="eyebrow">Member access</p>
+        {members.length > 0 ? (
+          <div className="entity-list">
+            {members.map((memberRecord) => {
+              const player = playerMap.get(memberRecord.playerId);
+              const displayName = player?.fullName || player?.email || memberRecord.uid;
+              const secondary = player?.email || memberRecord.uid;
+              const canEdit =
+                canManageMembership &&
+                memberRecord.role !== 'captain' &&
+                memberRecord.uid !== user?.uid;
+
+              return (
+                <div key={memberRecord.uid} className="entity-card entity-card--column">
+                  <div className="member-admin__header">
+                    <div>
+                      <strong>{displayName}</strong>
+                      <span>{secondary}</span>
+                    </div>
+                    <span className="status-badge">{formatRoleLabel(memberRecord.role)}</span>
+                  </div>
+
+                  {canEdit ? (
+                    <div className="choice-row">
+                      <button
+                        className={`choice-button ${memberRecord.role === 'member' ? 'choice-button--active' : ''}`}
+                        disabled={updatingUid === memberRecord.uid}
+                        onClick={() => handleRoleChange(memberRecord, 'member')}
+                        type="button"
+                      >
+                        {updatingUid === memberRecord.uid && memberRecord.role === 'coCaptain'
+                          ? 'Saving...'
+                          : 'Member'}
+                      </button>
+                      <button
+                        className={`choice-button ${memberRecord.role === 'coCaptain' ? 'choice-button--active' : ''}`}
+                        disabled={updatingUid === memberRecord.uid}
+                        onClick={() => handleRoleChange(memberRecord, 'coCaptain')}
+                        type="button"
+                      >
+                        {updatingUid === memberRecord.uid && memberRecord.role === 'member'
+                          ? 'Saving...'
+                          : 'Co-captain'}
+                      </button>
+                    </div>
+                  ) : (
+                    <span>
+                      {memberRecord.role === 'captain'
+                        ? 'Captain role changes are not enabled yet.'
+                        : canManageMembership
+                          ? 'You cannot change your own role here.'
+                          : 'Only the captain can change team roles right now.'}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p>No team members found yet.</p>
+        )}
+      </section>
+    </div>
   );
 }

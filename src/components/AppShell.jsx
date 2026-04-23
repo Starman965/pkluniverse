@@ -35,7 +35,7 @@ export default function AppShell() {
       if (!items.length && clubSlug && teamSlug) {
         const [team, membership] = await Promise.all([
           getTeam(clubSlug, teamSlug),
-          getMembership(clubSlug, teamSlug, user.uid),
+          getMembership(clubSlug, teamSlug, user.uid, user),
         ]);
 
         if (team && membership) {
