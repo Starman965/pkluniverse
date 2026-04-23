@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
+  buildStandingsSummary,
   deleteNewsPost,
   getMembership,
   getTeam,
@@ -17,6 +18,66 @@ import TeamPageTemplate from './TeamPageTemplate';
 
 function canManageRole(role) {
   return role === 'captain' || role === 'coCaptain';
+}
+
+function formatRecord(wins, losses, ties) {
+  return `${wins}-${losses}${ties ? `-${ties}` : ''}`;
+}
+
+function createResultDraft(game) {
+  return {
+    matchStatus: game.matchStatus ?? 'scheduled',
+    opponentScore: game.opponentScore ?? '',
+    teamScore: game.teamScore ?? '',
+  };
+}
+
+function buildResultDrafts(games) {
+  return games.reduce((accumulator, game) => {
+    accumulator[game.id] = createResultDraft(game);
+    return accumulator;
+  }, {});
+}
+
+function StandingsSummary({ games }) {
+  const standings = useMemo(() => buildStandingsSummary(games), [games]);
+
+  return (
+    <>
+      {standings.completedGames.length > 0 ? (
+        <div className="detail-grid">
+          <div className="detail-card">
+            <span>Overall record</span>
+            <strong>{formatRecord(standings.wins, standings.losses, standings.ties)}</strong>
+          </div>
+          <div className="detail-card">
+            <span>Win %</span>
+            <strong>{standings.winPct}</strong>
+          </div>
+          <div className="detail-card">
+            <span>Completed matchups</span>
+            <strong>{standings.completedGames.length}</strong>
+          </div>
+        </div>
+      ) : (
+        <p>No completed matchups yet. Standings will populate after results are entered.</p>
+      )}
+
+      {standings.opponents.length > 0 ? (
+        <div className="entity-list">
+          {standings.opponents.map((row) => (
+            <div key={row.opponent} className="entity-card entity-card--column">
+              <strong>{row.opponent}</strong>
+              <span>{formatRecord(row.wins, row.losses, row.ties)}</span>
+              <span>
+                PF {row.pointsFor} · PA {row.pointsAgainst}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 export function TeamDashboardPage() {
@@ -268,8 +329,10 @@ export function SchedulePage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
   const [games, setGames] = useState([]);
+  const [resultDrafts, setResultDrafts] = useState({});
   const [membership, setMembership] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [updatingGameId, setUpdatingGameId] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [form, setForm] = useState({
@@ -288,6 +351,7 @@ export function SchedulePage() {
     ]);
 
     setGames(gameData);
+    setResultDrafts(buildResultDrafts(gameData));
     setMembership(membershipData);
   }
 
@@ -323,6 +387,36 @@ export function SchedulePage() {
       setError(submitError.message ?? 'Unable to save that matchup.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleResultSave(game) {
+    const draft = resultDrafts[game.id] ?? createResultDraft(game);
+
+    setUpdatingGameId(game.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await saveGame({
+        clubSlug,
+        gameId: game.id,
+        isoDate: game.isoDate || game.dateLabel || '',
+        location: game.location,
+        matchStatus: draft.matchStatus,
+        opponent: game.opponent,
+        opponentScore: draft.opponentScore,
+        teamScore: draft.teamScore,
+        teamSlug,
+        timeLabel: game.timeLabel,
+        user,
+      });
+      setMessage('Match result updated.');
+      await loadScheduleData();
+    } catch (submitError) {
+      setError(submitError.message ?? 'Unable to update that result.');
+    } finally {
+      setUpdatingGameId('');
     }
   }
 
@@ -386,6 +480,11 @@ export function SchedulePage() {
       </section>
 
       <section className="card">
+        <p className="eyebrow">Standings</p>
+        <StandingsSummary games={games} />
+      </section>
+
+      <section className="card">
         <p className="eyebrow">Saved schedule</p>
         {games.length > 0 ? (
           <div className="entity-list">
@@ -396,12 +495,121 @@ export function SchedulePage() {
                   {game.isoDate || game.dateLabel || 'Date TBD'} · {game.timeLabel || 'Time TBD'}
                 </span>
                 <span>{game.location || 'Location TBD'}</span>
+                <span>
+                  Status: {game.matchStatus === 'completed' ? 'Completed' : 'Scheduled'}
+                  {game.result && game.result !== 'pending'
+                    ? ` · Result ${game.result}`
+                    : ''}
+                </span>
+                {game.matchStatus === 'completed' &&
+                game.teamScore !== null &&
+                game.opponentScore !== null ? (
+                  <span>
+                    Final: {game.teamScore}-{game.opponentScore}
+                  </span>
+                ) : null}
+                {canManage ? (
+                  <div className="result-editor">
+                    <label className="field">
+                      <span>Status</span>
+                      <select
+                        onChange={(event) =>
+                          setResultDrafts((current) => ({
+                            ...current,
+                            [game.id]: {
+                              ...(current[game.id] ?? createResultDraft(game)),
+                              matchStatus: event.target.value,
+                            },
+                          }))
+                        }
+                        value={resultDrafts[game.id]?.matchStatus ?? game.matchStatus ?? 'scheduled'}
+                      >
+                        <option value="scheduled">Scheduled</option>
+                        <option value="completed">Completed</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Your score</span>
+                      <input
+                        inputMode="numeric"
+                        onChange={(event) =>
+                          setResultDrafts((current) => ({
+                            ...current,
+                            [game.id]: {
+                              ...(current[game.id] ?? createResultDraft(game)),
+                              teamScore: event.target.value,
+                            },
+                          }))
+                        }
+                        placeholder="21"
+                        value={resultDrafts[game.id]?.teamScore ?? ''}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Opponent score</span>
+                      <input
+                        inputMode="numeric"
+                        onChange={(event) =>
+                          setResultDrafts((current) => ({
+                            ...current,
+                            [game.id]: {
+                              ...(current[game.id] ?? createResultDraft(game)),
+                              opponentScore: event.target.value,
+                            },
+                          }))
+                        }
+                        placeholder="18"
+                        value={resultDrafts[game.id]?.opponentScore ?? ''}
+                      />
+                    </label>
+                    <button
+                      className="button button--ghost"
+                      disabled={updatingGameId === game.id}
+                      onClick={() => handleResultSave(game)}
+                      type="button"
+                    >
+                      {updatingGameId === game.id ? 'Saving result...' : 'Save result'}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
         ) : (
           <p>No matchups saved yet.</p>
         )}
+      </section>
+    </div>
+  );
+}
+
+export function StandingsPage() {
+  const { clubSlug, teamSlug } = useParams();
+  const [games, setGames] = useState([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    listGames(clubSlug, teamSlug)
+      .then((gameData) => {
+        setGames(gameData);
+      })
+      .catch((loadError) => {
+        setError(loadError.message ?? 'Unable to load standings yet.');
+      });
+  }, [clubSlug, teamSlug]);
+
+  return (
+    <div className="page-grid">
+      <section className="card">
+        <p className="eyebrow">Standings</p>
+        <h1>Team results</h1>
+        <p>
+          Standings are derived directly from completed schedule entries, so the schedule and record
+          always stay in sync.
+        </p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+        <StandingsSummary games={games} />
       </section>
     </div>
   );

@@ -112,7 +112,8 @@ textarea {
   gap: 0.45rem;
 }
 
-.field input {
+.field input,
+.field select {
   width: 100%;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -132,6 +133,7 @@ textarea {
 }
 
 .field input:focus,
+.field select:focus,
 .field textarea:focus {
   outline: 2px solid rgba(77, 124, 255, 0.45);
   outline-offset: 1px;
@@ -279,6 +281,14 @@ ul {
 .news-list {
   display: grid;
   gap: 1rem;
+}
+
+.result-editor {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  width: 100%;
+  align-items: end;
 }
 
 .news-card {

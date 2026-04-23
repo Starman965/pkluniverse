@@ -438,6 +438,26 @@ function buildFullName(firstName, lastName) {
   return [firstName, lastName].filter(Boolean).join(' ').trim();
 }
 
+export function deriveMatchResult(matchStatus, teamScore, opponentScore) {
+  if (matchStatus !== 'completed') {
+    return 'pending';
+  }
+
+  if (teamScore === null || opponentScore === null) {
+    return 'pending';
+  }
+
+  if (teamScore > opponentScore) {
+    return 'win';
+  }
+
+  if (teamScore < opponentScore) {
+    return 'loss';
+  }
+
+  return 'tie';
+}
+
 function normalizeUrl(value) {
   const trimmed = (value ?? '').trim();
 
@@ -559,6 +579,13 @@ export async function listGames(clubSlug, teamSlug) {
       matchStatus: data.matchStatus ?? 'scheduled',
       opponent: data.opponent ?? '',
       opponentScore: normalizeNullableNumber(data.opponentScore),
+      result:
+        data.result ??
+        deriveMatchResult(
+          data.matchStatus ?? 'scheduled',
+          normalizeNullableNumber(data.teamScore),
+          normalizeNullableNumber(data.opponentScore),
+        ),
       teamScore: normalizeNullableNumber(data.teamScore),
       timeLabel: data.timeLabel ?? '',
     };
@@ -571,10 +598,14 @@ export async function listGames(clubSlug, teamSlug) {
 
 export async function saveGame({
   clubSlug,
+  gameId,
   isoDate,
   location,
+  matchStatus = 'scheduled',
   opponent,
+  opponentScore,
   teamSlug,
+  teamScore,
   timeLabel,
   user,
 }) {
@@ -594,8 +625,16 @@ export async function saveGame({
   }
 
   const baseId = slugify(`${trimmedIsoDate}-${trimmedOpponent}-${trimmedLocation || 'location'}`);
-  const gameId = baseId || `game-${Date.now()}`;
-  const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', gameId);
+  const nextGameId = gameId || baseId || `game-${Date.now()}`;
+  const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', nextGameId);
+  const normalizedTeamScore = normalizeNullableNumber(teamScore);
+  const normalizedOpponentScore = normalizeNullableNumber(opponentScore);
+  const finalStatus =
+    matchStatus === 'completed' ||
+    (normalizedTeamScore !== null && normalizedOpponentScore !== null)
+      ? 'completed'
+      : 'scheduled';
+  const result = deriveMatchResult(finalStatus, normalizedTeamScore, normalizedOpponentScore);
 
   await setDoc(
     gameRef,
@@ -606,18 +645,19 @@ export async function saveGame({
       dateLabel: trimmedIsoDate,
       isoDate: trimmedIsoDate,
       location: trimmedLocation || 'Location TBD',
-      matchStatus: 'scheduled',
+      matchStatus: finalStatus,
       opponent: trimmedOpponent,
-      opponentScore: null,
+      opponentScore: normalizedOpponentScore,
+      result,
       rosterPlayerIds: [],
-      teamScore: null,
+      teamScore: normalizedTeamScore,
       timeLabel: trimmedTimeLabel || 'Time TBD',
       updatedAt: serverTimestamp(),
     },
     { merge: true },
   );
 
-  return gameId;
+  return nextGameId;
 }
 
 export async function setAvailability({
@@ -753,4 +793,67 @@ export async function deleteNewsPost({ clubSlug, post, teamSlug }) {
   const postRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', post.id);
   await deleteDoc(postRef);
   await deleteStoragePath(post.imagePath);
+}
+
+export function buildStandingsSummary(games) {
+  const completedGames = games.filter(
+    (game) => game.matchStatus === 'completed' && game.result && game.result !== 'pending',
+  );
+
+  const wins = completedGames.filter((game) => game.result === 'win').length;
+  const losses = completedGames.filter((game) => game.result === 'loss').length;
+  const ties = completedGames.filter((game) => game.result === 'tie').length;
+  const winPct = completedGames.length
+    ? ((wins + ties * 0.5) / completedGames.length).toFixed(3)
+    : '0.000';
+
+  const rows = new Map();
+
+  completedGames.forEach((game) => {
+    const key = game.opponent || 'Unknown opponent';
+    const row = rows.get(key) ?? {
+      losses: 0,
+      matches: 0,
+      opponent: key,
+      pointsAgainst: 0,
+      pointsFor: 0,
+      ties: 0,
+      wins: 0,
+    };
+
+    row.matches += 1;
+
+    if (game.result === 'win') {
+      row.wins += 1;
+    } else if (game.result === 'loss') {
+      row.losses += 1;
+    } else if (game.result === 'tie') {
+      row.ties += 1;
+    }
+
+    row.pointsFor += game.teamScore ?? 0;
+    row.pointsAgainst += game.opponentScore ?? 0;
+    rows.set(key, row);
+  });
+
+  const opponents = Array.from(rows.values()).sort((left, right) => {
+    if (right.wins !== left.wins) {
+      return right.wins - left.wins;
+    }
+
+    if (left.losses !== right.losses) {
+      return left.losses - right.losses;
+    }
+
+    return left.opponent.localeCompare(right.opponent);
+  });
+
+  return {
+    completedGames,
+    losses,
+    opponents,
+    ties,
+    winPct,
+    wins,
+  };
 }

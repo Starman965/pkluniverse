@@ -8,6 +8,7 @@ const teamRoutes = [
   { label: 'Dashboard', to: '' },
   { label: 'Roster', to: 'roster' },
   { label: 'Schedule', to: 'schedule' },
+  { label: 'Standings', to: 'standings' },
   { label: 'Availability', to: 'availability' },
   { label: 'News', to: 'news' },
   { label: 'Settings', to: 'settings' },

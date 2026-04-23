@@ -11,6 +11,7 @@ import {
   RosterPage,
   SchedulePage,
   SettingsPage,
+  StandingsPage,
   TeamDashboardPage,
 } from './pages/TeamPages';
 
@@ -32,6 +33,7 @@ export default function App() {
         <Route element={<TeamDashboardPage />} index />
         <Route element={<RosterPage />} path="roster" />
         <Route element={<SchedulePage />} path="schedule" />
+        <Route element={<StandingsPage />} path="standings" />
         <Route element={<AvailabilityPage />} path="availability" />
         <Route element={<NewsPage />} path="news" />
         <Route element={<SettingsPage />} path="settings" />
