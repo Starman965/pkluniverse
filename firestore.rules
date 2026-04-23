@@ -72,7 +72,7 @@ service cloud.firestore {
 
         match /newsPosts/{postId} {
           allow read: if isTeamMember(clubId, teamId);
-          allow create, update: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+          allow create, update, delete: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
         }
       }
     }

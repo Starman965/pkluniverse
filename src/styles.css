@@ -121,7 +121,18 @@ textarea {
   padding: 0.9rem 1rem;
 }
 
-.field input:focus {
+.field textarea {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  padding: 0.9rem 1rem;
+  resize: vertical;
+}
+
+.field input:focus,
+.field textarea:focus {
   outline: 2px solid rgba(77, 124, 255, 0.45);
   outline-offset: 1px;
 }
@@ -226,6 +237,24 @@ ul {
   align-items: end;
 }
 
+.news-form {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: start;
+}
+
+.news-form__full {
+  grid-column: 1 / -1;
+}
+
+.news-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
 .membership-card,
 .detail-card {
   display: grid;
@@ -245,6 +274,58 @@ ul {
 .entity-list {
   display: grid;
   gap: 0.9rem;
+}
+
+.news-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.news-card {
+  display: grid;
+  gap: 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.news-card__image {
+  width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+  display: block;
+}
+
+.news-card__body {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.news-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.news-card__header h2 {
+  margin-bottom: 0.35rem;
+}
+
+.news-card__meta,
+.news-card__text {
+  color: #c9d7ea;
+}
+
+.news-card__text {
+  white-space: pre-wrap;
+}
+
+.news-card__link {
+  color: #89b1ff;
+  font-weight: 700;
 }
 
 .entity-card {

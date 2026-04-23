@@ -2,11 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
+  deleteNewsPost,
   getMembership,
   getTeam,
   listGames,
+  listNewsPosts,
   listPlayers,
   saveGame,
+  saveNewsPost,
   savePlayer,
   setAvailability,
 } from '../lib/data';
@@ -530,16 +533,258 @@ export function AvailabilityPage() {
 }
 
 export function NewsPage() {
+  const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
+  const [newsPosts, setNewsPosts] = useState([]);
+  const [membership, setMembership] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [editingPostId, setEditingPostId] = useState('');
+  const [form, setForm] = useState({
+    body: '',
+    imageFile: null,
+    linkUrl: '',
+    title: '',
+  });
+
+  const canManage = canManageRole(membership?.role);
+  const editingPost = newsPosts.find((post) => post.id === editingPostId) ?? null;
+
+  async function loadNewsData() {
+    const [posts, membershipData] = await Promise.all([
+      listNewsPosts(clubSlug, teamSlug),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+    ]);
+
+    setNewsPosts(posts);
+    setMembership(membershipData);
+  }
+
+  useEffect(() => {
+    loadNewsData().catch((loadError) => {
+      setError(loadError.message ?? 'Unable to load team news yet.');
+    });
+  }, [clubSlug, teamSlug, user?.uid]);
+
+  function formatPostDate(post) {
+    const value = post.updatedAtMs || post.createdAtMs;
+
+    if (!value) {
+      return 'Draft';
+    }
+
+    return new Intl.DateTimeFormat('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date(value));
+  }
+
+  function resetForm() {
+    setEditingPostId('');
+    setForm({
+      body: '',
+      imageFile: null,
+      linkUrl: '',
+      title: '',
+    });
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await saveNewsPost({
+        body: form.body,
+        clubSlug,
+        imageFile: form.imageFile,
+        linkUrl: form.linkUrl,
+        post: editingPost,
+        teamSlug,
+        title: form.title,
+        user,
+      });
+      setMessage(editingPost ? 'News post updated.' : 'News post published.');
+      resetForm();
+      await loadNewsData();
+    } catch (submitError) {
+      setError(submitError.message ?? 'Unable to save that news post.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(post) {
+    setDeletingId(post.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await deleteNewsPost({ clubSlug, post, teamSlug });
+      if (editingPostId === post.id) {
+        resetForm();
+      }
+      setMessage('News post deleted.');
+      await loadNewsData();
+    } catch (deleteError) {
+      setError(deleteError.message ?? 'Unable to delete that news post.');
+    } finally {
+      setDeletingId('');
+    }
+  }
+
+  function startEditing(post) {
+    setEditingPostId(post.id);
+    setForm({
+      body: post.body,
+      imageFile: null,
+      linkUrl: post.linkUrl,
+      title: post.title,
+    });
+    setMessage('');
+    setError('');
+  }
+
   return (
-    <TeamPageTemplate
-      description="News is team-specific in the rebuild, so each team gets its own feed without requiring a club-wide newsroom."
-      nextSteps={[
-        'Create team-scoped news post documents.',
-        'Add image uploads under team-prefixed storage paths.',
-        'Limit publish and edit actions to captains and co-captains.',
-      ]}
-      title="News"
-    />
+    <div className="page-grid">
+      <section className="card">
+        <p className="eyebrow">News</p>
+        <h1>Team updates</h1>
+        <p>
+          News posts are team-specific. Captains and co-captains can publish updates with text, an
+          optional link, and an optional image.
+        </p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
+
+        {canManage ? (
+          <form className="news-form" onSubmit={handleSubmit}>
+            <label className="field news-form__full">
+              <span>Title</span>
+              <input
+                onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
+                placeholder="Weekly team update"
+                value={form.title}
+              />
+            </label>
+            <label className="field news-form__full">
+              <span>Body</span>
+              <textarea
+                onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))}
+                placeholder="Share lineup notes, reminders, or club updates here."
+                rows={6}
+                value={form.body}
+              />
+            </label>
+            <label className="field">
+              <span>Optional link</span>
+              <input
+                onChange={(event) => setForm((current) => ({ ...current, linkUrl: event.target.value }))}
+                placeholder="https://..."
+                value={form.linkUrl}
+              />
+            </label>
+            <label className="field">
+              <span>Optional image</span>
+              <input
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, imageFile: event.target.files?.[0] ?? null }))
+                }
+                type="file"
+              />
+            </label>
+            <div className="news-form__actions">
+              <button className="button" disabled={saving} type="submit">
+                {saving
+                  ? editingPost
+                    ? 'Updating post...'
+                    : 'Publishing post...'
+                  : editingPost
+                    ? 'Update post'
+                    : 'Publish post'}
+              </button>
+              {editingPost ? (
+                <button className="button button--ghost" onClick={resetForm} type="button">
+                  Cancel edit
+                </button>
+              ) : null}
+            </div>
+            {editingPost?.imageUrl ? (
+              <div className="notice notice--info news-form__full">
+                Editing a post with an existing image. Upload a new file only if you want to replace
+                it.
+              </div>
+            ) : null}
+          </form>
+        ) : (
+          <div className="notice notice--info">
+            Captains and co-captains can publish or edit team news. Your current role is{' '}
+            <strong>{membership?.role ?? 'member'}</strong>.
+          </div>
+        )}
+      </section>
+
+      <section className="card">
+        <p className="eyebrow">Published feed</p>
+        {newsPosts.length > 0 ? (
+          <div className="news-list">
+            {newsPosts.map((post) => (
+              <article key={post.id} className="news-card">
+                {post.imageUrl ? (
+                  <img alt={post.title} className="news-card__image" src={post.imageUrl} />
+                ) : null}
+                <div className="news-card__body">
+                  <div className="news-card__header">
+                    <div>
+                      <h2>{post.title}</h2>
+                      <p className="news-card__meta">{formatPostDate(post)}</p>
+                    </div>
+                    {canManage ? (
+                      <div className="choice-row">
+                        <button
+                          className="choice-button"
+                          onClick={() => startEditing(post)}
+                          type="button"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="choice-button"
+                          disabled={deletingId === post.id}
+                          onClick={() => handleDelete(post)}
+                          type="button"
+                        >
+                          {deletingId === post.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <p className="news-card__text">{post.body}</p>
+                  {post.linkUrl ? (
+                    <a
+                      className="news-card__link"
+                      href={post.linkUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Open link
+                    </a>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p>No news posts published yet.</p>
+        )}
+      </section>
+    </div>
   );
 }
 

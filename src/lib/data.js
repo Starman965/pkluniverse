@@ -2,6 +2,7 @@ import {
   deleteField,
   collection,
   doc,
+  deleteDoc,
   getDoc,
   getDocs,
   limit,
@@ -11,7 +12,8 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { db, isFirebaseConfigured } from './firebase';
+import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { db, isFirebaseConfigured, storage } from './firebase';
 
 const DEFAULT_CLUB = {
   id: 'blackhawk',
@@ -38,6 +40,55 @@ function makeJoinCode(seed) {
   const normalizedSeed = seed.replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 3) || 'PKL';
   const random = Math.random().toString(36).slice(2, 6).toUpperCase();
   return `${normalizedSeed}${random}`;
+}
+
+function sanitizeFileBaseName(fileName) {
+  const withoutExtension = (fileName ?? '').replace(/\.[^/.]+$/, '');
+  return slugify(withoutExtension).slice(0, 32) || 'image';
+}
+
+function getFileExtension(fileName) {
+  const match = /(\.[a-z0-9]+)$/i.exec(fileName ?? '');
+  return match?.[1]?.toLowerCase() ?? '.jpg';
+}
+
+function buildNewsImagePath({ clubSlug, postId, teamSlug, fileName }) {
+  const safeBaseName = sanitizeFileBaseName(fileName);
+  const extension = getFileExtension(fileName);
+  return `clubs/${clubSlug}/teams/${teamSlug}/news/${postId}/${Date.now()}-${safeBaseName}${extension}`;
+}
+
+async function uploadNewsImage({ clubSlug, file, postId, teamSlug }) {
+  if (!storage) {
+    throw new Error('Firebase Storage is not configured yet.');
+  }
+
+  const imagePath = buildNewsImagePath({
+    clubSlug,
+    fileName: file?.name,
+    postId,
+    teamSlug,
+  });
+  const imageRef = ref(storage, imagePath);
+
+  await uploadBytes(imageRef, file);
+
+  return {
+    imagePath,
+    imageUrl: await getDownloadURL(imageRef),
+  };
+}
+
+async function deleteStoragePath(imagePath) {
+  if (!storage || !imagePath) {
+    return;
+  }
+
+  try {
+    await deleteObject(ref(storage, imagePath));
+  } catch {
+    // Ignore missing or already-deleted files during updates.
+  }
 }
 
 function splitDisplayName(displayName, email = '') {
@@ -387,6 +438,36 @@ function buildFullName(firstName, lastName) {
   return [firstName, lastName].filter(Boolean).join(' ').trim();
 }
 
+function normalizeUrl(value) {
+  const trimmed = (value ?? '').trim();
+
+  if (!trimmed) {
+    return '';
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+
+  return `https://${trimmed}`;
+}
+
+function normalizeTimestampMs(value) {
+  if (!value) {
+    return 0;
+  }
+
+  if (typeof value.toMillis === 'function') {
+    return value.toMillis();
+  }
+
+  if (typeof value.seconds === 'number') {
+    return value.seconds * 1000;
+  }
+
+  return 0;
+}
+
 export async function listPlayers(clubSlug, teamSlug) {
   requireDb();
 
@@ -572,4 +653,104 @@ export async function setAvailability({
     [fieldPath]: status,
     updatedAt: serverTimestamp(),
   });
+}
+
+function createNewsPostId(title) {
+  const slug = slugify(title).slice(0, 24) || 'news';
+  return `${Date.now()}-${slug}`;
+}
+
+export async function listNewsPosts(clubSlug, teamSlug) {
+  requireDb();
+
+  const newsRef = collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts');
+  const snapshot = await getDocs(newsRef);
+  const posts = snapshot.docs.map((entry) => {
+    const data = entry.data();
+
+    return {
+      body: (data.body ?? '').trim(),
+      createdAtMs: normalizeTimestampMs(data.createdAt),
+      createdBy: data.createdBy ?? '',
+      id: entry.id,
+      imagePath: typeof data.imagePath === 'string' ? data.imagePath : '',
+      imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : '',
+      linkUrl: typeof data.linkUrl === 'string' ? data.linkUrl : '',
+      title: (data.title ?? '').trim() || 'Team update',
+      updatedAtMs: normalizeTimestampMs(data.updatedAt),
+      updatedBy: data.updatedBy ?? '',
+    };
+  });
+
+  posts.sort((left, right) => (right.updatedAtMs || right.createdAtMs) - (left.updatedAtMs || left.createdAtMs));
+
+  return posts;
+}
+
+export async function saveNewsPost({
+  body,
+  clubSlug,
+  imageFile,
+  linkUrl,
+  post,
+  teamSlug,
+  title,
+  user,
+}) {
+  requireDb();
+
+  const normalizedTitle = title.trim();
+  const normalizedBody = body.trim();
+
+  if (!normalizedTitle) {
+    throw new Error('Enter a title for the news post.');
+  }
+
+  if (!normalizedBody) {
+    throw new Error('Enter some body text for the news post.');
+  }
+
+  const postId = post?.id ?? createNewsPostId(normalizedTitle);
+  const postRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', postId);
+  let uploadedImage = null;
+
+  if (imageFile) {
+    uploadedImage = await uploadNewsImage({
+      clubSlug,
+      file: imageFile,
+      postId,
+      teamSlug,
+    });
+  }
+
+  const payload = {
+    body: normalizedBody,
+    createdBy: post?.createdBy ?? user?.email ?? user?.uid ?? '',
+    imagePath: uploadedImage?.imagePath ?? post?.imagePath ?? '',
+    imageUrl: uploadedImage?.imageUrl ?? post?.imageUrl ?? '',
+    linkUrl: normalizeUrl(linkUrl),
+    title: normalizedTitle,
+    updatedAt: serverTimestamp(),
+    updatedBy: user?.email ?? user?.uid ?? '',
+  };
+
+  if (!post) {
+    payload.createdAt = serverTimestamp();
+  }
+
+  await setDoc(postRef, payload, { merge: true });
+
+  if (uploadedImage?.imagePath && post?.imagePath && post.imagePath !== uploadedImage.imagePath) {
+    await deleteStoragePath(post.imagePath);
+  }
+
+  return postId;
+}
+
+export async function deleteNewsPost({ clubSlug, post, teamSlug }) {
+  requireDb();
+
+  const postRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', post.id);
+  await deleteDoc(postRef);
+  await deleteStoragePath(post.imagePath);
 }
