@@ -562,6 +562,49 @@ function gameSortKey(game) {
   return game.isoDate || '9999-12-31';
 }
 
+function createEmptyPairings() {
+  return Array.from({ length: 4 }, (_, index) => ({
+    courtLabel: `Court ${index + 1}`,
+    playerIds: [],
+  }));
+}
+
+function normalizePlayerIdList(playerIds) {
+  return Array.from(
+    new Set(
+      (Array.isArray(playerIds) ? playerIds : [])
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter(Boolean),
+    ),
+  );
+}
+
+function normalizePairings(pairings, rosterPlayerIds = []) {
+  const allowedPlayerIds = new Set(normalizePlayerIdList(rosterPlayerIds));
+  const source = Array.isArray(pairings) ? pairings : [];
+  const seen = new Set();
+
+  return createEmptyPairings().map((defaultPairing, index) => {
+    const pair = source[index];
+    const playerIds = normalizePlayerIdList(pair?.playerIds).filter((playerId) => {
+      if (!allowedPlayerIds.has(playerId) || seen.has(playerId)) {
+        return false;
+      }
+
+      seen.add(playerId);
+      return true;
+    });
+
+    return {
+      courtLabel:
+        typeof pair?.courtLabel === 'string' && pair.courtLabel.trim()
+          ? pair.courtLabel.trim()
+          : defaultPairing.courtLabel,
+      playerIds: playerIds.slice(0, 2),
+    };
+  });
+}
+
 export async function listGames(clubSlug, teamSlug) {
   requireDb();
 
@@ -579,6 +622,7 @@ export async function listGames(clubSlug, teamSlug) {
       matchStatus: data.matchStatus ?? 'scheduled',
       opponent: data.opponent ?? '',
       opponentScore: normalizeNullableNumber(data.opponentScore),
+      pairings: normalizePairings(data.pairings, data.rosterPlayerIds ?? []),
       result:
         data.result ??
         deriveMatchResult(
@@ -586,6 +630,7 @@ export async function listGames(clubSlug, teamSlug) {
           normalizeNullableNumber(data.teamScore),
           normalizeNullableNumber(data.opponentScore),
         ),
+      rosterPlayerIds: normalizePlayerIdList(data.rosterPlayerIds),
       teamScore: normalizeNullableNumber(data.teamScore),
       timeLabel: data.timeLabel ?? '',
     };
@@ -635,29 +680,63 @@ export async function saveGame({
       ? 'completed'
       : 'scheduled';
   const result = deriveMatchResult(finalStatus, normalizedTeamScore, normalizedOpponentScore);
+  const payload = {
+    dateLabel: trimmedIsoDate,
+    isoDate: trimmedIsoDate,
+    location: trimmedLocation || 'Location TBD',
+    matchStatus: finalStatus,
+    opponent: trimmedOpponent,
+    opponentScore: normalizedOpponentScore,
+    result,
+    teamScore: normalizedTeamScore,
+    timeLabel: trimmedTimeLabel || 'Time TBD',
+    updatedAt: serverTimestamp(),
+  };
+
+  if (!gameId) {
+    payload.attendance = {};
+    payload.createdAt = serverTimestamp();
+    payload.createdBy = user?.uid ?? '';
+    payload.pairings = createEmptyPairings();
+    payload.rosterPlayerIds = [];
+  }
 
   await setDoc(
     gameRef,
-    {
-      attendance: {},
-      createdAt: serverTimestamp(),
-      createdBy: user?.uid ?? '',
-      dateLabel: trimmedIsoDate,
-      isoDate: trimmedIsoDate,
-      location: trimmedLocation || 'Location TBD',
-      matchStatus: finalStatus,
-      opponent: trimmedOpponent,
-      opponentScore: normalizedOpponentScore,
-      result,
-      rosterPlayerIds: [],
-      teamScore: normalizedTeamScore,
-      timeLabel: trimmedTimeLabel || 'Time TBD',
-      updatedAt: serverTimestamp(),
-    },
+    payload,
     { merge: true },
   );
 
   return nextGameId;
+}
+
+export async function saveGamePairings({
+  clubSlug,
+  gameId,
+  pairings,
+  rosterPlayerIds,
+  teamSlug,
+}) {
+  requireDb();
+
+  if (!gameId) {
+    throw new Error('Choose a matchup before saving pairings.');
+  }
+
+  const normalizedRosterPlayerIds = normalizePlayerIdList(rosterPlayerIds);
+
+  if (normalizedRosterPlayerIds.length > 8) {
+    throw new Error('Choose up to eight players for matchup pairings.');
+  }
+
+  const normalizedPairings = normalizePairings(pairings, normalizedRosterPlayerIds);
+  const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', gameId);
+
+  await updateDoc(gameRef, {
+    pairings: normalizedPairings,
+    rosterPlayerIds: normalizedRosterPlayerIds,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 export async function setAvailability({
@@ -855,5 +934,23 @@ export function buildStandingsSummary(games) {
     ties,
     winPct,
     wins,
+  };
+}
+
+export function buildPairingSummary(game, players) {
+  const playerMap = new Map(players.map((player) => [player.id, player]));
+  const selectedPlayers = normalizePlayerIdList(game?.rosterPlayerIds).map(
+    (playerId) => playerMap.get(playerId) ?? { fullName: 'Unknown player', id: playerId },
+  );
+  const pairings = normalizePairings(game?.pairings, game?.rosterPlayerIds ?? []);
+
+  return {
+    pairings: pairings.map((pairing) => ({
+      ...pairing,
+      players: pairing.playerIds.map(
+        (playerId) => playerMap.get(playerId) ?? { fullName: 'Unknown player', id: playerId },
+      ),
+    })),
+    selectedPlayers,
   };
 }

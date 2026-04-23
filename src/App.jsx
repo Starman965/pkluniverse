@@ -8,6 +8,7 @@ import {
   AdminPage,
   AvailabilityPage,
   NewsPage,
+  PairingsPage,
   RosterPage,
   SchedulePage,
   SettingsPage,
@@ -34,6 +35,7 @@ export default function App() {
         <Route element={<RosterPage />} path="roster" />
         <Route element={<SchedulePage />} path="schedule" />
         <Route element={<StandingsPage />} path="standings" />
+        <Route element={<PairingsPage />} path="pairings" />
         <Route element={<AvailabilityPage />} path="availability" />
         <Route element={<NewsPage />} path="news" />
         <Route element={<SettingsPage />} path="settings" />

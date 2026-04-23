@@ -283,6 +283,66 @@ ul {
   gap: 1rem;
 }
 
+.pairing-pool {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.pairing-chip {
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+  border-radius: 16px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  padding: 0.9rem 1rem;
+  cursor: pointer;
+}
+
+.pairing-chip span {
+  color: #9fb6d8;
+  font-size: 0.9rem;
+}
+
+.pairing-chip--active {
+  border-color: rgba(77, 124, 255, 0.4);
+  background: rgba(77, 124, 255, 0.12);
+}
+
+.pairing-chip--readonly {
+  cursor: default;
+}
+
+.pairing-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.pairing-card {
+  display: grid;
+  gap: 0.9rem;
+  border-radius: 18px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1rem;
+}
+
+.pairing-card__slots {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.pairing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 1rem;
+}
+
 .result-editor {
   display: grid;
   gap: 0.75rem;

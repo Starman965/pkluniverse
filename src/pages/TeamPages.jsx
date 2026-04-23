@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
+  buildPairingSummary,
   buildStandingsSummary,
   deleteNewsPost,
   getMembership,
@@ -10,6 +11,7 @@ import {
   listNewsPosts,
   listPlayers,
   saveGame,
+  saveGamePairings,
   saveNewsPost,
   savePlayer,
   setAvailability,
@@ -37,6 +39,39 @@ function buildResultDrafts(games) {
     accumulator[game.id] = createResultDraft(game);
     return accumulator;
   }, {});
+}
+
+function createPairingDraft(game) {
+  return {
+    pairings: (game?.pairings ?? []).map((pairing) => ({
+      courtLabel: pairing.courtLabel,
+      playerIds: [...(pairing.playerIds ?? [])],
+    })),
+    rosterPlayerIds: [...(game?.rosterPlayerIds ?? [])],
+  };
+}
+
+function buildPairingDrafts(games) {
+  return games.reduce((accumulator, game) => {
+    accumulator[game.id] = createPairingDraft(game);
+    return accumulator;
+  }, {});
+}
+
+function formatMatchupLabel(game) {
+  return `${game.opponent || 'Opponent TBD'} · ${game.isoDate || game.dateLabel || 'Date TBD'}`;
+}
+
+function formatAttendanceStatus(status) {
+  if (status === 'in') {
+    return 'In';
+  }
+
+  if (status === 'out') {
+    return 'Out';
+  }
+
+  return 'Unknown';
 }
 
 function StandingsSummary({ games }) {
@@ -611,6 +646,362 @@ export function StandingsPage() {
         {error ? <div className="notice notice--error">{error}</div> : null}
         <StandingsSummary games={games} />
       </section>
+    </div>
+  );
+}
+
+export function PairingsPage() {
+  const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
+  const [games, setGames] = useState([]);
+  const [players, setPlayers] = useState([]);
+  const [membership, setMembership] = useState(null);
+  const [selectedGameId, setSelectedGameId] = useState('');
+  const [pairingDrafts, setPairingDrafts] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const canManage = canManageRole(membership?.role);
+  const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
+
+  async function loadPairingsData() {
+    const [gameData, playerData, membershipData] = await Promise.all([
+      listGames(clubSlug, teamSlug),
+      listPlayers(clubSlug, teamSlug),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid) : Promise.resolve(null),
+    ]);
+
+    setGames(gameData);
+    setPlayers(playerData);
+    setMembership(membershipData);
+    setPairingDrafts(buildPairingDrafts(gameData));
+    setSelectedGameId((current) => {
+      if (current && gameData.some((game) => game.id === current)) {
+        return current;
+      }
+
+      return gameData[0]?.id ?? '';
+    });
+  }
+
+  useEffect(() => {
+    loadPairingsData().catch((loadError) => {
+      setError(loadError.message ?? 'Unable to load matchup pairings yet.');
+    });
+  }, [clubSlug, teamSlug, user?.uid]);
+
+  const activeGame = games.find((game) => game.id === selectedGameId) ?? games[0] ?? null;
+  const activeDraft = activeGame
+    ? pairingDrafts[activeGame.id] ?? createPairingDraft(activeGame)
+    : null;
+  const pairingSummary = useMemo(() => {
+    if (!activeGame || !activeDraft) {
+      return {
+        pairings: [],
+        selectedPlayers: [],
+      };
+    }
+
+    return buildPairingSummary(
+      {
+        ...activeGame,
+        pairings: activeDraft.pairings,
+        rosterPlayerIds: activeDraft.rosterPlayerIds,
+      },
+      players,
+    );
+  }, [activeDraft, activeGame, players]);
+
+  function updateDraft(updater) {
+    if (!activeGame) {
+      return;
+    }
+
+    setPairingDrafts((current) => ({
+      ...current,
+      [activeGame.id]: updater(current[activeGame.id] ?? createPairingDraft(activeGame)),
+    }));
+  }
+
+  function toggleRosterPlayer(playerId) {
+    updateDraft((draft) => {
+      const exists = draft.rosterPlayerIds.includes(playerId);
+
+      if (!exists && draft.rosterPlayerIds.length >= 8) {
+        setError('Choose up to eight players for matchup pairings.');
+        return draft;
+      }
+
+      const rosterPlayerIds = exists
+        ? draft.rosterPlayerIds.filter((id) => id !== playerId)
+        : [...draft.rosterPlayerIds, playerId];
+      const selectedIds = new Set(rosterPlayerIds);
+      const pairings = draft.pairings.map((pairing) => ({
+        ...pairing,
+        playerIds: pairing.playerIds.filter((id) => selectedIds.has(id)),
+      }));
+
+      setError('');
+      return {
+        ...draft,
+        pairings,
+        rosterPlayerIds,
+      };
+    });
+  }
+
+  function updatePairingSlot(pairIndex, slotIndex, playerId) {
+    updateDraft((draft) => {
+      const nextPairings = draft.pairings.map((pairing) => ({
+        ...pairing,
+        playerIds: [...pairing.playerIds],
+      }));
+
+      nextPairings.forEach((pairing) => {
+        pairing.playerIds = pairing.playerIds.filter((id) => id !== playerId);
+      });
+
+      const nextPlayerIds = [...(nextPairings[pairIndex]?.playerIds ?? [])];
+
+      while (nextPlayerIds.length < 2) {
+        nextPlayerIds.push('');
+      }
+
+      nextPlayerIds[slotIndex] = playerId;
+      nextPairings[pairIndex] = {
+        ...nextPairings[pairIndex],
+        playerIds: nextPlayerIds.filter(Boolean).slice(0, 2),
+      };
+
+      return {
+        ...draft,
+        pairings: nextPairings,
+      };
+    });
+  }
+
+  async function handleSavePairings() {
+    if (!activeGame || !activeDraft) {
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await saveGamePairings({
+        clubSlug,
+        gameId: activeGame.id,
+        pairings: activeDraft.pairings,
+        rosterPlayerIds: activeDraft.rosterPlayerIds,
+        teamSlug,
+      });
+      setMessage('Pairings saved for that matchup.');
+      await loadPairingsData();
+    } catch (saveError) {
+      setError(saveError.message ?? 'Unable to save matchup pairings.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="page-grid">
+      <section className="card">
+        <p className="eyebrow">Pairings</p>
+        <h1>Matchup pairings</h1>
+        <p>
+          Pairings are now saved per matchup. Captains and co-captains can choose up to eight roster
+          players, then assign them into court slots for the selected match.
+        </p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
+
+        {games.length > 0 ? (
+          <div className="choice-row">
+            {games.map((game) => (
+              <button
+                key={game.id}
+                className={`choice-button ${game.id === activeGame?.id ? 'choice-button--active' : ''}`}
+                onClick={() => {
+                  setSelectedGameId(game.id);
+                  setError('');
+                  setMessage('');
+                }}
+                type="button"
+              >
+                {formatMatchupLabel(game)}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p>No matchups are available for pairings yet.</p>
+        )}
+      </section>
+
+      {activeGame ? (
+        <>
+          <section className="card">
+            <p className="eyebrow">Selected matchup</p>
+            <div className="detail-grid">
+              <div className="detail-card">
+                <span>Opponent</span>
+                <strong>{activeGame.opponent || 'Opponent TBD'}</strong>
+              </div>
+              <div className="detail-card">
+                <span>Date</span>
+                <strong>{activeGame.isoDate || activeGame.dateLabel || 'Date TBD'}</strong>
+              </div>
+              <div className="detail-card">
+                <span>Location</span>
+                <strong>{activeGame.location || 'Location TBD'}</strong>
+              </div>
+              <div className="detail-card">
+                <span>Available responses</span>
+                <strong>
+                  {Object.values(activeGame.attendance ?? {}).filter((status) => status === 'in').length} in
+                </strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="card">
+            <p className="eyebrow">Roster pool</p>
+            {canManage ? (
+              <>
+                <p>Select up to eight active players for this matchup. Availability is shown as a guide.</p>
+                <div className="pairing-pool">
+                  {activePlayers.map((player) => {
+                    const selected = activeDraft?.rosterPlayerIds.includes(player.id);
+                    const attendanceStatus = formatAttendanceStatus(
+                      activeGame.attendance?.[player.id] ?? 'unknown',
+                    );
+
+                    return (
+                      <button
+                        key={player.id}
+                        className={`pairing-chip ${selected ? 'pairing-chip--active' : ''}`}
+                        onClick={() => toggleRosterPlayer(player.id)}
+                        type="button"
+                      >
+                        <strong>{player.fullName || 'Unnamed player'}</strong>
+                        <span>
+                          {attendanceStatus}
+                          {player.skillLevel ? ` · ${player.skillLevel}` : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <>
+                <p>Selected players for this matchup.</p>
+                {pairingSummary.selectedPlayers.length > 0 ? (
+                  <div className="pairing-pool">
+                    {pairingSummary.selectedPlayers.map((player) => (
+                      <div key={player.id} className="pairing-chip pairing-chip--readonly">
+                        <strong>{player.fullName || 'Unnamed player'}</strong>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p>No roster pool has been selected yet.</p>
+                )}
+              </>
+            )}
+          </section>
+
+          <section className="card">
+            <p className="eyebrow">Court assignments</p>
+            <div className="pairing-grid">
+              {pairingSummary.pairings.map((pairing, pairIndex) => {
+                const slotValues = pairing.playerIds.length > 0 ? [...pairing.playerIds] : ['', ''];
+
+                while (slotValues.length < 2) {
+                  slotValues.push('');
+                }
+
+                return (
+                  <div key={pairing.courtLabel} className="pairing-card">
+                    <h2>{pairing.courtLabel}</h2>
+                    {canManage ? (
+                      <div className="pairing-card__slots">
+                        {[0, 1].map((slotIndex) => {
+                          const currentValue = slotValues[slotIndex] ?? '';
+                          const selectedElsewhere = new Set(
+                            (activeDraft?.pairings ?? [])
+                              .flatMap((entry, entryIndex) =>
+                                entryIndex === pairIndex ? [] : entry.playerIds ?? [],
+                              )
+                              .filter(Boolean),
+                          );
+
+                          return (
+                            <label key={`${pairing.courtLabel}-${slotIndex}`} className="field">
+                              <span>Player {slotIndex + 1}</span>
+                              <select
+                                onChange={(event) =>
+                                  updatePairingSlot(pairIndex, slotIndex, event.target.value)
+                                }
+                                value={currentValue}
+                              >
+                                <option value="">Open slot</option>
+                                {(activeDraft?.rosterPlayerIds ?? []).map((playerId) => {
+                                  const player = players.find((entry) => entry.id === playerId);
+                                  const disabled =
+                                    currentValue !== playerId && selectedElsewhere.has(playerId);
+
+                                  return (
+                                    <option key={playerId} disabled={disabled} value={playerId}>
+                                      {player?.fullName || playerId}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="pairing-card__slots">
+                        {pairing.players.length > 0 ? (
+                          pairing.players.map((player) => (
+                            <div key={player.id} className="pairing-chip pairing-chip--readonly">
+                              <strong>{player.fullName || 'Unnamed player'}</strong>
+                            </div>
+                          ))
+                        ) : (
+                          <p>Open slot</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {canManage ? (
+              <div className="pairing-actions">
+                <button className="button" disabled={saving} onClick={handleSavePairings} type="button">
+                  {saving ? 'Saving pairings...' : 'Save pairings'}
+                </button>
+                <span className="sidebar__empty">
+                  Selected: {activeDraft?.rosterPlayerIds.length ?? 0} / 8 players
+                </span>
+              </div>
+            ) : (
+              <div className="notice notice--info">
+                Captains and co-captains can edit pairings. Your current role is{' '}
+                <strong>{membership?.role ?? 'member'}</strong>.
+              </div>
+            )}
+          </section>
+        </>
+      ) : null}
     </div>
   );
 }

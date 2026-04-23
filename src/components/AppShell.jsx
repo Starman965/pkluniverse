@@ -9,6 +9,7 @@ const teamRoutes = [
   { label: 'Roster', to: 'roster' },
   { label: 'Schedule', to: 'schedule' },
   { label: 'Standings', to: 'standings' },
+  { label: 'Pairings', to: 'pairings' },
   { label: 'Availability', to: 'availability' },
   { label: 'News', to: 'news' },
   { label: 'Settings', to: 'settings' },
