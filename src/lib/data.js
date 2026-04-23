@@ -840,6 +840,52 @@ export async function savePlayer({
   return nextPlayerId;
 }
 
+export async function deletePlayer({ clubSlug, playerId, teamSlug }) {
+  requireDb();
+
+  if (!playerId) {
+    throw new Error('Choose a player to remove.');
+  }
+
+  const playerRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'players', playerId);
+  const playerSnapshot = await getDoc(playerRef);
+
+  if (!playerSnapshot.exists()) {
+    throw new Error('That player could not be found.');
+  }
+
+  const player = playerSnapshot.data();
+
+  if (player.uid) {
+    throw new Error('Linked account players cannot be deleted. Deactivate them instead.');
+  }
+
+  const gamesRef = collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'games');
+  const gamesSnapshot = await getDocs(gamesRef);
+  const batch = writeBatch(db);
+
+  gamesSnapshot.docs.forEach((entry) => {
+    const game = entry.data();
+    const rosterPlayerIds = normalizePlayerIdList(
+      (game.rosterPlayerIds ?? []).filter((entryPlayerId) => entryPlayerId !== playerId),
+    );
+    const pairings = normalizePairings(game.pairings, rosterPlayerIds);
+    const attendance = { ...(game.attendance ?? {}) };
+
+    delete attendance[playerId];
+
+    batch.update(entry.ref, {
+      attendance,
+      pairings,
+      rosterPlayerIds,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  batch.delete(playerRef);
+  await batch.commit();
+}
+
 function gameSortKey(game) {
   return game.isoDate || '9999-12-31';
 }

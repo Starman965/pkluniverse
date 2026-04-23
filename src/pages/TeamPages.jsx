@@ -5,6 +5,7 @@ import {
   PLAYER_SKILL_LEVELS,
   buildPairingSummary,
   buildStandingsSummary,
+  deletePlayer,
   deleteNewsPost,
   getMembership,
   getTeam,
@@ -282,6 +283,7 @@ export function RosterPage() {
   const [membership, setMembership] = useState(null);
   const [saving, setSaving] = useState(false);
   const [updatingPlayerId, setUpdatingPlayerId] = useState('');
+  const [deletingPlayerId, setDeletingPlayerId] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [form, setForm] = useState(createEmptyRosterForm());
@@ -377,6 +379,29 @@ export function RosterPage() {
     }
   }
 
+  async function handleDeletePlayer(player) {
+    setDeletingPlayerId(player.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await deletePlayer({
+        clubSlug,
+        playerId: player.id,
+        teamSlug,
+      });
+      if (form.playerId === player.id) {
+        setForm(createEmptyRosterForm());
+      }
+      setMessage('Player removed from the roster.');
+      await loadRosterData();
+    } catch (deleteError) {
+      setError(deleteError.message ?? 'Unable to remove that player right now.');
+    } finally {
+      setDeletingPlayerId('');
+    }
+  }
+
   return (
     <div className="page-grid">
       <section className="card">
@@ -385,6 +410,8 @@ export function RosterPage() {
         <p>
           This page now reads live roster records from Firestore. Captains and co-captains can add
           players manually while the hybrid identity model still allows later user-linking.
+          Linked account players can be edited or deactivated; manual-only players can also be
+          deleted.
         </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -502,6 +529,16 @@ export function RosterPage() {
                             ? 'Deactivate'
                             : 'Reactivate'}
                       </button>
+                      {!player.uid ? (
+                        <button
+                          className="choice-button"
+                          disabled={deletingPlayerId === player.id}
+                          onClick={() => handleDeletePlayer(player)}
+                          type="button"
+                        >
+                          {deletingPlayerId === player.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
