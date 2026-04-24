@@ -219,14 +219,24 @@ async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
   const playerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'players', user.uid);
   const membershipPlayerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'playerLinks', user.uid);
   const { firstName, fullName, lastName } = splitDisplayName(user.displayName, user.email);
-  const playerSnapshot = await getDoc(playerRef);
-  const existingPlayer = playerSnapshot.exists() ? playerSnapshot.data() : null;
+  let playerSnapshot = null;
+  let existingPlayer = null;
+
+  try {
+    playerSnapshot = await getDoc(playerRef);
+    existingPlayer = playerSnapshot.exists() ? playerSnapshot.data() : null;
+  } catch (error) {
+    // Joining or creating a team can happen before membership exists, and the current
+    // rules block reads on player docs until the user is already a team member.
+    if (error?.code !== 'permission-denied') {
+      throw error;
+    }
+  }
+
   const existingFirstName = (existingPlayer?.firstName ?? '').trim();
   const existingLastName = (existingPlayer?.lastName ?? '').trim();
   const existingFullName = (existingPlayer?.fullName ?? '').trim();
-  const normalizedExistingSkillLevel = normalizeSkillLevel(existingPlayer?.skillLevel ?? '');
   const payload = {
-    active: existingPlayer?.active !== false,
     displayName: user.displayName ?? user.email ?? existingPlayer?.displayName ?? 'New player',
     email: user.email ?? existingPlayer?.email ?? '',
     firstName: existingFirstName || firstName,
@@ -235,16 +245,20 @@ async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
       buildFullName(existingFirstName || firstName, existingLastName || lastName) ||
       fullName,
     lastName: existingLastName || lastName,
-    skillLevel: normalizedExistingSkillLevel,
     teamId,
     teamName,
     uid: user.uid,
     updatedAt: serverTimestamp(),
   };
 
-  if (!playerSnapshot.exists()) {
-    payload.createdAt = serverTimestamp();
-    payload.createdBy = user.uid;
+  if (playerSnapshot) {
+    payload.active = existingPlayer?.active !== false;
+    payload.skillLevel = normalizeSkillLevel(existingPlayer?.skillLevel ?? '');
+
+    if (!playerSnapshot.exists()) {
+      payload.createdAt = serverTimestamp();
+      payload.createdBy = user.uid;
+    }
   }
 
   await setDoc(
@@ -378,7 +392,12 @@ export async function joinTeamByCode({ code, user }) {
   const teamDoc = teamSnapshot.docs[0];
   const team = teamDoc.data();
   const membershipRef = doc(db, 'clubs', club.id, 'teams', team.slug, 'members', user.uid);
-  const membershipSnapshot = await getDoc(membershipRef);
+  const existingMemberships = await listMemberships(user.uid).catch(() => []);
+  const existingMembership =
+    existingMemberships.find(
+      (membership) => membership.clubSlug === club.slug && membership.teamSlug === team.slug,
+    ) ?? null;
+  const nextRole = existingMembership?.role ?? 'member';
   const playerId = await ensurePlayerProfile({
     clubId: club.id,
     teamId: team.slug,
@@ -386,13 +405,18 @@ export async function joinTeamByCode({ code, user }) {
     user,
   });
 
-  if (!membershipSnapshot.exists()) {
+  if (existingMembership) {
+    await updateDoc(membershipRef, {
+      playerId,
+      updatedAt: serverTimestamp(),
+    });
+  } else {
     await setDoc(membershipRef, {
       clubId: club.id,
       clubSlug: club.slug,
       joinedAt: serverTimestamp(),
       playerId,
-      role: 'member',
+      role: nextRole,
       status: 'active',
       teamId: team.slug,
       teamName: team.name,
@@ -400,16 +424,11 @@ export async function joinTeamByCode({ code, user }) {
       uid: user.uid,
       updatedAt: serverTimestamp(),
     });
-  } else {
-    await updateDoc(membershipRef, {
-      playerId,
-      updatedAt: serverTimestamp(),
-    });
   }
 
   await syncMembershipSummary({
     clubSlug: club.slug,
-    role: membershipSnapshot.exists() ? membershipSnapshot.data().role ?? 'member' : 'member',
+    role: nextRole,
     teamName: team.name,
     teamSlug: team.slug,
     uid: user.uid,
@@ -944,6 +963,7 @@ export async function listGames(clubSlug, teamSlug) {
     return {
       attendance: data.attendance ?? {},
       dateLabel: data.dateLabel ?? '',
+      dateTbd: data.dateTbd === true,
       id: entry.id,
       isoDate: data.isoDate ?? '',
       location: data.location ?? '',
@@ -971,6 +991,7 @@ export async function listGames(clubSlug, teamSlug) {
 
 export async function saveGame({
   clubSlug,
+  dateTbd = false,
   gameId,
   isoDate,
   location,
@@ -988,8 +1009,9 @@ export async function saveGame({
   const trimmedOpponent = opponent.trim();
   const trimmedLocation = location.trim();
   const trimmedTimeLabel = timeLabel.trim();
+  const normalizedDateTbd = dateTbd === true;
 
-  if (!trimmedIsoDate) {
+  if (!normalizedDateTbd && !trimmedIsoDate) {
     throw new Error('Choose a date for the matchup.');
   }
 
@@ -997,7 +1019,9 @@ export async function saveGame({
     throw new Error('Enter an opponent or event name.');
   }
 
-  const baseId = slugify(`${trimmedIsoDate}-${trimmedOpponent}-${trimmedLocation || 'location'}`);
+  const baseId = slugify(
+    `${normalizedDateTbd ? 'date-tbd' : trimmedIsoDate}-${trimmedOpponent}-${trimmedLocation || 'location'}`,
+  );
   const nextGameId = gameId || baseId || `game-${Date.now()}`;
   const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', nextGameId);
   const normalizedTeamScore = normalizeNullableNumber(teamScore);
@@ -1009,15 +1033,16 @@ export async function saveGame({
       : 'scheduled';
   const result = deriveMatchResult(finalStatus, normalizedTeamScore, normalizedOpponentScore);
   const payload = {
-    dateLabel: trimmedIsoDate,
-    isoDate: trimmedIsoDate,
+    dateLabel: normalizedDateTbd ? 'Date TBD' : trimmedIsoDate,
+    dateTbd: normalizedDateTbd,
+    isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
     location: trimmedLocation || 'Location TBD',
     matchStatus: finalStatus,
     opponent: trimmedOpponent,
     opponentScore: normalizedOpponentScore,
     result,
     teamScore: normalizedTeamScore,
-    timeLabel: trimmedTimeLabel || 'Time TBD',
+    timeLabel: normalizedDateTbd ? 'Time TBD' : trimmedTimeLabel || 'Time TBD',
     updatedAt: serverTimestamp(),
   };
 
@@ -1036,6 +1061,16 @@ export async function saveGame({
   );
 
   return nextGameId;
+}
+
+export async function deleteGame({ clubSlug, gameId, teamSlug }) {
+  requireDb();
+
+  if (!gameId) {
+    throw new Error('Choose a matchup to delete.');
+  }
+
+  await deleteDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', gameId));
 }
 
 export async function saveGamePairings({

@@ -148,7 +148,7 @@ service cloud.firestore {
 
         match /games/{gameId} {
           allow read: if isTeamMember(clubId, teamId);
-          allow create, update: if isManager(clubId, teamId);
+          allow create, update, delete: if isManager(clubId, teamId);
         }
 
         match /newsPosts/{postId} {

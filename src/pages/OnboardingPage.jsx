@@ -1,11 +1,31 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { createTeam, joinTeamByCode, listMemberships } from '../lib/data';
 
+const ONBOARDING_INTENT_KEY = 'pkl-onboarding-intent';
+
+function readOnboardingIntent() {
+  try {
+    const rawValue = window.sessionStorage.getItem(ONBOARDING_INTENT_KEY);
+    return rawValue ? JSON.parse(rawValue) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeOnboardingIntent(intent) {
+  window.sessionStorage.setItem(ONBOARDING_INTENT_KEY, JSON.stringify(intent));
+}
+
+function clearOnboardingIntent() {
+  window.sessionStorage.removeItem(ONBOARDING_INTENT_KEY);
+}
+
 export default function OnboardingPage() {
-  const { isAuthenticated, isFirebaseConfigured, signInWithGoogle, user } = useAuth();
+  const { isAuthenticated, isFirebaseConfigured, signInWithGoogle, signOutUser, user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [teamName, setTeamName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
@@ -31,22 +51,19 @@ export default function OnboardingPage() {
     loadMemberships();
   }, [loadMemberships]);
 
-  async function handleCreateTeam(event) {
-    event.preventDefault();
+  const requestedMode = searchParams.get('mode');
+  const mode = requestedMode === 'create' || requestedMode === 'join' ? requestedMode : '';
 
-    if (!isAuthenticated) {
-      await signInWithGoogle();
-      return;
-    }
-
+  async function submitCreateTeam(nextTeamName) {
     setBusyAction('create');
     setErrorMessage('');
     setStatusMessage('');
 
     try {
-      const result = await createTeam({ teamName, user });
+      const result = await createTeam({ teamName: nextTeamName, user });
+      clearOnboardingIntent();
       setStatusMessage(`Team created. Share join code ${result.joinCode} with players.`);
-      navigate(`/c/${result.clubSlug}/t/${result.teamSlug}`);
+      navigate(`/c/${result.clubSlug}/t/${result.teamSlug}/news`);
     } catch (error) {
       setErrorMessage(error.message ?? 'Unable to create the team right now.');
     } finally {
@@ -54,22 +71,16 @@ export default function OnboardingPage() {
     }
   }
 
-  async function handleJoinTeam(event) {
-    event.preventDefault();
-
-    if (!isAuthenticated) {
-      await signInWithGoogle();
-      return;
-    }
-
+  async function submitJoinTeam(nextJoinCode) {
     setBusyAction('join');
     setErrorMessage('');
     setStatusMessage('');
 
     try {
-      const result = await joinTeamByCode({ code: joinCode, user });
+      const result = await joinTeamByCode({ code: nextJoinCode, user });
+      clearOnboardingIntent();
       setStatusMessage('Team joined successfully.');
-      navigate(`/c/${result.clubSlug}/t/${result.teamSlug}`);
+      navigate(`/c/${result.clubSlug}/t/${result.teamSlug}/news`);
     } catch (error) {
       setErrorMessage(error.message ?? 'Unable to join that team right now.');
     } finally {
@@ -77,65 +88,165 @@ export default function OnboardingPage() {
     }
   }
 
+  useEffect(() => {
+    if (!isAuthenticated || busyAction) {
+      return;
+    }
+
+    const intent = readOnboardingIntent();
+
+    if (!intent?.mode) {
+      return;
+    }
+
+    if (intent.mode === 'create' && intent.teamName) {
+      setTeamName(intent.teamName);
+      clearOnboardingIntent();
+      submitCreateTeam(intent.teamName);
+      return;
+    }
+
+    if (intent.mode === 'join' && intent.joinCode) {
+      setJoinCode(intent.joinCode);
+      clearOnboardingIntent();
+      submitJoinTeam(intent.joinCode);
+    }
+  }, [busyAction, isAuthenticated]);
+
+  async function handleCreateTeam(event) {
+    event.preventDefault();
+
+    if (!isAuthenticated) {
+      writeOnboardingIntent({ mode: 'create', teamName });
+      await signInWithGoogle();
+      return;
+    }
+
+    await submitCreateTeam(teamName);
+  }
+
+  async function handleJoinTeam(event) {
+    event.preventDefault();
+
+    if (!isAuthenticated) {
+      writeOnboardingIntent({ joinCode, mode: 'join' });
+      await signInWithGoogle();
+      return;
+    }
+
+    await submitJoinTeam(joinCode);
+  }
+
   return (
     <div className="page-grid">
       <section className="card">
         <p className="eyebrow">Onboarding</p>
-        <h1>Create or join a team</h1>
+        <h1>
+          {mode === 'join' ? 'Join a team' : mode === 'create' ? 'Create a team' : 'Get started'}
+        </h1>
         <p>
-          This scaffold sets up the front door for club-approved team creation and join-by-code
-          team access.
+          {mode === 'join'
+            ? 'Enter a captain-managed join code to become part of an existing team.'
+            : mode === 'create'
+              ? 'Create a new team, become the captain, and generate the first join code for players.'
+              : 'Choose whether you are creating a new team or joining one with a captain-managed code.'}
         </p>
 
-        <div className="action-grid">
-          <form className="mini-card form-card" onSubmit={handleCreateTeam}>
-            <h2>Create team</h2>
-            <p>
-              Start with the team name. The app will create the Blackhawk club if it does not
-              exist yet, then create the team, join code, captain membership, and linked player
-              profile.
-            </p>
-            <label className="field">
-              <span>Team name</span>
-              <input
-                onChange={(event) => setTeamName(event.target.value)}
-                placeholder="Hawks"
-                type="text"
-                value={teamName}
-              />
-            </label>
-            <button
-              className="button"
-              disabled={!isFirebaseConfigured || busyAction === 'create'}
-              type="submit"
-            >
-              {busyAction === 'create' ? 'Creating team...' : 'Create team'}
-            </button>
-          </form>
+        <div className="availability-tabs" aria-label="Onboarding mode">
+          <button
+            className={`availability-tabs__button ${mode === 'create' ? 'availability-tabs__button--active' : ''}`}
+            onClick={() => setSearchParams({ mode: 'create' })}
+            type="button"
+          >
+            Create Team
+          </button>
+          <button
+            className={`availability-tabs__button ${mode === 'join' ? 'availability-tabs__button--active' : ''}`}
+            onClick={() => setSearchParams({ mode: 'join' })}
+            type="button"
+          >
+            Join Team
+          </button>
+        </div>
 
-          <form className="mini-card form-card" onSubmit={handleJoinTeam}>
-            <h2>Join with code</h2>
-            <p>
-              Players sign in, enter a captain-managed code or link, then link themselves to a
-              team roster profile.
-            </p>
-            <label className="field">
-              <span>Join code</span>
-              <input
-                onChange={(event) => setJoinCode(event.target.value)}
-                placeholder="HAWK7F2"
-                type="text"
-                value={joinCode}
-              />
-            </label>
-            <button
-              className="button button--ghost"
-              disabled={!isFirebaseConfigured || busyAction === 'join'}
-              type="submit"
-            >
-              {busyAction === 'join' ? 'Joining team...' : 'Join team'}
-            </button>
-          </form>
+        <div className="action-grid">
+          {mode === 'create' ? (
+            <form className="mini-card form-card onboarding-card" onSubmit={handleCreateTeam}>
+              <h2>Create team</h2>
+              <p>
+                Start with the team name. PKL Universe will create the team, captain membership,
+                player profile, and first join code in one step.
+              </p>
+              <label className="field">
+                <span>Team name</span>
+                <input
+                  onChange={(event) => setTeamName(event.target.value)}
+                  placeholder="Hawks"
+                  type="text"
+                  value={teamName}
+                />
+              </label>
+              <button
+                className="button"
+                disabled={!isFirebaseConfigured || busyAction === 'create'}
+                type="submit"
+              >
+                {busyAction === 'create'
+                  ? 'Creating team...'
+                  : isAuthenticated
+                    ? 'Create team'
+                    : 'Sign in to create'}
+              </button>
+            </form>
+          ) : mode === 'join' ? (
+            <form className="mini-card form-card onboarding-card" onSubmit={handleJoinTeam}>
+              <h2>Join with code</h2>
+              <p>
+                Players sign in, enter the captain&apos;s join code, and get attached to the team in
+                one flow.
+              </p>
+              <label className="field">
+                <span>Join code</span>
+                <input
+                  onChange={(event) => setJoinCode(event.target.value)}
+                  placeholder="HAWK7F2"
+                  type="text"
+                  value={joinCode}
+                />
+              </label>
+              <button
+                className="button button--ghost"
+                disabled={!isFirebaseConfigured || busyAction === 'join'}
+                type="submit"
+              >
+                {busyAction === 'join'
+                  ? 'Joining team...'
+                  : isAuthenticated
+                    ? 'Join team'
+                    : 'Sign in to join'}
+              </button>
+            </form>
+          ) : (
+            <div className="mini-card form-card onboarding-card onboarding-card--neutral">
+              <h2>Choose your path</h2>
+              <p>
+                New captains should create a team. Players who received a join code should choose
+                Join Team.
+              </p>
+              <div className="stack">
+                <button className="button" onClick={() => setSearchParams({ mode: 'create' })} type="button">
+                  Create Team
+                </button>
+                <button
+                  className="button button--ghost"
+                  onClick={() => setSearchParams({ mode: 'join' })}
+                  type="button"
+                >
+                  Join Team
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {statusMessage ? <div className="notice notice--success">{statusMessage}</div> : null}
@@ -143,36 +254,36 @@ export default function OnboardingPage() {
       </section>
 
       <section className="card">
-        <p className="eyebrow">Your teams</p>
+        <p className="eyebrow">{memberships.length > 0 ? 'Returning user' : 'What happens next'}</p>
         {memberships.length > 0 ? (
-          <div className="membership-list">
-            {memberships.map((membership) => (
-              <Link
-                key={`${membership.clubSlug}-${membership.teamSlug}`}
-                className="membership-card"
-                to={`/c/${membership.clubSlug}/t/${membership.teamSlug}`}
-              >
-                <strong>{membership.teamName}</strong>
-                <span>
-                  {membership.clubSlug} · {membership.role}
-                </span>
-              </Link>
-            ))}
+          <div className="stack">
+            <p>You already belong to one or more teams. Use the chooser to jump back in.</p>
+            <Link className="button button--ghost" to="/teams">
+              Open team chooser
+            </Link>
           </div>
         ) : (
           <ul className="feature-list">
-            <li>Hash-routed pages are wired for GitHub Pages.</li>
-            <li>Protected team routes are ready for Firebase auth.</li>
-            <li>Google users are synced into Firestore on sign-in.</li>
-            <li>Create and join now use real Firestore writes.</li>
+            <li>Create Team is for new captains starting a team for the first time.</li>
+            <li>Join Team is for players entering a captain-managed join code.</li>
+            <li>Login is for returning users who already belong to one or more teams.</li>
+            <li>Your create or join action will continue after Google sign-in.</li>
           </ul>
         )}
 
         <div className="notice notice--info">
           {isAuthenticated
-            ? 'You are signed in. The next major step is tightening rules and replacing the placeholder team pages with live roster, schedule, news, and availability data.'
-            : 'Sign in with Google first so the app can create your user profile and attach you to a team membership.'}
+            ? 'You are signed in. Choose the path that matches what you want to do next.'
+            : 'You can start a team or join one from here. If sign-in is required, PKL Universe will continue the flow after Google auth.'}
         </div>
+
+        {isAuthenticated ? (
+          <div className="stack">
+            <button className="button button--ghost" onClick={signOutUser} type="button">
+              Sign out
+            </button>
+          </div>
+        ) : null}
       </section>
     </div>
   );

@@ -1,6 +1,8 @@
 node_modules/
 dist/
+dist-pages-check/
 .DS_Store
 .env
 .env.local
 .env.*.local
+vite.config.js.timestamp-*.mjs

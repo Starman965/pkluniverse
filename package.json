@@ -12,10 +12,14 @@
   "author": "",
   "license": "ISC",
   "description": "Blackhawk club app rebuild scaffold",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "firebase": "^10.14.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-easy-crop": "^5.5.7",
     "react-router-dom": "^6.30.3"
   },
   "devDependencies": {

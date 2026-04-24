@@ -4,16 +4,19 @@ import ProtectedRoute from './components/ProtectedRoute';
 import LandingPage from './pages/LandingPage';
 import AuthPage from './pages/AuthPage';
 import OnboardingPage from './pages/OnboardingPage';
+import TeamChooserPage from './pages/TeamChooserPage';
 import {
-  AdminPage,
   AvailabilityPage,
+  GameRostersPage,
   NewsPage,
-  PairingsPage,
+  NewsroomPage,
+  RosterMgmtPage,
   RosterPage,
   SchedulePage,
+  ScheduleScoresPage,
   SettingsPage,
   StandingsPage,
-  TeamDashboardPage,
+  TeamMembersPage,
 } from './pages/TeamPages';
 
 export default function App() {
@@ -22,6 +25,14 @@ export default function App() {
       <Route element={<LandingPage />} path="/" />
       <Route element={<AuthPage />} path="/auth" />
       <Route element={<OnboardingPage />} path="/onboarding" />
+      <Route
+        element={
+          <ProtectedRoute>
+            <TeamChooserPage />
+          </ProtectedRoute>
+        }
+        path="/teams"
+      />
 
       <Route
         element={
@@ -31,15 +42,21 @@ export default function App() {
         }
         path="/c/:clubSlug/t/:teamSlug"
       >
-        <Route element={<TeamDashboardPage />} index />
+        <Route element={<Navigate replace to="news" />} index />
+        <Route element={<TeamMembersPage />} path="team" />
         <Route element={<RosterPage />} path="roster" />
+        <Route element={<RosterPage />} path="player-mgmt" />
         <Route element={<SchedulePage />} path="schedule" />
+        <Route element={<ScheduleScoresPage />} path="schedule-scores" />
         <Route element={<StandingsPage />} path="standings" />
-        <Route element={<PairingsPage />} path="pairings" />
+        <Route element={<StandingsPage />} path="team-standing" />
+        <Route element={<GameRostersPage />} path="pairings" />
+        <Route element={<GameRostersPage />} path="game-rosters" />
+        <Route element={<RosterMgmtPage />} path="roster-mgmt" />
         <Route element={<AvailabilityPage />} path="availability" />
         <Route element={<NewsPage />} path="news" />
+        <Route element={<NewsroomPage />} path="newsroom" />
         <Route element={<SettingsPage />} path="settings" />
-        <Route element={<AdminPage />} path="admin" />
       </Route>
 
       <Route element={<Navigate replace to="/" />} path="*" />
