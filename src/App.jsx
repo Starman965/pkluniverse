@@ -9,6 +9,7 @@ import OnboardingPage from './pages/OnboardingPage';
 import TeamChooserPage from './pages/TeamChooserPage';
 import {
   AvailabilityPage,
+  ClubAffiliationAdminPage,
   GameRostersPage,
   NewsPage,
   NewsroomPage,
@@ -36,6 +37,22 @@ export default function App() {
           </ProtectedRoute>
         }
         path="/teams"
+      />
+      <Route
+        element={
+          <ProtectedRoute>
+            <ClubAffiliationAdminPage />
+          </ProtectedRoute>
+        }
+        path="/admin"
+      />
+      <Route
+        element={
+          <ProtectedRoute>
+            <ClubAffiliationAdminPage />
+          </ProtectedRoute>
+        }
+        path="/club-admin"
       />
 
       <Route

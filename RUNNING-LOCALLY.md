@@ -15,6 +15,21 @@ Then open:
 
 - `http://127.0.0.1:5173/#/`
 
+## Blank page or Vite 504 dependency errors
+
+This repo is often run from a Dropbox-synced folder on Windows. To avoid file-lock issues with Vite's optimized dependency cache, `vite.config.js` stores the dev cache under local AppData instead of `node_modules/.vite`.
+
+If the page is blank and the browser console shows errors like `504 (Outdated Optimize Dep)` for `/node_modules/.vite/deps/...`, the browser is using stale Vite module URLs. Fix it by clearing the page cache:
+
+1. Open browser DevTools.
+2. Go to the Network tab.
+3. Check Disable cache.
+4. Press `Ctrl+F5`.
+
+If needed, close all `127.0.0.1:5173` tabs and reopen:
+
+- `http://127.0.0.1:5173/?fresh=1#/`
+
 ## Firebase setup for local auth
 
 1. Copy `.env.example` to `.env`.

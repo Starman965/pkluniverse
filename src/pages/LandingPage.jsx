@@ -24,11 +24,15 @@ export default function LandingPage() {
           <Link className="hero__top-link" to="/create">
             Create A Team
           </Link>
+          <span className="hero__top-separator">|</span>
+          <Link className="hero__top-link" rel="noreferrer" target="_blank" to="/admin">
+            App Admin
+          </Link>
         </div>
 
         <div className="hero__content hero__content--landing">
           <img alt="PKL Universe" className="hero__brand" src={pklUniverseWideLogo} />
-          <h1>Bring Your Pickleball Team Together</h1>
+          <h1>Welcome to PKL Universe, the place where teams are formed and come together.</h1>
           <p className="hero__copy">
             PKL Universe gives captains and players one place to organize communication, schedules,
             availability, and roster decisions throughout the season.

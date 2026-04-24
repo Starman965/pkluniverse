@@ -62,6 +62,9 @@ export default function OnboardingPage() {
           <Link className="button button--ghost" to="/auth">
             Log In
           </Link>
+          <Link className="button button--ghost" rel="noreferrer" target="_blank" to="/admin">
+            App Admin
+          </Link>
         </div>
       </section>
 

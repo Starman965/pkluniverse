@@ -9,6 +9,20 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "teams",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "affiliationStatus",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "approvedClubSlug",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

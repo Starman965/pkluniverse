@@ -34,6 +34,36 @@ service cloud.firestore {
       return hasTeamRole(clubId, teamId, ['captain']);
     }
 
+    function isBootstrapPlatformAdmin() {
+      return signedIn()
+        && request.auth.token.email in ['demandgendave@gmail.com'];
+    }
+
+    function isPlatformAdmin() {
+      return signedIn()
+        && (
+          isBootstrapPlatformAdmin()
+          || exists(/databases/$(database)/documents/platformAdmins/$(request.auth.uid))
+        );
+    }
+
+    function isClubAdmin(clubId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/clubs/$(clubId)/admins/$(request.auth.uid));
+    }
+
+    function isClubApprover(clubId) {
+      return isPlatformAdmin() || isClubAdmin(clubId);
+    }
+
+    function isAdminContext() {
+      return isPlatformAdmin();
+    }
+
+    function isReservedClubCreate(clubId) {
+      return clubId in ['independent'];
+    }
+
     function safeSelfMembershipUpdate(uid) {
       return isSelf(uid)
         && request.resource.data.uid == resource.data.uid
@@ -97,16 +127,49 @@ service cloud.firestore {
       }
     }
 
+    match /platformAdmins/{uid} {
+      allow read: if isSelf(uid) || isPlatformAdmin();
+      allow write: if isPlatformAdmin();
+    }
+
     match /clubs/{clubId} {
       allow read: if signedIn();
       allow create: if signedIn()
         && request.resource.data.slug == clubId
-        && request.resource.data.status == 'active';
-      allow update: if false;
+        && request.resource.data.status == 'active'
+        && (isReservedClubCreate(clubId) || isPlatformAdmin());
+      allow update: if isPlatformAdmin()
+        && request.resource.data.slug == resource.data.slug;
+      allow delete: if isPlatformAdmin() && clubId != 'independent';
 
       match /admins/{uid} {
         allow read: if signedIn();
-        allow write: if false;
+        allow write: if isPlatformAdmin();
+      }
+
+      match /affiliationRequests/{requestId} {
+        allow read: if isClubApprover(clubId)
+          || isManager(resource.data.teamClubSlug, resource.data.teamSlug);
+        allow create: if signedIn()
+          && request.resource.data.requestedClubSlug == clubId
+          && request.resource.data.clubSlug == clubId
+          && request.resource.data.status == 'pending'
+          && request.resource.data.teamClubSlug is string
+          && request.resource.data.teamSlug is string
+          && isManager(request.resource.data.teamClubSlug, request.resource.data.teamSlug);
+        allow update: if isClubApprover(clubId)
+          && request.resource.data.teamClubSlug == resource.data.teamClubSlug
+          && request.resource.data.teamSlug == resource.data.teamSlug
+          && request.resource.data.requestedClubSlug == resource.data.requestedClubSlug
+          && request.resource.data.clubSlug == resource.data.clubSlug
+          && request.resource.data.status in ['approved', 'rejected']
+          && request.resource.data.reviewedBy == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'reviewedAt',
+            'reviewedBy',
+            'status',
+            'updatedAt',
+          ]);
       }
 
       match /teams/{teamId} {
@@ -116,13 +179,50 @@ service cloud.firestore {
           && request.resource.data.clubId == clubId
           && request.resource.data.slug == teamId
           && request.resource.data.status == 'active';
-        allow update: if isManager(clubId, teamId)
-          && request.resource.data.clubId == resource.data.clubId
-          && request.resource.data.slug == resource.data.slug
-          && request.resource.data.createdBy == resource.data.createdBy;
+        allow update: if (
+            isManager(clubId, teamId)
+            && request.resource.data.clubId == resource.data.clubId
+            && request.resource.data.slug == resource.data.slug
+            && request.resource.data.createdBy == resource.data.createdBy
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'affiliationStatus',
+              'joinCode',
+              'logoPath',
+              'logoUrl',
+              'name',
+              'primaryLocation',
+              'requestedClubName',
+              'requestedClubSlug',
+              'status',
+              'updatedAt',
+            ])
+            && (
+              !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                'affiliationStatus',
+                'requestedClubName',
+                'requestedClubSlug',
+              ])
+              || request.resource.data.affiliationStatus == 'pending'
+            )
+          )
+          || (
+            isClubApprover(resource.data.requestedClubSlug)
+            && request.resource.data.clubId == resource.data.clubId
+            && request.resource.data.slug == resource.data.slug
+            && request.resource.data.createdBy == resource.data.createdBy
+            && request.resource.data.affiliationStatus in ['approved', 'rejected']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'affiliationStatus',
+              'approvedAt',
+              'approvedBy',
+              'approvedClubSlug',
+              'requestedClubSlug',
+              'updatedAt',
+            ])
+          );
 
         match /members/{uid} {
-          allow read: if isTeamMember(clubId, teamId);
+          allow read: if isTeamMember(clubId, teamId) || isAdminContext();
           allow create: if signedIn()
             && request.auth.uid == uid
             && request.resource.data.uid == uid
@@ -137,8 +237,9 @@ service cloud.firestore {
         }
 
         match /players/{playerId} {
-          allow read: if isTeamMember(clubId, teamId);
-          allow create, update: if isManager(clubId, teamId) || safeSelfPlayerWrite(playerId, teamId);
+          allow read: if isTeamMember(clubId, teamId) || isAdminContext();
+          allow create: if safeSelfPlayerWrite(playerId, teamId);
+          allow update: if isManager(clubId, teamId) || safeSelfPlayerWrite(playerId, teamId);
         }
 
         match /playerLinks/{uid} {

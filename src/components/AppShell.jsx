@@ -4,12 +4,13 @@ import { useAuth } from '../context/AuthContext';
 import {
   getMembership,
   getTeam,
+  isPlatformAdmin,
   listMemberships,
   listPlayers,
   listTeamMembers,
   setLastActiveTeam,
 } from '../lib/data';
-import pklUniverseLogo from '../../pkl_universe_logo.png';
+import defaultTeamLogo from '../../default_team_logo.png';
 import pklUniverseWideLogo from '../../pkl_universe_wide_logo.png';
 
 const primaryRoutes = [
@@ -49,6 +50,7 @@ export default function AppShell() {
   const [membershipError, setMembershipError] = useState('');
   const [activeTeam, setActiveTeam] = useState(null);
   const [activeMembership, setActiveMembership] = useState(null);
+  const [isAppAdmin, setIsAppAdmin] = useState(false);
   const [captainName, setCaptainName] = useState('');
   const [teamRefreshKey, setTeamRefreshKey] = useState(0);
 
@@ -88,6 +90,17 @@ export default function AppShell() {
       setMembershipError(error.message ?? 'Unable to load your teams yet.');
     }
   }, [clubSlug, teamSlug, user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setIsAppAdmin(false);
+      return;
+    }
+
+    isPlatformAdmin(user.uid, user.email).then(setIsAppAdmin).catch(() => {
+      setIsAppAdmin(false);
+    });
+  }, [user?.email, user?.uid]);
 
   useEffect(() => {
     loadMemberships();
@@ -153,7 +166,7 @@ export default function AppShell() {
     [activeMembership, clubSlug, memberships, teamSlug],
   );
   const canManage = canManageRole(currentMembership?.role);
-  const teamLogo = activeTeam?.logoUrl || pklUniverseLogo;
+  const teamLogo = activeTeam?.logoUrl || defaultTeamLogo;
   const teamTitle = activeTeam?.name ?? 'PKL Universe';
   const captainLabel = captainName ? `Captain: ${captainName}` : 'Captain: TBD';
   const signedInLabel = canManage ? 'Signed In: Captain' : 'Signed In: Player';
@@ -181,10 +194,6 @@ export default function AppShell() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar__header">
-          <div className="sidebar__app-brand">
-            <img alt="PKL Universe" className="sidebar__app-logo" src={pklUniverseWideLogo} />
-          </div>
-
           <div className="sidebar__team-card">
             <img alt={`${teamTitle} logo`} className="sidebar__team-logo" src={teamLogo} />
             <div className="sidebar__team-copy">
@@ -238,10 +247,18 @@ export default function AppShell() {
                 My Teams
               </NavLink>
             ) : null}
+            {isAppAdmin ? (
+              <NavLink className="sidebar__footer-link" rel="noreferrer" target="_blank" to="/admin">
+                App Admin
+              </NavLink>
+            ) : null}
           </div>
           <button className="sidebar__signout" onClick={handleSignOut} type="button">
             Sign out
           </button>
+          <div className="sidebar__app-brand sidebar__footer-brand">
+            <img alt="PKL Universe" className="sidebar__app-logo" src={pklUniverseWideLogo} />
+          </div>
         </div>
       </aside>
 

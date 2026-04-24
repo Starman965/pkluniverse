@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getTeam, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
-import pklUniverseLogo from '../../pkl_universe_logo.png';
+import { getTeam, isPlatformAdmin, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
+import defaultTeamLogo from '../../default_team_logo.png';
 
 function buildCaptainLabel(members, players) {
   const playerMap = new Map(players.map((player) => [player.id, player]));
@@ -25,8 +25,20 @@ function buildCaptainLabel(members, players) {
 export default function TeamChooserPage() {
   const { isFirebaseConfigured, user } = useAuth();
   const [memberships, setMemberships] = useState([]);
+  const [isAppAdmin, setIsAppAdmin] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [loadingTeams, setLoadingTeams] = useState(true);
+
+  useEffect(() => {
+    if (!user?.uid || !isFirebaseConfigured) {
+      setIsAppAdmin(false);
+      return;
+    }
+
+    isPlatformAdmin(user.uid, user.email).then(setIsAppAdmin).catch(() => {
+      setIsAppAdmin(false);
+    });
+  }, [isFirebaseConfigured, user?.email, user?.uid]);
 
   useEffect(() => {
     if (!user?.uid || !isFirebaseConfigured) {
@@ -113,7 +125,7 @@ export default function TeamChooserPage() {
                 <img
                   alt={`${membership.teamName} logo`}
                   className="membership-card__logo"
-                  src={membership.logoUrl || pklUniverseLogo}
+                  src={membership.logoUrl || defaultTeamLogo}
                 />
                 <div className="membership-card__content">
                   <strong>{membership.teamName}</strong>
@@ -127,6 +139,11 @@ export default function TeamChooserPage() {
       </section>
 
       <div className="team-entry__footer">
+        {isAppAdmin ? (
+          <Link className="button button--ghost" rel="noreferrer" target="_blank" to="/admin">
+            App Admin
+          </Link>
+        ) : null}
         <Link className="button button--ghost" to="/">
           Return to Home
         </Link>

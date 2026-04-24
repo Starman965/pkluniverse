@@ -1,21 +1,29 @@
 import { useEffect, useMemo, useState } from 'react';
 import Cropper from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
-import { useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   PLAYER_SKILL_LEVELS,
   buildPairingSummary,
   buildStandingsSummary,
+  createClub,
+  deleteClub,
   deleteGame,
-  deletePlayer,
   deleteNewsPost,
   getMembership,
   getTeam,
+  listAdminTeamSummaries,
+  listApprovedClubTeams,
+  listClubAffiliationRequests,
+  listClubs,
   listGames,
   listNewsPosts,
   listPlayers,
   listTeamMembers,
+  requestClubAffiliation,
+  renameClub,
+  reviewClubAffiliationRequest,
   rotateTeamJoinCode,
   saveGame,
   saveGamePairings,
@@ -25,6 +33,7 @@ import {
   updateTeamMemberRole,
   updateTeamSettings,
 } from '../lib/data';
+import defaultTeamLogo from '../../default_team_logo.png';
 
 function canManageRole(role) {
   return role === 'captain' || role === 'coCaptain';
@@ -73,11 +82,11 @@ function buildScheduleAdminDrafts(games) {
   }, {});
 }
 
-function createEmptyScheduleAdminForm() {
+function createEmptyScheduleAdminForm(primaryLocation = 'Blackhawk Country Club') {
   return {
     dateTbd: false,
     isoDate: '',
-    location: 'Blackhawk Country Club',
+    location: primaryLocation || 'Blackhawk Country Club',
     matchStatus: 'scheduled',
     opponent: '',
     opponentScore: '',
@@ -462,9 +471,10 @@ function createEmptyNewsForm() {
   };
 }
 
-function createEmptyTeamSettingsForm(teamName = '') {
+function createEmptyTeamSettingsForm(teamName = '', primaryLocation = '') {
   return {
     logoFile: null,
+    primaryLocation,
     teamName,
   };
 }
@@ -788,14 +798,11 @@ export function RosterPage() {
   const [players, setPlayers] = useState([]);
   const [membership, setMembership] = useState(null);
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
-  const [createSaving, setCreateSaving] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [updatingPlayerId, setUpdatingPlayerId] = useState('');
-  const [deletingPlayerId, setDeletingPlayerId] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [editForm, setEditForm] = useState(createEmptyRosterForm());
-  const [createForm, setCreateForm] = useState(createEmptyRosterForm());
 
   const canManage = canManageRole(membership?.role);
   const selectedPlayerIndex = Math.max(
@@ -844,32 +851,6 @@ export function RosterPage() {
     setSelectedPlayerId(players[nextIndex]?.id ?? '');
     setError('');
     setMessage('');
-  }
-
-  async function handleCreateSubmit(event) {
-    event.preventDefault();
-
-    setCreateSaving(true);
-    setError('');
-    setMessage('');
-
-    try {
-      const nextPlayerId = await savePlayer({
-        ...createForm,
-        active: true,
-        clubSlug,
-        teamSlug,
-        user,
-      });
-      setCreateForm(createEmptyRosterForm());
-      setMessage('Player saved to the team roster.');
-      await loadRosterData();
-      setSelectedPlayerId(nextPlayerId);
-    } catch (submitError) {
-      setError(submitError.message ?? 'Unable to save that player.');
-    } finally {
-      setCreateSaving(false);
-    }
   }
 
   function resetSelectedPlayer() {
@@ -942,38 +923,14 @@ export function RosterPage() {
     }
   }
 
-  async function handleDeletePlayer(player) {
-    if (!player) {
-      return;
-    }
-
-    setDeletingPlayerId(player.id);
-    setError('');
-    setMessage('');
-
-    try {
-      await deletePlayer({
-        clubSlug,
-        playerId: player.id,
-        teamSlug,
-      });
-      setMessage('Player removed from the roster.');
-      await loadRosterData();
-    } catch (deleteError) {
-      setError(deleteError.message ?? 'Unable to remove that player right now.');
-    } finally {
-      setDeletingPlayerId('');
-    }
-  }
-
   return (
     <div className="page-grid schedule-admin-page">
       <section className="card">
         <p className="eyebrow">Player Mgmt</p>
         <h1>Manage players</h1>
         <p>
-          Captains and co-captains manage the active roster here, then add new players from the
-          secondary card.
+          Captains and co-captains manage player profile details here. New players join the team
+          with the team join code.
         </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -1005,155 +962,60 @@ export function RosterPage() {
               </div>
             ) : null}
 
-            <div className="schedule-admin-layout">
-              <section className="schedule-admin-card">
-                <div className="schedule-admin-card__header">
-                  <div>
-                    <h2>{selectedPlayer?.fullName || 'No player selected'}</h2>
-                    <p>
-                      {selectedPlayer
-                        ? "Update a player's name or remove them from the active list."
-                        : 'Create the first player to start managing the roster.'}
-                    </p>
-                  </div>
-                  {selectedPlayer ? (
-                    <span
-                      className={`status-badge ${selectedPlayer.active ? 'status-badge--active' : 'status-badge--inactive'}`}
-                    >
-                      {selectedPlayer.active ? 'ACTIVE' : 'INACTIVE'}
-                    </span>
-                  ) : null}
+            <section className="schedule-admin-card">
+              <div className="schedule-admin-card__header">
+                <div>
+                  <h2>{selectedPlayer?.fullName || 'No player selected'}</h2>
+                  <p>
+                    {selectedPlayer
+                        ? "Update a player's profile details or remove them from the active list."
+                        : 'Share the team join code to add the first player.'}
+                  </p>
                 </div>
-
                 {selectedPlayer ? (
-                  <form className="schedule-admin-form" onSubmit={handleEditSubmit}>
-                    <label className="field">
-                      <span>First name</span>
-                      <input
-                        onChange={(event) =>
-                          setEditForm((current) => ({ ...current, firstName: event.target.value }))
-                        }
-                        value={editForm.firstName}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Last name</span>
-                      <input
-                        onChange={(event) =>
-                          setEditForm((current) => ({ ...current, lastName: event.target.value }))
-                        }
-                        value={editForm.lastName}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>DUPR</span>
-                      <input
-                        onChange={(event) =>
-                          setEditForm((current) => ({ ...current, dupr: event.target.value }))
-                        }
-                        placeholder="x.xxx"
-                        value={editForm.dupr}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Skill level</span>
-                      <select
-                        onChange={(event) =>
-                          setEditForm((current) => ({ ...current, skillLevel: event.target.value }))
-                        }
-                        value={editForm.skillLevel}
-                      >
-                        <option value="">Not set</option>
-                        {PLAYER_SKILL_LEVELS.map((skillLevel) => (
-                          <option key={skillLevel} value={skillLevel}>
-                            {skillLevel}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="player-admin-form__primary-actions">
-                      <button className="button button--ghost" onClick={resetSelectedPlayer} type="button">
-                        Reset
-                      </button>
-                      <button className="button" disabled={editSaving} type="submit">
-                        {editSaving ? 'Saving...' : 'Save'}
-                      </button>
-                    </div>
-                    <div className="player-admin-form__secondary-actions">
-                      <button
-                        className={`button ${selectedPlayer.active ? 'button--danger' : 'button--ghost'}`}
-                        disabled={updatingPlayerId === selectedPlayer.id || deletingPlayerId === selectedPlayer.id}
-                        onClick={() => toggleActiveStatus(selectedPlayer)}
-                        type="button"
-                      >
-                        {updatingPlayerId === selectedPlayer.id
-                          ? 'Saving...'
-                          : selectedPlayer.active
-                            ? 'Deactivate'
-                            : 'Reactivate'}
-                      </button>
-                      {!selectedPlayer.uid ? (
-                        <button
-                          className="button button--ghost"
-                          disabled={deletingPlayerId === selectedPlayer.id || updatingPlayerId === selectedPlayer.id}
-                          onClick={() => handleDeletePlayer(selectedPlayer)}
-                          type="button"
-                        >
-                          {deletingPlayerId === selectedPlayer.id ? 'Deleting...' : 'Delete'}
-                        </button>
-                      ) : null}
-                    </div>
-                  </form>
-                ) : (
-                  <p>No players saved yet.</p>
-                )}
-              </section>
+                  <span
+                    className={`status-badge ${selectedPlayer.active ? 'status-badge--active' : 'status-badge--inactive'}`}
+                  >
+                    {selectedPlayer.active ? 'ACTIVE' : 'INACTIVE'}
+                  </span>
+                ) : null}
+              </div>
 
-              <section className="schedule-admin-card">
-                <div className="schedule-admin-card__header">
-                  <div>
-                    <h2>Add player</h2>
-                    <p>Add a new player to the roster.</p>
-                  </div>
-                  <span className="status-badge status-badge--active">ACTIVE</span>
-                </div>
-
-                <form className="schedule-admin-form" onSubmit={handleCreateSubmit}>
+              {selectedPlayer ? (
+                <form className="schedule-admin-form" onSubmit={handleEditSubmit}>
                   <label className="field">
                     <span>First name</span>
                     <input
                       onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, firstName: event.target.value }))
+                        setEditForm((current) => ({ ...current, firstName: event.target.value }))
                       }
-                      value={createForm.firstName}
+                      value={editForm.firstName}
                     />
                   </label>
                   <label className="field">
                     <span>Last name</span>
                     <input
                       onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, lastName: event.target.value }))
+                        setEditForm((current) => ({ ...current, lastName: event.target.value }))
                       }
-                      value={createForm.lastName}
+                      value={editForm.lastName}
                     />
                   </label>
                   <label className="field">
                     <span>DUPR</span>
                     <input
-                      onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, dupr: event.target.value }))
-                      }
+                      onChange={(event) => setEditForm((current) => ({ ...current, dupr: event.target.value }))}
                       placeholder="x.xxx"
-                      value={createForm.dupr}
+                      value={editForm.dupr}
                     />
                   </label>
                   <label className="field">
                     <span>Skill level</span>
                     <select
                       onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, skillLevel: event.target.value }))
+                        setEditForm((current) => ({ ...current, skillLevel: event.target.value }))
                       }
-                      value={createForm.skillLevel}
+                      value={editForm.skillLevel}
                     >
                       <option value="">Not set</option>
                       {PLAYER_SKILL_LEVELS.map((skillLevel) => (
@@ -1163,18 +1025,37 @@ export function RosterPage() {
                       ))}
                     </select>
                   </label>
-                  <div className="player-admin-form__create-actions">
-                    <button className="button" disabled={createSaving} type="submit">
-                      {createSaving ? 'Creating player...' : 'Create player'}
+                  <div className="player-admin-form__primary-actions">
+                    <button className="button button--ghost" onClick={resetSelectedPlayer} type="button">
+                      Reset
+                    </button>
+                    <button className="button" disabled={editSaving} type="submit">
+                      {editSaving ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                  <div className="player-admin-form__secondary-actions">
+                    <button
+                      className={`button ${selectedPlayer.active ? 'button--danger' : 'button--ghost'}`}
+                      disabled={updatingPlayerId === selectedPlayer.id}
+                      onClick={() => toggleActiveStatus(selectedPlayer)}
+                      type="button"
+                    >
+                      {updatingPlayerId === selectedPlayer.id
+                          ? 'Saving...'
+                          : selectedPlayer.active
+                            ? 'Deactivate'
+                            : 'Reactivate'}
                     </button>
                   </div>
                 </form>
-              </section>
-            </div>
+              ) : (
+                <p>No players have joined yet.</p>
+              )}
+            </section>
           </>
         ) : (
           <div className="notice notice--info">
-            Captains and co-captains can add or edit players. Your current role is{' '}
+            Captains and co-captains can edit player profiles. Your current role is{' '}
             <strong>{membership?.role ?? 'member'}</strong>.
           </div>
         )}
@@ -1307,19 +1188,28 @@ export function ScheduleScoresPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [form, setForm] = useState(createEmptyScheduleAdminForm());
+  const [teamPrimaryLocation, setTeamPrimaryLocation] = useState('Blackhawk Country Club');
 
   const canManage = canManageRole(membership?.role);
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
 
   async function loadScheduleData() {
-    const [gameData, membershipData] = await Promise.all([
+    const [gameData, membershipData, teamData] = await Promise.all([
       listGames(clubSlug, teamSlug),
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
+      getTeam(clubSlug, teamSlug),
     ]);
+    const nextPrimaryLocation = teamData?.primaryLocation || 'Blackhawk Country Club';
 
     setGames(gameData);
     setGameDrafts(buildScheduleAdminDrafts(gameData));
     setMembership(membershipData);
+    setTeamPrimaryLocation(nextPrimaryLocation);
+    setForm((current) =>
+      current.location === 'Blackhawk Country Club'
+        ? createEmptyScheduleAdminForm(nextPrimaryLocation)
+        : current,
+    );
     setSelectedGameId((current) => {
       if (current && gameData.some((game) => game.id === current)) {
         return current;
@@ -1380,7 +1270,7 @@ export function ScheduleScoresPage() {
         teamSlug,
         user,
       });
-      setForm(createEmptyScheduleAdminForm());
+      setForm(createEmptyScheduleAdminForm(teamPrimaryLocation));
       setMessage('Matchup added to the schedule.');
       await loadScheduleData();
     } catch (submitError) {
@@ -3254,16 +3144,20 @@ export function SettingsPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
   const [team, setTeam] = useState(null);
+  const [clubs, setClubs] = useState([]);
+  const [approvedClubTeams, setApprovedClubTeams] = useState([]);
   const [members, setMembers] = useState([]);
   const [players, setPlayers] = useState([]);
   const [membership, setMembership] = useState(null);
   const [saving, setSaving] = useState(false);
   const [rotating, setRotating] = useState(false);
+  const [requestingAffiliation, setRequestingAffiliation] = useState(false);
   const [creatingCrop, setCreatingCrop] = useState(false);
   const [updatingUid, setUpdatingUid] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [form, setForm] = useState(createEmptyTeamSettingsForm());
+  const [requestedClubSlug, setRequestedClubSlug] = useState('');
   const [logoPreviewUrl, setLogoPreviewUrl] = useState('');
   const [cropImageSrc, setCropImageSrc] = useState('');
   const [cropFileName, setCropFileName] = useState('team-logo.png');
@@ -3273,8 +3167,9 @@ export function SettingsPage() {
 
   const canManage = canManageRole(membership?.role);
   const canManageMembership = isCaptainRole(membership?.role);
+  const clubOptions = clubs.filter((club) => club.slug !== 'independent');
   const playerMap = useMemo(() => new Map(players.map((player) => [player.id, player])), [players]);
-  const displayedLogoUrl = logoPreviewUrl || team?.logoUrl || '';
+  const displayedLogoUrl = logoPreviewUrl || team?.logoUrl || defaultTeamLogo;
 
   function replaceLogoPreview(nextUrl) {
     setLogoPreviewUrl((current) => {
@@ -3296,19 +3191,36 @@ export function SettingsPage() {
   }
 
   async function loadSettingsData() {
-    const [teamData, memberData, playerData, membershipData] = await Promise.all([
+    const [teamData, memberData, playerData, membershipData, clubData] = await Promise.all([
       getTeam(clubSlug, teamSlug),
       listTeamMembers(clubSlug, teamSlug),
       listPlayers(clubSlug, teamSlug),
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
+      listClubs(),
     ]);
 
     setTeam(teamData);
+    setClubs(clubData);
     setMembers(memberData);
     setPlayers(playerData);
     setMembership(membershipData);
-    setForm(createEmptyTeamSettingsForm(teamData?.name ?? ''));
+    setForm(createEmptyTeamSettingsForm(teamData?.name ?? '', teamData?.primaryLocation ?? ''));
+    setRequestedClubSlug(
+      teamData?.requestedClubSlug || teamData?.approvedClubSlug || clubData[0]?.slug || '',
+    );
     replaceLogoPreview('');
+
+    if (teamData?.approvedClubSlug && teamData.affiliationStatus === 'approved') {
+      listApprovedClubTeams(teamData.approvedClubSlug)
+        .then((approvedTeams) => {
+          setApprovedClubTeams(approvedTeams.filter((clubTeam) => clubTeam.teamSlug !== teamSlug));
+        })
+        .catch(() => {
+          setApprovedClubTeams([]);
+        });
+    } else {
+      setApprovedClubTeams([]);
+    }
   }
 
   useEffect(() => {
@@ -3382,6 +3294,7 @@ export function SettingsPage() {
       await updateTeamSettings({
         clubSlug,
         logoFile: form.logoFile,
+        primaryLocation: form.primaryLocation,
         teamName: form.teamName,
         teamSlug,
       });
@@ -3408,6 +3321,28 @@ export function SettingsPage() {
       setError(rotateError.message ?? 'Unable to rotate the join code.');
     } finally {
       setRotating(false);
+    }
+  }
+
+  async function handleRequestClubAffiliation() {
+    setRequestingAffiliation(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await requestClubAffiliation({
+        clubSlug,
+        requestedClubSlug,
+        teamSlug,
+        user,
+      });
+      setMessage('Club affiliation request submitted.');
+      await loadSettingsData();
+      window.dispatchEvent(new Event('team-updated'));
+    } catch (requestError) {
+      setError(requestError.message ?? 'Unable to request club affiliation.');
+    } finally {
+      setRequestingAffiliation(false);
     }
   }
 
@@ -3459,7 +3394,7 @@ export function SettingsPage() {
       setMessage(
         `${memberRecord.uid === user?.uid ? 'Your' : 'Member'} role updated to ${formatRoleLabel(nextRole).toLowerCase()}.`,
       );
-      await loadAdminData();
+      await loadSettingsData();
     } catch (updateError) {
       setError(updateError.message ?? 'Unable to update that team role.');
     } finally {
@@ -3513,7 +3448,7 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <div className="schedule-admin-layout">
+      <div className="schedule-admin-layout settings-admin-layout">
         <section className="schedule-admin-card">
           <div className="schedule-admin-card__header">
             <div>
@@ -3532,18 +3467,24 @@ export function SettingsPage() {
                   value={form.teamName}
                 />
               </label>
+              <label className="field">
+                <span>Primary location</span>
+                <input
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, primaryLocation: event.target.value }))
+                  }
+                  placeholder="Optional, e.g. Blackhawk Country Club"
+                  value={form.primaryLocation}
+                />
+              </label>
               <div className="settings-admin-branding-preview">
                 <div>
                   <p className="eyebrow">Current logo</p>
-                  {displayedLogoUrl ? (
-                    <img
-                      alt={`${team?.name ?? 'Team'} logo`}
-                      className="team-logo-preview settings-admin-logo-preview"
-                      src={displayedLogoUrl}
-                    />
-                  ) : (
-                    <div className="settings-admin-logo-empty">No logo uploaded yet.</div>
-                  )}
+                  <img
+                    alt={`${team?.name ?? 'Team'} logo`}
+                    className="settings-admin-logo-preview"
+                    src={displayedLogoUrl}
+                  />
                 </div>
               </div>
               <div className="field settings-admin-form__logo-field">
@@ -3554,7 +3495,7 @@ export function SettingsPage() {
                     Choose logo image
                   </label>
                   <button className="button" disabled={saving} type="submit">
-                    {saving ? 'Saving logo...' : 'Save Logo'}
+                    {saving ? 'Saving settings...' : 'Save Settings'}
                   </button>
                 </div>
               </div>
@@ -3563,6 +3504,90 @@ export function SettingsPage() {
             <div className="notice notice--info">
               Captains and co-captains can edit team settings. Your current role is{' '}
               <strong>{membership?.role ?? 'member'}</strong>.
+            </div>
+          )}
+        </section>
+
+        <section className="schedule-admin-card">
+          <div className="schedule-admin-card__header">
+            <div>
+              <p className="eyebrow">Club affiliation</p>
+              <h2>Join a club network</h2>
+              <p>Request approval so this team can appear with other teams in a club.</p>
+            </div>
+          </div>
+
+          <div className="detail-card">
+            <span>Current status</span>
+            <strong>
+              {team?.affiliationStatus === 'approved'
+                ? 'Approved'
+                : team?.affiliationStatus === 'pending'
+                  ? 'Pending approval'
+                  : team?.affiliationStatus === 'rejected'
+                    ? 'Rejected'
+                    : 'Independent'}
+            </strong>
+            <span>
+              {team?.approvedClubSlug
+                ? `Approved for ${team.approvedClubSlug}`
+                : team?.requestedClubSlug
+                  ? `Requested ${team.requestedClubSlug}`
+                  : 'Not affiliated with a club yet.'}
+            </span>
+          </div>
+
+          {team?.affiliationStatus === 'approved' ? (
+            <div className="detail-card">
+              <span>Challenge-ready club teams</span>
+              <strong>{approvedClubTeams.length}</strong>
+              <span>
+                {approvedClubTeams.length
+                  ? approvedClubTeams.map((clubTeam) => clubTeam.name).join(', ')
+                  : 'No other approved teams are in this club yet.'}
+              </span>
+            </div>
+          ) : null}
+
+          {canManage ? (
+            <div className="schedule-admin-form settings-admin-form">
+              <label className="field">
+                <span>Request club</span>
+                <select
+                  disabled={team?.affiliationStatus === 'pending'}
+                  onChange={(event) => setRequestedClubSlug(event.target.value)}
+                  value={requestedClubSlug}
+                >
+                  {!clubOptions.length ? <option value="">No clubs available yet</option> : null}
+                  {clubOptions.map((club) => (
+                    <option key={club.slug} value={club.slug}>
+                      {club.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="button"
+                disabled={
+                  requestingAffiliation ||
+                  !requestedClubSlug ||
+                  team?.affiliationStatus === 'pending' ||
+                  team?.approvedClubSlug === requestedClubSlug
+                }
+                onClick={handleRequestClubAffiliation}
+                type="button"
+              >
+                {requestingAffiliation ? 'Submitting request...' : 'Request affiliation'}
+              </button>
+              {team?.affiliationStatus === 'pending' ? (
+                <div className="notice notice--info">
+                  This team already has a pending club affiliation request.
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="notice notice--info">
+              Captains and co-captains can request club affiliation for this team.
             </div>
           )}
         </section>
@@ -3699,6 +3724,406 @@ export function SettingsPage() {
           </aside>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+export function ClubAffiliationAdminPage() {
+  const { signOutUser, user } = useAuth();
+  const navigate = useNavigate();
+  const [clubs, setClubs] = useState([]);
+  const [clubName, setClubName] = useState('');
+  const [clubDrafts, setClubDrafts] = useState({});
+  const [requests, setRequests] = useState([]);
+  const [adminTeams, setAdminTeams] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [creatingClub, setCreatingClub] = useState(false);
+  const [updatingClubSlug, setUpdatingClubSlug] = useState('');
+  const [updatingRequestId, setUpdatingRequestId] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [adminSection, setAdminSection] = useState('teams');
+  const isBootstrapSuperAdmin = user?.email?.toLowerCase() === 'demandgendave@gmail.com';
+
+  async function loadAdminData() {
+    if (!user?.uid) {
+      setClubs([]);
+      setRequests([]);
+      setAdminTeams([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const [clubData, requestData, teamData] = await Promise.all([
+        listClubs(),
+        listClubAffiliationRequests(user),
+        listAdminTeamSummaries(user),
+      ]);
+
+      setClubs(clubData);
+      setClubDrafts(
+        clubData.reduce((drafts, club) => {
+          drafts[club.slug] = club.name;
+          return drafts;
+        }, {}),
+      );
+      setRequests(requestData);
+      setAdminTeams(teamData);
+    } catch (loadError) {
+      setError(loadError.message ?? 'Unable to load admin data.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadAdminData();
+  }, [user?.uid]);
+
+  async function handleCreateClub(event) {
+    event.preventDefault();
+    setCreatingClub(true);
+    setError('');
+    setMessage('');
+
+    try {
+      const club = await createClub({ clubName, user });
+      setClubName('');
+      setMessage(`${club.name} created.`);
+      await loadAdminData();
+    } catch (createError) {
+      setError(createError.message ?? 'Unable to create that club.');
+    } finally {
+      setCreatingClub(false);
+    }
+  }
+
+  async function handleRenameClub(club) {
+    setUpdatingClubSlug(club.slug);
+    setError('');
+    setMessage('');
+
+    try {
+      await renameClub({
+        clubName: clubDrafts[club.slug] ?? club.name,
+        clubSlug: club.slug,
+        user,
+      });
+      setMessage(`${clubDrafts[club.slug] ?? club.name} renamed.`);
+      await loadAdminData();
+    } catch (renameError) {
+      setError(renameError.message ?? 'Unable to rename that club.');
+    } finally {
+      setUpdatingClubSlug('');
+    }
+  }
+
+  async function handleDeleteClub(club) {
+    const confirmed = window.confirm(
+      `Delete ${club.name}? This only works for clubs with no teams.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setUpdatingClubSlug(club.slug);
+    setError('');
+    setMessage('');
+
+    try {
+      await deleteClub({
+        clubSlug: club.slug,
+        user,
+      });
+      setMessage(`${club.name} deleted.`);
+      await loadAdminData();
+    } catch (deleteError) {
+      setError(deleteError.message ?? 'Unable to delete that club.');
+    } finally {
+      setUpdatingClubSlug('');
+    }
+  }
+
+  async function handleReview(request, status) {
+    setUpdatingRequestId(request.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await reviewClubAffiliationRequest({
+        request,
+        status,
+        user,
+      });
+      setMessage(`${request.teamName || request.teamSlug} ${status}.`);
+      await loadAdminData();
+    } catch (reviewError) {
+      setError(reviewError.message ?? 'Unable to review that affiliation request.');
+    } finally {
+      setUpdatingRequestId('');
+    }
+  }
+
+  async function handleSignOut() {
+    await signOutUser();
+    navigate('/', { replace: true });
+  }
+
+  return (
+    <div className="auth-page admin-page">
+      <aside className="admin-sidebar card">
+        <p className="eyebrow">PKL Universe</p>
+        <h2>App Admin</h2>
+        <p className="admin-sidebar__copy">
+          Signed in as <strong>{user?.email ?? user?.displayName ?? 'Unknown user'}</strong>
+        </p>
+        <span className="status-badge">
+          {isBootstrapSuperAdmin ? 'Bootstrap super admin' : 'Admin access checked by Firebase'}
+        </span>
+        <nav className="sidebar__nav">
+          <div className="sidebar__nav-group">
+            <button
+              className={`nav-link admin-nav-button ${adminSection === 'teams' ? 'nav-link--active' : ''}`}
+              onClick={() => setAdminSection('teams')}
+              type="button"
+            >
+              Teams
+            </button>
+            <button
+              className={`nav-link admin-nav-button ${adminSection === 'clubs' ? 'nav-link--active' : ''}`}
+              onClick={() => setAdminSection('clubs')}
+              type="button"
+            >
+              Clubs
+            </button>
+          </div>
+        </nav>
+        <div className="sidebar__footer-actions">
+          <Link className="sidebar__footer-link" to="/teams">
+            My Teams
+          </Link>
+          <Link className="sidebar__footer-link" to="/">
+            Home
+          </Link>
+          <button className="sidebar__signout" onClick={handleSignOut} type="button">
+            Sign out
+          </button>
+        </div>
+      </aside>
+
+      <section className="card auth-card">
+        <p className="eyebrow">App admin</p>
+        <h1>{adminSection === 'teams' ? 'Teams' : 'Clubs'}</h1>
+        <p>
+          {adminSection === 'teams'
+            ? 'Review each team, its club affiliation, captains, and member count.'
+            : 'Create clubs, manage club names, and review teams requesting club affiliation.'}
+        </p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
+
+        {adminSection === 'teams' ? (
+          <section className="schedule-admin-card">
+            <div className="schedule-admin-card__header">
+              <div>
+                <p className="eyebrow">Teams</p>
+                <h2>All teams</h2>
+                <p>Review each team, its club affiliation, captains, and member count.</p>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="state-panel">
+                <p>Loading teams...</p>
+              </div>
+            ) : adminTeams.length > 0 ? (
+              <div className="team-admin-grid">
+                {adminTeams.map((teamSummary) => (
+                  <article
+                    key={`${teamSummary.clubSlug}-${teamSummary.teamSlug}`}
+                    className="entity-card entity-card--column"
+                  >
+                    <div className="member-admin__header">
+                      <div>
+                        <strong>{teamSummary.name}</strong>
+                        <span>
+                          Stored under {teamSummary.clubName} ({teamSummary.clubSlug})
+                        </span>
+                      </div>
+                      <span className="status-badge">{teamSummary.affiliationStatus}</span>
+                    </div>
+                    <span>
+                      Club affiliation:{' '}
+                      {teamSummary.approvedClubSlug
+                        ? teamSummary.approvedClubSlug
+                        : teamSummary.requestedClubSlug
+                          ? `Requested ${teamSummary.requestedClubSlug}`
+                          : 'Independent'}
+                    </span>
+                    <span>
+                      Captains:{' '}
+                      {teamSummary.captainNames.length
+                        ? teamSummary.captainNames.join(', ')
+                        : 'TBD'}
+                    </span>
+                    <span>Members: {teamSummary.memberCount}</span>
+                    {teamSummary.primaryLocation ? (
+                      <span>Primary location: {teamSummary.primaryLocation}</span>
+                    ) : null}
+                    <Link
+                      className="button button--ghost"
+                      to={`/c/${teamSummary.clubSlug}/t/${teamSummary.teamSlug}/settings`}
+                    >
+                      Open team settings
+                    </Link>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="notice notice--info">No teams have been created yet.</div>
+            )}
+          </section>
+        ) : (
+          <>
+            <section className="schedule-admin-card">
+              <div className="schedule-admin-card__header">
+                <div>
+                  <p className="eyebrow">Clubs</p>
+                  <h2>Create and manage clubs</h2>
+                  <p>Only app admins can create real clubs. Teams remain independent until approved.</p>
+                </div>
+              </div>
+
+              <form className="schedule-admin-form settings-admin-form" onSubmit={handleCreateClub}>
+                <label className="field">
+                  <span>Club name</span>
+                  <input
+                    onChange={(event) => setClubName(event.target.value)}
+                    placeholder="Blackhawk Country Club"
+                    value={clubName}
+                  />
+                </label>
+                <button className="button" disabled={creatingClub} type="submit">
+                  {creatingClub ? 'Creating club...' : 'Create club'}
+                </button>
+              </form>
+
+              {clubs.length > 0 ? (
+                <div className="entity-list">
+                  {clubs.map((club) => (
+                    <div key={club.slug} className="entity-card entity-card--column">
+                      <label className="field">
+                        <span>Club name</span>
+                        <input
+                          onChange={(event) =>
+                            setClubDrafts((current) => ({
+                              ...current,
+                              [club.slug]: event.target.value,
+                            }))
+                          }
+                          value={clubDrafts[club.slug] ?? club.name}
+                        />
+                      </label>
+                      <span>Slug: {club.slug}</span>
+                      <div className="choice-row">
+                        <button
+                          className="button"
+                          disabled={updatingClubSlug === club.slug}
+                          onClick={() => handleRenameClub(club)}
+                          type="button"
+                        >
+                          {updatingClubSlug === club.slug ? 'Saving...' : 'Rename club'}
+                        </button>
+                        <button
+                          className="button button--danger"
+                          disabled={updatingClubSlug === club.slug}
+                          onClick={() => handleDeleteClub(club)}
+                          type="button"
+                        >
+                          Delete club
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="notice notice--info">
+                  No real clubs created yet. Create Blackhawk here when you are ready.
+                </div>
+              )}
+            </section>
+
+            <section className="schedule-admin-card">
+              <div className="schedule-admin-card__header">
+                <div>
+                  <p className="eyebrow">Requests</p>
+                  <h2>Club affiliation requests</h2>
+                  <p>Approve or reject teams that want to become part of a club.</p>
+                </div>
+              </div>
+
+              {loading ? (
+                <div className="state-panel">
+                  <p>Loading affiliation requests...</p>
+                </div>
+              ) : requests.length > 0 ? (
+                <div className="entity-list">
+                  {requests.map((request) => (
+                    <div key={`${request.requestedClubSlug}-${request.id}`} className="entity-card entity-card--column">
+                      <div className="member-admin__header">
+                        <div>
+                          <strong>{request.teamName || request.teamSlug}</strong>
+                          <span>
+                            Requested {request.requestedClubName || request.requestedClubSlug} from{' '}
+                            {request.teamClubSlug}/{request.teamSlug}
+                          </span>
+                        </div>
+                        <span className="status-badge">{request.status}</span>
+                      </div>
+
+                      {request.status === 'pending' ? (
+                        <div className="choice-row">
+                          <button
+                            className="button"
+                            disabled={updatingRequestId === request.id}
+                            onClick={() => handleReview(request, 'approved')}
+                            type="button"
+                          >
+                            {updatingRequestId === request.id ? 'Approving...' : 'Approve'}
+                          </button>
+                          <button
+                            className="button button--ghost"
+                            disabled={updatingRequestId === request.id}
+                            onClick={() => handleReview(request, 'rejected')}
+                            type="button"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <span>
+                          Reviewed by {request.reviewedByLabel || 'an admin'}
+                          {request.reviewedAtMs ? ` on ${new Date(request.reviewedAtMs).toLocaleDateString()}` : ''}.
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="notice notice--info">
+                  No affiliation requests are available for your admin account.
+                </div>
+              )}
+            </section>
+          </>
+        )}
+      </section>
     </div>
   );
 }

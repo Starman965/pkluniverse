@@ -1,4 +1,5 @@
 import {
+  collectionGroup,
   deleteField,
   collection,
   doc,
@@ -16,11 +17,15 @@ import {
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, isFirebaseConfigured, storage } from './firebase';
 
-const DEFAULT_CLUB = {
-  id: 'blackhawk',
-  name: 'Blackhawk',
-  slug: 'blackhawk',
+const INDEPENDENT_CLUB = {
+  id: 'independent',
+  name: 'Independent Teams',
+  slug: 'independent',
 };
+
+const RESERVED_CLUBS = [INDEPENDENT_CLUB];
+
+const SUPER_ADMIN_EMAILS = ['demandgendave@gmail.com'];
 
 export const PLAYER_SKILL_LEVELS = [
   'Beginner',
@@ -230,20 +235,262 @@ export async function setLastActiveTeam({ clubSlug, teamSlug, uid }) {
 export async function ensureClub() {
   requireDb();
 
-  const clubRef = doc(db, 'clubs', DEFAULT_CLUB.id);
+  return ensureIndependentClub();
+}
+
+async function ensureReservedClub(club) {
+  const clubRef = doc(db, 'clubs', club.id);
   const snapshot = await getDoc(clubRef);
 
   if (!snapshot.exists()) {
     await setDoc(clubRef, {
       createdAt: serverTimestamp(),
-      name: DEFAULT_CLUB.name,
-      slug: DEFAULT_CLUB.slug,
+      name: club.name,
+      slug: club.slug,
       status: 'active',
       updatedAt: serverTimestamp(),
     });
   }
 
-  return DEFAULT_CLUB;
+  return club;
+}
+
+async function ensureIndependentClub() {
+  requireDb();
+
+  return ensureReservedClub(INDEPENDENT_CLUB);
+}
+
+export async function listClubs({ includeIndependent = false } = {}) {
+  requireDb();
+
+  await Promise.all(RESERVED_CLUBS.map((club) => ensureReservedClub(club)));
+
+  const clubsSnapshot = await getDocs(collection(db, 'clubs'));
+  const clubs = clubsSnapshot.docs
+    .map((entry) => {
+      const data = entry.data();
+
+      return {
+        id: entry.id,
+        name: data.name ?? entry.id,
+        slug: data.slug ?? entry.id,
+        status: data.status ?? 'active',
+      };
+    })
+    .filter((club) => club.status === 'active')
+    .filter((club) => includeIndependent || club.slug !== INDEPENDENT_CLUB.slug);
+
+  clubs.sort((left, right) => left.name.localeCompare(right.name));
+
+  return clubs;
+}
+
+export async function createClub({ clubName, user }) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to create a club.');
+  }
+
+  const trimmedName = clubName.trim();
+
+  if (!trimmedName) {
+    throw new Error('Enter a club name.');
+  }
+
+  const clubSlug = slugify(trimmedName);
+
+  if (!clubSlug || clubSlug === INDEPENDENT_CLUB.slug) {
+    throw new Error('Enter a valid club name.');
+  }
+
+  const platformAdmin = await isPlatformAdmin(user.uid, user.email);
+
+  if (!platformAdmin) {
+    throw new Error('Only app admins can create clubs.');
+  }
+
+  const clubRef = doc(db, 'clubs', clubSlug);
+  const snapshot = await getDoc(clubRef);
+
+  if (snapshot.exists()) {
+    throw new Error('A club with that name already exists.');
+  }
+
+  await setDoc(clubRef, {
+    createdAt: serverTimestamp(),
+    createdBy: user.uid,
+    name: trimmedName,
+    slug: clubSlug,
+    status: 'active',
+    updatedAt: serverTimestamp(),
+  });
+
+  return { name: trimmedName, slug: clubSlug };
+}
+
+export async function renameClub({ clubName, clubSlug, user }) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to rename a club.');
+  }
+
+  if (!clubSlug || clubSlug === INDEPENDENT_CLUB.slug) {
+    throw new Error('That club cannot be renamed here.');
+  }
+
+  const trimmedName = clubName.trim();
+
+  if (!trimmedName) {
+    throw new Error('Enter a club name.');
+  }
+
+  const platformAdmin = await isPlatformAdmin(user.uid, user.email);
+
+  if (!platformAdmin) {
+    throw new Error('Only app admins can rename clubs.');
+  }
+
+  await updateDoc(doc(db, 'clubs', clubSlug), {
+    name: trimmedName,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function deleteClub({ clubSlug, user }) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to delete a club.');
+  }
+
+  if (!clubSlug || clubSlug === INDEPENDENT_CLUB.slug) {
+    throw new Error('The independent team area cannot be deleted.');
+  }
+
+  const platformAdmin = await isPlatformAdmin(user.uid, user.email);
+
+  if (!platformAdmin) {
+    throw new Error('Only app admins can delete clubs.');
+  }
+
+  const teamsSnapshot = await getDocs(collection(db, 'clubs', clubSlug, 'teams'));
+
+  if (!teamsSnapshot.empty) {
+    throw new Error('Move or remove this club’s teams before deleting the club.');
+  }
+
+  await deleteDoc(doc(db, 'clubs', clubSlug));
+}
+
+function isBootstrapPlatformAdmin(email) {
+  return SUPER_ADMIN_EMAILS.includes((email ?? '').trim().toLowerCase());
+}
+
+export async function isPlatformAdmin(uid, email = '') {
+  requireDb();
+
+  if (isBootstrapPlatformAdmin(email)) {
+    return true;
+  }
+
+  if (!uid) {
+    return false;
+  }
+
+  const snapshot = await getDoc(doc(db, 'platformAdmins', uid));
+
+  return snapshot.exists();
+}
+
+export async function listManagedClubs(uid, email = '') {
+  requireDb();
+
+  if (!uid) {
+    return [];
+  }
+
+  const [clubs, platformAdmin] = await Promise.all([
+    listClubs(),
+    isPlatformAdmin(uid, email),
+  ]);
+
+  if (platformAdmin) {
+    return clubs;
+  }
+
+  const adminChecks = await Promise.all(
+    clubs.map(async (club) => {
+      const adminSnapshot = await getDoc(doc(db, 'clubs', club.slug, 'admins', uid));
+      return adminSnapshot.exists() ? club : null;
+    }),
+  );
+
+  return adminChecks.filter(Boolean);
+}
+
+export async function listAdminTeamSummaries(user) {
+  requireDb();
+
+  if (!user?.uid) {
+    return [];
+  }
+
+  const platformAdmin = await isPlatformAdmin(user.uid, user.email);
+  const clubs = platformAdmin
+    ? await listClubs({ includeIndependent: true })
+    : await listManagedClubs(user.uid, user.email);
+
+  const clubTeams = await Promise.all(
+    clubs.map(async (club) => {
+      const teamsSnapshot = await getDocs(collection(db, 'clubs', club.slug, 'teams'));
+
+      return Promise.all(
+        teamsSnapshot.docs.map(async (teamEntry) => {
+          const team = teamEntry.data();
+          const teamSlug = team.slug ?? teamEntry.id;
+          const [members, players] = await Promise.all([
+            listTeamMembers(club.slug, teamSlug),
+            listPlayers(club.slug, teamSlug),
+          ]);
+          const playerMap = new Map(players.map((player) => [player.id, player]));
+          const captains = members
+            .filter((member) => member.role === 'captain' || member.role === 'coCaptain')
+            .map((member) => playerMap.get(member.playerId)?.fullName || member.uid)
+            .filter(Boolean);
+
+          return {
+            affiliationStatus: team.affiliationStatus ?? 'independent',
+            approvedClubSlug: team.approvedClubSlug ?? '',
+            captainNames: captains,
+            clubName: club.name,
+            clubSlug: club.slug,
+            memberCount: members.length,
+            name: team.name ?? teamSlug,
+            primaryLocation: team.primaryLocation ?? '',
+            requestedClubSlug: team.requestedClubSlug ?? '',
+            teamSlug,
+          };
+        }),
+      );
+    }),
+  );
+
+  const teams = clubTeams.flat();
+
+  teams.sort((left, right) => {
+    const clubCompare = left.clubName.localeCompare(right.clubName);
+
+    if (clubCompare !== 0) {
+      return clubCompare;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+
+  return teams;
 }
 
 async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
@@ -325,7 +572,7 @@ export async function createTeam({ teamName, user }) {
     throw new Error('Enter a team name first.');
   }
 
-  const club = await ensureClub();
+  const club = await ensureIndependentClub();
   const teamSlug = slugify(trimmedName);
 
   if (!teamSlug) {
@@ -342,6 +589,8 @@ export async function createTeam({ teamName, user }) {
   const joinCode = makeJoinCode(teamSlug);
 
   await setDoc(teamRef, {
+    affiliationStatus: 'independent',
+    approvedClubSlug: '',
     clubId: club.id,
     clubName: club.name,
     createdAt: serverTimestamp(),
@@ -351,6 +600,8 @@ export async function createTeam({ teamName, user }) {
     logoPath: '',
     logoUrl: '',
     name: trimmedName,
+    primaryLocation: '',
+    requestedClubSlug: '',
     slug: teamSlug,
     status: 'active',
     updatedAt: serverTimestamp(),
@@ -407,9 +658,11 @@ export async function joinTeamByCode({ code, user }) {
     throw new Error('Enter a join code first.');
   }
 
-  const club = await ensureClub();
-  const teamsRef = collection(db, 'clubs', club.id, 'teams');
-  const teamQuery = query(teamsRef, where('joinCode', '==', normalizedCode), limit(1));
+  const teamQuery = query(
+    collectionGroup(db, 'teams'),
+    where('joinCode', '==', normalizedCode),
+    limit(1),
+  );
   const teamSnapshot = await getDocs(teamQuery);
 
   if (teamSnapshot.empty) {
@@ -418,16 +671,18 @@ export async function joinTeamByCode({ code, user }) {
 
   const teamDoc = teamSnapshot.docs[0];
   const team = teamDoc.data();
-  const membershipRef = doc(db, 'clubs', club.id, 'teams', team.slug, 'members', user.uid);
+  const teamClubSlug = team.clubId ?? teamDoc.ref.parent.parent?.id ?? INDEPENDENT_CLUB.id;
+  const teamSlug = team.slug ?? teamDoc.id;
+  const membershipRef = doc(db, 'clubs', teamClubSlug, 'teams', teamSlug, 'members', user.uid);
   const existingMemberships = await listMemberships(user.uid).catch(() => []);
   const existingMembership =
     existingMemberships.find(
-      (membership) => membership.clubSlug === club.slug && membership.teamSlug === team.slug,
+      (membership) => membership.clubSlug === teamClubSlug && membership.teamSlug === teamSlug,
     ) ?? null;
   const nextRole = existingMembership?.role ?? 'member';
   const playerId = await ensurePlayerProfile({
-    clubId: club.id,
-    teamId: team.slug,
+    clubId: teamClubSlug,
+    teamId: teamSlug,
     teamName: team.name,
     user,
   });
@@ -439,35 +694,35 @@ export async function joinTeamByCode({ code, user }) {
     });
   } else {
     await setDoc(membershipRef, {
-      clubId: club.id,
-      clubSlug: club.slug,
+      clubId: teamClubSlug,
+      clubSlug: teamClubSlug,
       joinedAt: serverTimestamp(),
       playerId,
       role: nextRole,
       status: 'active',
-      teamId: team.slug,
+      teamId: teamSlug,
       teamName: team.name,
-      teamSlug: team.slug,
+      teamSlug,
       uid: user.uid,
       updatedAt: serverTimestamp(),
     });
   }
 
   await syncMembershipSummary({
-    clubSlug: club.slug,
+    clubSlug: teamClubSlug,
     role: nextRole,
     teamName: team.name,
-    teamSlug: team.slug,
+    teamSlug,
     uid: user.uid,
   });
 
   await setLastActiveTeam({
-    clubSlug: club.slug,
-    teamSlug: team.slug,
+    clubSlug: teamClubSlug,
+    teamSlug,
     uid: user.uid,
   });
 
-  return { clubSlug: club.slug, teamSlug: team.slug };
+  return { clubSlug: teamClubSlug, teamSlug };
 }
 
 export async function listMemberships(uid) {
@@ -617,6 +872,7 @@ async function syncTeamNameReferences({ clubSlug, teamName, teamSlug }) {
 export async function updateTeamSettings({
   clubSlug,
   logoFile,
+  primaryLocation = '',
   status = 'active',
   teamName,
   teamSlug,
@@ -637,6 +893,7 @@ export async function updateTeamSettings({
   }
 
   const currentTeam = teamSnapshot.data();
+  const normalizedPrimaryLocation = primaryLocation.trim();
   let uploadedLogo = null;
 
   if (logoFile) {
@@ -651,6 +908,7 @@ export async function updateTeamSettings({
     logoPath: uploadedLogo?.logoPath ?? currentTeam.logoPath ?? '',
     logoUrl: uploadedLogo?.logoUrl ?? currentTeam.logoUrl ?? '',
     name: normalizedName,
+    primaryLocation: normalizedPrimaryLocation,
     status,
     updatedAt: serverTimestamp(),
   });
@@ -666,6 +924,219 @@ export async function updateTeamSettings({
       teamSlug,
     });
   }
+}
+
+export async function requestClubAffiliation({
+  clubSlug,
+  requestedClubSlug,
+  teamSlug,
+  user,
+}) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to request club affiliation.');
+  }
+
+  if (!requestedClubSlug || requestedClubSlug === INDEPENDENT_CLUB.slug) {
+    throw new Error('Choose a club to request affiliation.');
+  }
+
+  const [teamSnapshot, requestedClubSnapshot, membershipSnapshot] = await Promise.all([
+    getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug)),
+    getDoc(doc(db, 'clubs', requestedClubSlug)),
+    getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'members', user.uid)),
+  ]);
+
+  if (!teamSnapshot.exists()) {
+    throw new Error('That team could not be found.');
+  }
+
+  if (!requestedClubSnapshot.exists()) {
+    throw new Error('That club could not be found.');
+  }
+
+  const membership = membershipSnapshot.exists() ? membershipSnapshot.data() : null;
+
+  if (!['captain', 'coCaptain'].includes(membership?.role)) {
+    throw new Error('Only captains and co-captains can request club affiliation.');
+  }
+
+  const team = teamSnapshot.data();
+  const requestedClub = requestedClubSnapshot.data();
+  const requestId = `${clubSlug}_${teamSlug}`;
+  const requestRef = doc(db, 'clubs', requestedClubSlug, 'affiliationRequests', requestId);
+  const batch = writeBatch(db);
+
+  batch.set(requestRef, {
+    clubSlug: requestedClubSlug,
+    createdAt: serverTimestamp(),
+    captainUid: user.uid,
+    requestedClubName: requestedClub.name ?? requestedClubSlug,
+    requestedClubSlug,
+    reviewedAt: null,
+    reviewedBy: '',
+    status: 'pending',
+    teamClubSlug: clubSlug,
+    teamName: team.name ?? teamSlug,
+    teamSlug,
+    updatedAt: serverTimestamp(),
+  });
+
+  batch.update(teamSnapshot.ref, {
+    affiliationStatus: 'pending',
+    requestedClubSlug,
+    requestedClubName: requestedClub.name ?? requestedClubSlug,
+    updatedAt: serverTimestamp(),
+  });
+
+  await batch.commit();
+}
+
+function mapAffiliationRequest(snapshot) {
+  const data = snapshot.data();
+
+  return {
+    id: snapshot.id,
+    captainUid: data.captainUid ?? '',
+    clubSlug: data.clubSlug ?? data.requestedClubSlug ?? '',
+    createdAtMs: normalizeTimestampMs(data.createdAt),
+    requestedClubName: data.requestedClubName ?? data.requestedClubSlug ?? '',
+    requestedClubSlug: data.requestedClubSlug ?? data.clubSlug ?? '',
+    reviewedAtMs: normalizeTimestampMs(data.reviewedAt),
+    reviewedBy: data.reviewedBy ?? '',
+    status: data.status ?? 'pending',
+    teamClubSlug: data.teamClubSlug ?? '',
+    teamName: data.teamName ?? '',
+    teamSlug: data.teamSlug ?? '',
+  };
+}
+
+export async function listClubAffiliationRequests(userOrUid) {
+  requireDb();
+
+  const uid = typeof userOrUid === 'string' ? userOrUid : userOrUid?.uid;
+  const email = typeof userOrUid === 'string' ? '' : userOrUid?.email;
+
+  if (!uid) {
+    return [];
+  }
+
+  const platformAdmin = await isPlatformAdmin(uid, email);
+  let snapshots = [];
+  const managedClubs = await listManagedClubs(uid, email);
+
+  if (platformAdmin) {
+    const requestSnapshots = await Promise.all(
+      managedClubs.map((club) => getDocs(collection(db, 'clubs', club.slug, 'affiliationRequests'))),
+    );
+    snapshots = requestSnapshots.flatMap((snapshot) => snapshot.docs);
+  } else {
+    const requestSnapshots = await Promise.all(
+      managedClubs.map((club) => getDocs(collection(db, 'clubs', club.slug, 'affiliationRequests'))),
+    );
+    snapshots = requestSnapshots.flatMap((snapshot) => snapshot.docs);
+  }
+
+  const requests = snapshots.map(mapAffiliationRequest);
+  const reviewerUids = Array.from(
+    new Set(requests.map((request) => request.reviewedBy).filter(Boolean)),
+  );
+  const reviewerProfiles = await Promise.all(
+    reviewerUids.map(async (reviewerUid) => {
+      const profile = await getUserProfileData(reviewerUid).catch(() => null);
+
+      return [reviewerUid, profile];
+    }),
+  );
+  const reviewerMap = new Map(reviewerProfiles);
+
+  requests.forEach((request) => {
+    const reviewer = reviewerMap.get(request.reviewedBy);
+    request.reviewedByLabel =
+      reviewer?.displayName || reviewer?.email || (request.reviewedBy ? 'an admin' : '');
+  });
+
+  requests.sort((left, right) => {
+    if (left.status !== right.status) {
+      return left.status === 'pending' ? -1 : 1;
+    }
+
+    return right.createdAtMs - left.createdAtMs;
+  });
+
+  return requests;
+}
+
+export async function reviewClubAffiliationRequest({
+  request,
+  status,
+  user,
+}) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to review affiliation requests.');
+  }
+
+  if (!['approved', 'rejected'].includes(status)) {
+    throw new Error('Choose whether to approve or reject the request.');
+  }
+
+  const requestedClubSlug = request.requestedClubSlug || request.clubSlug;
+  const requestRef = doc(db, 'clubs', requestedClubSlug, 'affiliationRequests', request.id);
+  const teamRef = doc(db, 'clubs', request.teamClubSlug, 'teams', request.teamSlug);
+  const batch = writeBatch(db);
+  const approved = status === 'approved';
+
+  batch.update(requestRef, {
+    reviewedAt: serverTimestamp(),
+    reviewedBy: user.uid,
+    status,
+    updatedAt: serverTimestamp(),
+  });
+
+  batch.update(teamRef, {
+    affiliationStatus: status,
+    approvedAt: approved ? serverTimestamp() : deleteField(),
+    approvedBy: approved ? user.uid : deleteField(),
+    approvedClubSlug: approved ? requestedClubSlug : deleteField(),
+    requestedClubSlug: approved ? deleteField() : requestedClubSlug,
+    updatedAt: serverTimestamp(),
+  });
+
+  await batch.commit();
+}
+
+export async function listApprovedClubTeams(clubSlug) {
+  requireDb();
+
+  if (!clubSlug || clubSlug === INDEPENDENT_CLUB.slug) {
+    return [];
+  }
+
+  const teamsQuery = query(
+    collectionGroup(db, 'teams'),
+    where('affiliationStatus', '==', 'approved'),
+    where('approvedClubSlug', '==', clubSlug),
+  );
+  const snapshot = await getDocs(teamsQuery);
+  const teams = snapshot.docs.map((entry) => {
+    const data = entry.data();
+
+    return {
+      clubSlug: data.clubId ?? entry.ref.parent.parent?.id ?? '',
+      id: entry.id,
+      logoUrl: data.logoUrl ?? '',
+      name: data.name ?? entry.id,
+      primaryLocation: data.primaryLocation ?? '',
+      teamSlug: data.slug ?? entry.id,
+    };
+  });
+
+  teams.sort((left, right) => left.name.localeCompare(right.name));
+
+  return teams;
 }
 
 export async function rotateTeamJoinCode({ clubSlug, teamSlug }) {
@@ -842,9 +1313,12 @@ export async function savePlayer({
   playerId,
   skillLevel,
   teamSlug,
-  user,
 }) {
   requireDb();
+
+  if (!playerId) {
+    throw new Error('Players must join the team before their profile can be edited.');
+  }
 
   const trimmedFirstName = firstName.trim();
   const trimmedLastName = lastName.trim();
@@ -860,8 +1334,13 @@ export async function savePlayer({
     throw new Error('Choose a valid skill level from the list.');
   }
 
-  const nextPlayerId = playerId || slugify(fullName) || `player-${Date.now()}`;
-  const playerRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'players', nextPlayerId);
+  const playerRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'players', playerId);
+  const playerSnapshot = await getDoc(playerRef);
+
+  if (!playerSnapshot.exists()) {
+    throw new Error('That player could not be found.');
+  }
+
   const payload = {
     active,
     dupr: normalizeNullableNumber(dupr),
@@ -872,14 +1351,9 @@ export async function savePlayer({
     updatedAt: serverTimestamp(),
   };
 
-  if (!playerId) {
-    payload.createdAt = serverTimestamp();
-    payload.createdBy = user?.uid ?? '';
-  }
+  await updateDoc(playerRef, payload);
 
-  await setDoc(playerRef, payload, { merge: true });
-
-  return nextPlayerId;
+  return playerId;
 }
 
 export async function deletePlayer({ clubSlug, playerId, teamSlug }) {
