@@ -1,6 +1,6 @@
 # Running Locally
 
-The repo now contains a Vite + React app scaffold for the Blackhawk club rebuild.
+The repo now contains the Vite + React app for PKL Universe.
 
 ## Recommended
 
@@ -31,6 +31,12 @@ To verify the static build locally:
 npm run build
 ```
 
+If Windows has a file lock on `dist`, use a fresh output folder instead:
+
+```powershell
+npx vite build --outDir dist-pages-check
+```
+
 ## GitHub Pages path
 
 The rebuilt app is now set up to live at the site root for its own dedicated repo/domain.
@@ -40,6 +46,12 @@ If you later host it on GitHub Pages, the expected URL shape is the root site, f
 - `https://yourname.github.io/your-repo/`
 
 If you connect a custom domain, that custom domain becomes the primary app URL.
+
+## Deployment notes
+
+For the quickest repeatable GitHub Pages push flow, see:
+
+- `PUSHING-TO-GITHUB-PAGES.md`
 
 ## Legacy files
 

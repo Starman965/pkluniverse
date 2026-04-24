@@ -3411,6 +3411,39 @@ export function SettingsPage() {
     }
   }
 
+  async function handleCopyInviteLink() {
+    if (!team?.joinCode) {
+      setError('No join code is available yet.');
+      setMessage('');
+      return;
+    }
+
+    const inviteLink = `${window.location.origin}${window.location.pathname}#/join?code=${encodeURIComponent(team.joinCode)}`;
+
+    setError('');
+    setMessage('');
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(inviteLink);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = inviteLink;
+        textArea.setAttribute('readonly', '');
+        textArea.style.position = 'absolute';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+
+      setMessage('Invite link copied.');
+    } catch (copyError) {
+      setError(copyError.message ?? 'Unable to copy the invite link.');
+    }
+  }
+
   async function handleRoleChange(memberRecord, nextRole) {
     setUpdatingUid(memberRecord.uid);
     setError('');
@@ -3452,14 +3485,24 @@ export function SettingsPage() {
               <span>Current join code</span>
               <strong>{team?.joinCode ?? 'Not available yet'}</strong>
               {canManage ? (
-                <button
-                  className="button button--ghost settings-admin-join-action"
-                  disabled={rotating}
-                  onClick={handleRotateJoinCode}
-                  type="button"
-                >
-                  {rotating ? 'Rotating code...' : 'Rotate join code'}
-                </button>
+                <div className="settings-admin-join-actions">
+                  <button
+                    className="button button--ghost settings-admin-join-action"
+                    disabled={!team?.joinCode}
+                    onClick={handleCopyInviteLink}
+                    type="button"
+                  >
+                    Copy invite link
+                  </button>
+                  <button
+                    className="button button--ghost settings-admin-join-action"
+                    disabled={rotating}
+                    onClick={handleRotateJoinCode}
+                    type="button"
+                  >
+                    {rotating ? 'Rotating code...' : 'Rotate join code'}
+                  </button>
+                </div>
               ) : null}
             </div>
             <div className="detail-card">

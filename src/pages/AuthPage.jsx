@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { listMemberships } from '../lib/data';
+import { getUserProfileData, listMemberships } from '../lib/data';
+
+function buildTeamPath(membership) {
+  return `/c/${membership.clubSlug}/t/${membership.teamSlug}/news`;
+}
 
 export default function AuthPage() {
   const {
@@ -22,31 +26,50 @@ export default function AuthPage() {
       return;
     }
 
-    if (location.state?.from?.pathname) {
-      navigate(location.state.from.pathname, { replace: true });
+    if (location.state?.from) {
+      navigate(location.state.from, { replace: true });
       return;
     }
 
     let cancelled = false;
 
-    listMemberships(user.uid)
-      .then((items) => {
+    Promise.all([listMemberships(user.uid), getUserProfileData(user.uid).catch(() => null)])
+      .then(([items, userProfile]) => {
         if (cancelled) {
           return;
         }
 
-        if (items.length > 0) {
-          setRedirectMessage('Signed in. Redirecting to your teams...');
+        if (items.length === 1) {
+          setRedirectMessage('Signed in. Opening your team...');
+          navigate(buildTeamPath(items[0]), { replace: true });
+          return;
+        }
+
+        const lastActiveMembership =
+          items.find(
+            (membership) =>
+              membership.clubSlug === userProfile?.lastActiveClubId &&
+              membership.teamSlug === userProfile?.lastActiveTeamId,
+          ) ?? null;
+
+        if (lastActiveMembership) {
+          setRedirectMessage('Signed in. Returning you to your last team...');
+          navigate(buildTeamPath(lastActiveMembership), { replace: true });
+          return;
+        }
+
+        if (items.length > 1) {
+          setRedirectMessage('Signed in. Opening your teams...');
           navigate('/teams', { replace: true });
           return;
         }
 
-        setRedirectMessage('Signed in. Redirecting to onboarding...');
+        setRedirectMessage('Signed in. Choose whether to join or create a team.');
         navigate('/onboarding', { replace: true });
       })
       .catch(() => {
         if (!cancelled) {
-          navigate('/onboarding', { replace: true });
+          navigate('/teams', { replace: true });
         }
       });
 
@@ -63,31 +86,20 @@ export default function AuthPage() {
     }
   }
 
+  async function handleSignOut() {
+    await signOutUser();
+    navigate('/', { replace: true });
+  }
+
   return (
     <div className="auth-page">
       <section className="card auth-card">
         <div className="auth-card__intro">
-          <p className="eyebrow">Welcome back</p>
-          <h1>Sign in to PKL Universe</h1>
+          <p className="eyebrow">Login</p>
+          <h1>Log in with Google</h1>
           <p className="auth-card__copy">
-            Sign in with Google to create a team, join with a captain&apos;s code, or get back to the
-            teams you already belong to.
+            Use Google Sign-in to access your team.
           </p>
-        </div>
-
-        <div className="auth-card__benefits">
-          <div className="auth-card__benefit">
-            <strong>Create Team</strong>
-            <span>Start a new team and become its captain.</span>
-          </div>
-          <div className="auth-card__benefit">
-            <strong>Join Team</strong>
-            <span>Use a join code from your captain to get access.</span>
-          </div>
-          <div className="auth-card__benefit">
-            <strong>Return to your teams</strong>
-            <span>Jump back into the teams you already manage or play on.</span>
-          </div>
         </div>
 
         {!isFirebaseConfigured && (
@@ -112,15 +124,15 @@ export default function AuthPage() {
             onClick={handleSignIn}
             type="button"
           >
-            {loading ? 'Checking sign-in...' : 'Continue with Google'}
+            {loading ? 'Checking sign-in...' : 'Log in with Google'}
           </button>
 
           <Link className="button button--ghost" to="/">
-            Back to website
+            Back to home
           </Link>
 
           {isAuthenticated ? (
-            <button className="button button--ghost" onClick={signOutUser} type="button">
+            <button className="button button--ghost" onClick={handleSignOut} type="button">
               Sign out
             </button>
           ) : null}

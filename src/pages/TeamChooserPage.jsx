@@ -1,7 +1,26 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { listMemberships } from '../lib/data';
+import { getTeam, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
+import pklUniverseLogo from '../../pkl_universe_logo.png';
+
+function buildCaptainLabel(members, players) {
+  const playerMap = new Map(players.map((player) => [player.id, player]));
+  const captainNames = members
+    .filter((member) => member.role === 'captain' || member.role === 'coCaptain')
+    .map((member) => playerMap.get(member.playerId)?.fullName)
+    .filter(Boolean);
+
+  if (!captainNames.length) {
+    return 'Captain: TBD';
+  }
+
+  if (captainNames.length === 1) {
+    return `Captain: ${captainNames[0]}`;
+  }
+
+  return `Captains: ${captainNames.join(', ')}`;
+}
 
 export default function TeamChooserPage() {
   const { isFirebaseConfigured, user } = useAuth();
@@ -19,9 +38,33 @@ export default function TeamChooserPage() {
     let cancelled = false;
 
     listMemberships(user.uid)
-      .then((items) => {
+      .then(async (items) => {
+        const enrichedItems = await Promise.all(
+          items.map(async (membership) => {
+            try {
+              const [team, members, players] = await Promise.all([
+                getTeam(membership.clubSlug, membership.teamSlug),
+                listTeamMembers(membership.clubSlug, membership.teamSlug),
+                listPlayers(membership.clubSlug, membership.teamSlug),
+              ]);
+
+              return {
+                ...membership,
+                captainLabel: buildCaptainLabel(members, players),
+                logoUrl: team?.logoUrl || '',
+              };
+            } catch {
+              return {
+                ...membership,
+                captainLabel: 'Captain: TBD',
+                logoUrl: '',
+              };
+            }
+          }),
+        );
+
         if (!cancelled) {
-          setMemberships(items);
+          setMemberships(enrichedItems);
         }
       })
       .catch((error) => {
@@ -50,8 +93,7 @@ export default function TeamChooserPage() {
         <p className="eyebrow">Your teams</p>
         <h1>Choose a team</h1>
         <p>
-          Welcome back. Pick the team you want to open, or join another team if the one you need
-          is not listed here yet.
+          Welcome back. Click on the team below you wish to access.
         </p>
 
         {errorMessage ? <div className="notice notice--error">{errorMessage}</div> : null}
@@ -68,21 +110,27 @@ export default function TeamChooserPage() {
                 className="membership-card"
                 to={`/c/${membership.clubSlug}/t/${membership.teamSlug}/news`}
               >
-                <strong>{membership.teamName}</strong>
-                <span>
-                  {membership.clubSlug} · {membership.role}
-                </span>
+                <img
+                  alt={`${membership.teamName} logo`}
+                  className="membership-card__logo"
+                  src={membership.logoUrl || pklUniverseLogo}
+                />
+                <div className="membership-card__content">
+                  <strong>{membership.teamName}</strong>
+                  <span>{membership.captainLabel}</span>
+                </div>
               </Link>
             ))}
           </div>
         )}
 
-        <div className="hero__actions">
-          <Link className="button button--ghost" to="/onboarding?mode=join">
-            Team not listed? Join Team
-          </Link>
-        </div>
       </section>
+
+      <div className="team-entry__footer">
+        <Link className="button button--ghost" to="/">
+          Return to Home
+        </Link>
+      </div>
     </div>
   );
 }

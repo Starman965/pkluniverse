@@ -13,16 +13,16 @@ export default function LandingPage() {
         <div className="hero__overlay" />
 
         <div className="hero__top-nav">
-          <Link className="hero__top-link" to="/onboarding?mode=create">
-            Create A Team
+          <Link className="hero__top-link" to="/teams">
+            Log In
           </Link>
           <span className="hero__top-separator">|</span>
-          <Link className="hero__top-link" to="/onboarding?mode=join">
+          <Link className="hero__top-link" to="/join">
             Join A Team
           </Link>
           <span className="hero__top-separator">|</span>
-          <Link className="hero__top-link" to="/auth">
-            Log In Now
+          <Link className="hero__top-link" to="/create">
+            Create A Team
           </Link>
         </div>
 
@@ -46,31 +46,31 @@ export default function LandingPage() {
       <section className="marketing-section">
         <div className="marketing-section__header">
           <p className="eyebrow">Get started</p>
-          <h2>Choose the path that fits you</h2>
+          <h2>How would you like to get started?</h2>
         </div>
 
         <div className="marketing-action-grid">
-          <Link className="marketing-action-card" to="/onboarding?mode=create">
-            <img alt="Create a team" className="marketing-action-card__image" src={createTeamImage} />
+          <Link className="marketing-action-card" to="/teams">
+            <img alt="Login to PKL Universe" className="marketing-action-card__image" src={loginNowImage} />
             <div className="marketing-action-card__body">
-              <strong>Create Team</strong>
-              <span>Set up your team, become the captain, and get your first join code.</span>
+              <strong>Log In</strong>
+              <span>Already on a team? Get back in quickly and open the team you need.</span>
             </div>
           </Link>
 
-          <Link className="marketing-action-card" to="/onboarding?mode=join">
+          <Link className="marketing-action-card" to="/join">
             <img alt="Join a team" className="marketing-action-card__image" src={joinTeamImage} />
             <div className="marketing-action-card__body">
               <strong>Join Team</strong>
-              <span>Enter the captain&apos;s code and get connected to the team you want to play on.</span>
+              <span>Have a code from your captain? Join the right team without hunting through setup steps.</span>
             </div>
           </Link>
 
-          <Link className="marketing-action-card" to="/auth">
-            <img alt="Login to PKL Universe" className="marketing-action-card__image" src={loginNowImage} />
+          <Link className="marketing-action-card" to="/create">
+            <img alt="Create a team" className="marketing-action-card__image" src={createTeamImage} />
             <div className="marketing-action-card__body">
-              <strong>Login</strong>
-              <span>Return to your teams, switch between them, and pick up where you left off.</span>
+              <strong>Create Team</strong>
+              <span>Starting a new team? Set it up, become captain, and share your first join code.</span>
             </div>
           </Link>
         </div>

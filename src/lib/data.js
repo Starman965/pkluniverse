@@ -196,6 +196,37 @@ export async function syncUserProfile(user) {
   );
 }
 
+export async function getUserProfileData(uid) {
+  requireDb();
+
+  if (!uid) {
+    return null;
+  }
+
+  const userRef = doc(db, 'users', uid);
+  const snapshot = await getDoc(userRef);
+
+  return snapshot.exists() ? snapshot.data() : null;
+}
+
+export async function setLastActiveTeam({ clubSlug, teamSlug, uid }) {
+  requireDb();
+
+  if (!uid || !clubSlug || !teamSlug) {
+    return;
+  }
+
+  await setDoc(
+    doc(db, 'users', uid),
+    {
+      lastActiveClubId: clubSlug,
+      lastActiveTeamId: teamSlug,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
 export async function ensureClub() {
   requireDb();
 
@@ -354,15 +385,11 @@ export async function createTeam({ teamName, user }) {
     uid: user.uid,
   });
 
-  await setDoc(
-    doc(db, 'users', user.uid),
-    {
-      lastActiveClubId: club.id,
-      lastActiveTeamId: teamSlug,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
+  await setLastActiveTeam({
+    clubSlug: club.slug,
+    teamSlug,
+    uid: user.uid,
+  });
 
   return { clubSlug: club.slug, joinCode, teamSlug };
 }
@@ -434,15 +461,11 @@ export async function joinTeamByCode({ code, user }) {
     uid: user.uid,
   });
 
-  await setDoc(
-    doc(db, 'users', user.uid),
-    {
-      lastActiveClubId: club.id,
-      lastActiveTeamId: team.slug,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
+  await setLastActiveTeam({
+    clubSlug: club.slug,
+    teamSlug: team.slug,
+    uid: user.uid,
+  });
 
   return { clubSlug: club.slug, teamSlug: team.slug };
 }

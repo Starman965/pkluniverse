@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { NavLink, Outlet, useParams } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getMembership, getTeam, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
+import {
+  getMembership,
+  getTeam,
+  listMemberships,
+  listPlayers,
+  listTeamMembers,
+  setLastActiveTeam,
+} from '../lib/data';
 import pklUniverseLogo from '../../pkl_universe_logo.png';
 import pklUniverseWideLogo from '../../pkl_universe_wide_logo.png';
 
@@ -36,6 +43,7 @@ function formatClubLabel(clubSlug) {
 
 export default function AppShell() {
   const { signOutUser, user } = useAuth();
+  const navigate = useNavigate();
   const { clubSlug, teamSlug } = useParams();
   const [memberships, setMemberships] = useState([]);
   const [membershipError, setMembershipError] = useState('');
@@ -150,6 +158,25 @@ export default function AppShell() {
   const captainLabel = captainName ? `Captain: ${captainName}` : 'Captain: TBD';
   const signedInLabel = canManage ? 'Signed In: Captain' : 'Signed In: Player';
 
+  useEffect(() => {
+    if (!user?.uid || !clubSlug || !teamSlug || !currentMembership) {
+      return;
+    }
+
+    setLastActiveTeam({
+      clubSlug,
+      teamSlug,
+      uid: user.uid,
+    }).catch(() => {
+      // Last-active tracking should not interrupt team navigation.
+    });
+  }, [clubSlug, currentMembership, teamSlug, user?.uid]);
+
+  async function handleSignOut() {
+    await signOutUser();
+    navigate('/', { replace: true });
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -196,31 +223,6 @@ export default function AppShell() {
           ) : null}
         </nav>
 
-        {memberships.length > 1 ? (
-          <div className="sidebar__section">
-            <p className="sidebar__label">Your teams</p>
-            <div className="team-switcher">
-              {memberships.map((membership) => {
-                const active =
-                  membership.clubSlug === clubSlug && membership.teamSlug === teamSlug;
-
-                return (
-                  <NavLink
-                    key={`${membership.clubSlug}-${membership.teamSlug}`}
-                    className={`team-pill ${active ? 'team-pill--active' : ''}`}
-                    to={`/c/${membership.clubSlug}/t/${membership.teamSlug}/news`}
-                  >
-                    <strong>{membership.teamName}</strong>
-                    <span className="team-pill__meta">
-                      {membership.clubSlug} · {membership.role}
-                    </span>
-                  </NavLink>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-
         {membershipError ? (
           <p className="sidebar__empty">
             Team list is still syncing. Refresh after your Firestore index finishes building.
@@ -231,13 +233,13 @@ export default function AppShell() {
           <p className="sidebar__footer-title">{signedInLabel}</p>
           <strong>{user?.displayName ?? user?.email}</strong>
           <div className="sidebar__footer-actions">
-            {memberships.length > 1 ? (
+            {memberships.length > 0 ? (
               <NavLink className="sidebar__footer-link" to="/teams">
                 My Teams
               </NavLink>
             ) : null}
           </div>
-          <button className="sidebar__signout" onClick={signOutUser} type="button">
+          <button className="sidebar__signout" onClick={handleSignOut} type="button">
             Sign out
           </button>
         </div>

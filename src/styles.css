@@ -479,11 +479,30 @@ ul {
 .membership-card,
 .detail-card {
   display: grid;
-  gap: 0.2rem;
   border-radius: 16px;
   border: 1px solid rgba(126, 161, 255, 0.18);
   background: rgba(255, 255, 255, 0.04);
   padding: 1rem;
+}
+
+.membership-card {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.membership-card__logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: #fff;
+  object-fit: cover;
+  padding: 0.24rem;
+}
+
+.membership-card__content {
+  display: grid;
+  gap: 0.2rem;
 }
 
 .membership-card span,
@@ -1069,6 +1088,96 @@ ul {
   border-color: rgba(197, 159, 63, 0.34);
   color: #f0c14b;
   box-shadow: inset 0 0 0 1px rgba(255, 209, 102, 0.08);
+}
+
+.onboarding-flow {
+  width: 100%;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(340px, 1.18fr) minmax(320px, 400px);
+  align-items: stretch;
+}
+
+.team-entry__intro {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.team-entry__intro h1,
+.team-entry__intro p {
+  margin: 0;
+}
+
+.team-entry__description {
+  max-width: none;
+}
+
+.onboarding-card {
+  gap: 0.85rem;
+}
+
+.onboarding-card--visual {
+  padding: 0;
+  overflow: hidden;
+  min-height: 100%;
+  border-radius: 22px;
+}
+
+.onboarding-card__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  object-fit: cover;
+}
+
+.onboarding-card__image--join {
+  object-position: left center;
+}
+
+.onboarding-card__image--create {
+  object-position: center;
+}
+
+.team-entry__form {
+  align-content: start;
+  gap: 1.1rem;
+}
+
+.team-entry__form h2,
+.team-entry__form p {
+  margin: 0;
+}
+
+.team-entry__form-copy {
+  max-width: 40ch;
+  color: #d7e2f0;
+  line-height: 1.6;
+}
+
+.onboarding-card__hint {
+  margin: 0;
+  color: #9fb6d8;
+  font-size: 0.95rem;
+}
+
+.team-entry__chooser-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 0.5rem;
+}
+
+.team-entry__footer {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.onboarding-card--neutral {
+  max-width: 420px;
 }
 
 .availability-card__summary {
@@ -1664,10 +1773,16 @@ ul {
   grid-column: 1 / 2;
 }
 
-.settings-admin-join-action {
+.settings-admin-join-actions {
   grid-column: 2 / 3;
   grid-row: 1 / span 2;
+  display: grid;
+  gap: 0.75rem;
   align-self: center;
+}
+
+.settings-admin-join-action {
+  width: 100%;
 }
 
 .settings-admin-logo-preview {
@@ -1910,18 +2025,16 @@ ul {
 }
 
 .sidebar__header {
-  gap: 0.75rem;
-}
-
-.sidebar__app-brand,
-.sidebar__team-card {
-  border-radius: 20px;
-  border: 1px solid rgba(126, 161, 255, 0.16);
+  gap: 0.2rem;
 }
 
 .sidebar__app-brand {
-  padding: 0.6rem 0.8rem;
-  background: linear-gradient(180deg, rgba(15, 24, 39, 0.9) 0%, rgba(10, 18, 30, 0.94) 100%);
+  padding: 0 0.2rem 0;
+}
+
+.sidebar__team-card {
+  border-radius: 20px;
+  border: 1px solid rgba(126, 161, 255, 0.16);
 }
 
 .sidebar__app-logo {
@@ -2132,6 +2245,10 @@ code {
 @media (max-width: 900px) {
   .hero,
   .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-flow {
     grid-template-columns: 1fr;
   }
 

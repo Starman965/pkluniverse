@@ -3,6 +3,8 @@ import AppShell from './components/AppShell';
 import ProtectedRoute from './components/ProtectedRoute';
 import LandingPage from './pages/LandingPage';
 import AuthPage from './pages/AuthPage';
+import CreateTeamPage from './pages/CreateTeamPage';
+import JoinTeamPage from './pages/JoinTeamPage';
 import OnboardingPage from './pages/OnboardingPage';
 import TeamChooserPage from './pages/TeamChooserPage';
 import {
@@ -24,6 +26,8 @@ export default function App() {
     <Routes>
       <Route element={<LandingPage />} path="/" />
       <Route element={<AuthPage />} path="/auth" />
+      <Route element={<CreateTeamPage />} path="/create" />
+      <Route element={<JoinTeamPage />} path="/join" />
       <Route element={<OnboardingPage />} path="/onboarding" />
       <Route
         element={
