@@ -1,0 +1,22 @@
+{
+  "name": "PKL Universe",
+  "short_name": "PKL Universe",
+  "description": "Build, join, and manage pickleball teams.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#050814",
+  "theme_color": "#101827",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
