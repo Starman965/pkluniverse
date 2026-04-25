@@ -19,14 +19,23 @@ service firebase.storage {
         && firestore.get(memberPath(clubId, teamId)).data.role in roles;
     }
 
+    function isPlatformAdmin() {
+      return signedIn() && request.auth.token.email in ['demandgendave@gmail.com'];
+    }
+
     match /clubs/{clubId}/teams/{teamId}/news/{postId}/{fileName} {
       allow read: if isTeamMember(clubId, teamId);
-      allow write: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+      allow write: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']) || isPlatformAdmin();
     }
 
     match /clubs/{clubId}/teams/{teamId}/branding/{fileName} {
       allow read: if isTeamMember(clubId, teamId);
-      allow write: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']);
+      allow write: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']) || isPlatformAdmin();
+    }
+
+    match /clubs/{clubId}/branding/{fileName} {
+      allow read: if true;
+      allow write: if isPlatformAdmin();
     }
 
     match /{allPaths=**} {

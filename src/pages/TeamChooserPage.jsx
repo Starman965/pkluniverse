@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getTeam, isPlatformAdmin, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
+import { getTeam, isPlatformAdmin, listClubs, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
 import defaultTeamLogo from '../../default_team_logo.png';
 
 function buildCaptainLabel(members, players) {
@@ -20,6 +20,20 @@ function buildCaptainLabel(members, players) {
   }
 
   return `Captains: ${captainNames.join(', ')}`;
+}
+
+function buildClubLabel(team, clubNameBySlug) {
+  if (team?.affiliationStatus === 'approved' && team.approvedClubSlug) {
+    return `Club: ${clubNameBySlug.get(team.approvedClubSlug) ?? team.approvedClubSlug}`;
+  }
+
+  return 'Club: Independent';
+}
+
+function buildMemberCountLabel(members) {
+  const memberCount = members.length;
+
+  return `Members: ${memberCount}`;
 }
 
 export default function TeamChooserPage() {
@@ -51,6 +65,10 @@ export default function TeamChooserPage() {
 
     listMemberships(user.uid)
       .then(async (items) => {
+        const clubs = await listClubs({ includeIndependent: true }).catch(() => []);
+        const clubNameBySlug = new Map(
+          clubs.map((club) => [club.slug, club.slug === 'independent' ? 'Independent' : club.name]),
+        );
         const enrichedItems = await Promise.all(
           items.map(async (membership) => {
             try {
@@ -63,13 +81,17 @@ export default function TeamChooserPage() {
               return {
                 ...membership,
                 captainLabel: buildCaptainLabel(members, players),
+                clubLabel: buildClubLabel(team, clubNameBySlug),
                 logoUrl: team?.logoUrl || '',
+                memberCountLabel: buildMemberCountLabel(members),
               };
             } catch {
               return {
                 ...membership,
                 captainLabel: 'Captain: TBD',
+                clubLabel: 'Club: Independent',
                 logoUrl: '',
+                memberCountLabel: 'Members: 0',
               };
             }
           }),
@@ -103,10 +125,10 @@ export default function TeamChooserPage() {
     <div className="auth-page">
       <section className="card auth-card team-chooser">
         <p className="eyebrow">Your teams</p>
-        <h1>Choose a team</h1>
-        <p>
-          Welcome back. Click on the team below you wish to access.
-        </p>
+        <div className="team-chooser__intro">
+          <h1>Choose a team</h1>
+          <p>Welcome back. Click on the team below you wish to access.</p>
+        </div>
 
         {errorMessage ? <div className="notice notice--error">{errorMessage}</div> : null}
 
@@ -130,6 +152,8 @@ export default function TeamChooserPage() {
                 <div className="membership-card__content">
                   <strong>{membership.teamName}</strong>
                   <span>{membership.captainLabel}</span>
+                  <span>{membership.clubLabel}</span>
+                  <span>{membership.memberCountLabel}</span>
                 </div>
               </Link>
             ))}

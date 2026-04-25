@@ -1,9 +1,11 @@
 import { Link } from 'react-router-dom';
+import clubDirectoryImage from '../../club_directory.png';
 import createTeamImage from '../../create_team.png';
 import heroShot from '../../hero_shot.png';
 import joinTeamImage from '../../join_team.png';
 import loginNowImage from '../../login_now.png';
 import pklUniverseWideLogo from '../../pkl_universe_wide_logo.png';
+import teamDirectoryImage from '../../team_directory.png';
 
 export default function LandingPage() {
   return (
@@ -49,8 +51,10 @@ export default function LandingPage() {
 
       <section className="marketing-section">
         <div className="marketing-section__header">
-          <p className="eyebrow">Get started</p>
-          <h2>How would you like to get started?</h2>
+          <div>
+            <p className="eyebrow">Get started</p>
+            <h2>How would you like to get started?</h2>
+          </div>
         </div>
 
         <div className="marketing-action-grid">
@@ -75,6 +79,22 @@ export default function LandingPage() {
             <div className="marketing-action-card__body">
               <strong>Create Team</strong>
               <span>Starting a new team? Set it up, become captain, and share your first join code.</span>
+            </div>
+          </Link>
+
+          <Link className="marketing-action-card" to="/team-directory">
+            <img alt="Browse the team directory" className="marketing-action-card__image" src={teamDirectoryImage} />
+            <div className="marketing-action-card__body">
+              <strong>Team Directory</strong>
+              <span>Browse teams by club, captain, member count, and location.</span>
+            </div>
+          </Link>
+
+          <Link className="marketing-action-card" to="/club-directory">
+            <img alt="Browse the club directory" className="marketing-action-card__image" src={clubDirectoryImage} />
+            <div className="marketing-action-card__body">
+              <strong>Club Directory</strong>
+              <span>Explore approved clubs and see how many teams are active in each network.</span>
             </div>
           </Link>
         </div>

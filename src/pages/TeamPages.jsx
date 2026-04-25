@@ -1,25 +1,35 @@
 import { useEffect, useMemo, useState } from 'react';
 import Cropper from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   PLAYER_SKILL_LEVELS,
+  acceptChallenge,
   buildPairingSummary,
   buildStandingsSummary,
+  cancelChallenge,
   createClub,
+  createChallenge,
   deleteClub,
+  deleteChallengeAsAdmin,
   deleteGame,
   deleteNewsPost,
+  deleteTeamAsAdmin,
+  declineChallenge,
   getMembership,
   getTeam,
+  isPlatformAdmin,
   listAdminTeamSummaries,
+  listAdminChallenges,
   listApprovedClubTeams,
+  listClubChallenges,
   listClubAffiliationRequests,
   listClubs,
   listGames,
   listNewsPosts,
   listPlayers,
+  listTeamChallenges,
   listTeamMembers,
   requestClubAffiliation,
   renameClub,
@@ -63,6 +73,8 @@ function buildResultDrafts(games) {
 }
 
 function createScheduleAdminDraft(game) {
+  const timeLabel = (game.timeLabel ?? '').replace(':undefined', ':00');
+
   return {
     dateTbd: game.dateTbd === true,
     isoDate: game.isoDate ?? '',
@@ -71,7 +83,7 @@ function createScheduleAdminDraft(game) {
     opponent: game.opponent ?? '',
     opponentScore: game.opponentScore ?? '',
     teamScore: game.teamScore ?? '',
-    timeLabel: game.dateTbd === true || game.timeLabel === 'Time TBD' ? '' : game.timeLabel ?? '',
+    timeLabel: game.dateTbd === true || timeLabel === 'Time TBD' ? '' : timeLabel,
   };
 }
 
@@ -92,6 +104,20 @@ function createEmptyScheduleAdminForm(primaryLocation = 'Blackhawk Country Club'
     opponentScore: '',
     teamScore: '',
     timeLabel: '',
+  };
+}
+
+function createEmptyChallengeForm(primaryLocation = '') {
+  return {
+    dateTbd: false,
+    hour: '',
+    isoDate: '',
+    location: primaryLocation,
+    minute: '00',
+    notes: '',
+    period: 'PM',
+    targetTeamKey: '',
+    visibility: 'open',
   };
 }
 
@@ -479,6 +505,19 @@ function createEmptyTeamSettingsForm(teamName = '', primaryLocation = '') {
   };
 }
 
+function createEmptyClubForm(club = {}) {
+  return {
+    address: club.address ?? '',
+    city: club.city ?? '',
+    clubName: club.name ?? '',
+    logoFile: null,
+    logoPreviewUrl: '',
+    numberOfCourts: club.numberOfCourts ?? '',
+    state: club.state ?? '',
+    zip: club.zip ?? '',
+  };
+}
+
 function createEmptyRosterForm() {
   return {
     active: true,
@@ -788,6 +827,7 @@ export function TeamMembersPage() {
           <p>No players are on the team yet.</p>
         )}
       </section>
+
     </div>
   );
 }
@@ -802,6 +842,7 @@ export function RosterPage() {
   const [updatingPlayerId, setUpdatingPlayerId] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [editForm, setEditForm] = useState(createEmptyRosterForm());
 
   const canManage = canManageRole(membership?.role);
@@ -829,9 +870,16 @@ export function RosterPage() {
   }
 
   useEffect(() => {
-    loadRosterData().catch((loadError) => {
-      setError(loadError.message ?? 'Unable to load the roster yet.');
-    });
+    setLoading(true);
+    setError('');
+
+    loadRosterData()
+      .catch((loadError) => {
+        setError(loadError.message ?? 'Unable to load the roster yet.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [clubSlug, teamSlug, user?.uid]);
 
   useEffect(() => {
@@ -1053,12 +1101,12 @@ export function RosterPage() {
               )}
             </section>
           </>
-        ) : (
+        ) : !loading ? (
           <div className="notice notice--info">
             Captains and co-captains can edit player profiles. Your current role is{' '}
             <strong>{membership?.role ?? 'member'}</strong>.
           </div>
-        )}
+        ) : null}
       </section>
     </div>
   );
@@ -1171,6 +1219,7 @@ export function SchedulePage() {
           <p>{activeTab === 'past' ? 'No past matchups yet.' : 'No upcoming matchups yet.'}</p>
         )}
       </section>
+
     </div>
   );
 }
@@ -1187,6 +1236,7 @@ export function ScheduleScoresPage() {
   const [selectedGameId, setSelectedGameId] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(createEmptyScheduleAdminForm());
   const [teamPrimaryLocation, setTeamPrimaryLocation] = useState('Blackhawk Country Club');
 
@@ -1220,9 +1270,16 @@ export function ScheduleScoresPage() {
   }
 
   useEffect(() => {
-    loadScheduleData().catch((loadError) => {
-      setError(loadError.message ?? 'Unable to load matchups yet.');
-    });
+    setLoading(true);
+    setError('');
+
+    loadScheduleData()
+      .catch((loadError) => {
+        setError(loadError.message ?? 'Unable to load matchups yet.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [clubSlug, teamSlug, todayDateKey, user?.uid]);
 
   const selectedGameIndex = Math.max(
@@ -1362,7 +1419,7 @@ export function ScheduleScoresPage() {
         {error ? <div className="notice notice--error">{error}</div> : null}
         {message ? <div className="notice notice--success">{message}</div> : null}
 
-        {!canManage ? (
+        {!loading && !canManage ? (
           <div className="notice notice--info">
             Captains and co-captains manage the schedule. Your current role is{' '}
             <strong>{membership?.role ?? 'member'}</strong>.
@@ -1566,7 +1623,7 @@ export function ScheduleScoresPage() {
                     />
                     <span>Date and time TBD</span>
                   </label>
-                  <label className="field">
+                  <label className="field challenge-form__location">
                     <span>Location</span>
                     <input
                       onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
@@ -2283,6 +2340,7 @@ export function AvailabilityPage() {
   const [selectedGameId, setSelectedGameId] = useState('');
   const [updatingGameId, setUpdatingGameId] = useState('');
   const [viewMode, setViewMode] = useState('per-game');
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
@@ -2325,9 +2383,16 @@ export function AvailabilityPage() {
   }
 
   useEffect(() => {
-    loadAvailabilityData().catch((loadError) => {
-      setError(loadError.message ?? 'Unable to load availability yet.');
-    });
+    setLoading(true);
+    setError('');
+
+    loadAvailabilityData()
+      .catch((loadError) => {
+        setError(loadError.message ?? 'Unable to load availability yet.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [clubSlug, teamSlug, todayDateKey, user?.uid]);
 
   const selectedGameIndex = Math.max(
@@ -2382,7 +2447,7 @@ export function AvailabilityPage() {
 
         {error ? <div className="notice notice--error">{error}</div> : null}
 
-        {!membership?.playerId ? (
+        {!loading && !membership?.playerId ? (
           <div className="notice notice--warning">
             Your account is not linked to a player record for this team yet.
           </div>
@@ -2823,6 +2888,7 @@ export function NewsroomPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(true);
   const [editingPostId, setEditingPostId] = useState('');
   const [form, setForm] = useState(createEmptyNewsForm());
 
@@ -2871,9 +2937,16 @@ export function NewsroomPage() {
   }
 
   useEffect(() => {
-    loadNewsData().catch((loadError) => {
-      setError(loadError.message ?? 'Unable to load the newsroom yet.');
-    });
+    setLoading(true);
+    setError('');
+
+    loadNewsData()
+      .catch((loadError) => {
+        setError(loadError.message ?? 'Unable to load the newsroom yet.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [clubSlug, teamSlug, user?.uid]);
 
   function resetForm() {
@@ -3005,12 +3078,12 @@ export function NewsroomPage() {
               </div>
             </div>
           </div>
-        ) : (
+        ) : !loading ? (
           <div className="notice notice--info">
             Captains and co-captains can publish or edit team news. Your current role is{' '}
             <strong>{membership?.role ?? 'member'}</strong>.
           </div>
-        )}
+        ) : null}
       </section>
 
       <section className="card">
@@ -3136,6 +3209,582 @@ export function NewsroomPage() {
           </aside>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function formatChallengeDate(challenge) {
+  if (challenge.dateTbd || !challenge.isoDate) {
+    return 'Date TBD';
+  }
+
+  return challenge.isoDate;
+}
+
+function formatChallengeTime(challenge) {
+  const normalizedTime = (challenge.timeLabel ?? '').replace(':undefined', ':00');
+
+  return challenge.dateTbd ? 'Time TBD' : normalizedTime || 'Time TBD';
+}
+
+function buildChallengeTimeLabel(form) {
+  if (form.dateTbd || !form.hour) {
+    return '';
+  }
+
+  return `${form.hour}:${form.minute} ${form.period}`;
+}
+
+function getChallengeStatusLabel(challenge) {
+  if (challenge.status === 'accepted') {
+    return 'Accepted';
+  }
+
+  if (challenge.status === 'declined') {
+    return 'Declined';
+  }
+
+  if (challenge.status === 'cancelled') {
+    return 'Cancelled';
+  }
+
+  return challenge.visibility === 'targeted' ? 'Targeted' : 'Open';
+}
+
+export function ChallengesPage() {
+  const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
+  const [team, setTeam] = useState(null);
+  const [membership, setMembership] = useState(null);
+  const [eligibleTeams, setEligibleTeams] = useState([]);
+  const [clubChallenges, setClubChallenges] = useState([]);
+  const [teamChallenges, setTeamChallenges] = useState([]);
+  const [form, setForm] = useState(createEmptyChallengeForm());
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [updatingChallengeId, setUpdatingChallengeId] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const canManage = canManageRole(membership?.role);
+  const challengeClubSlug =
+    team?.affiliationStatus === 'approved' && team?.approvedClubSlug ? team.approvedClubSlug : '';
+  const selectedTargetTeam = eligibleTeams.find(
+    (eligibleTeam) => `${eligibleTeam.clubSlug}:${eligibleTeam.teamSlug}` === form.targetTeamKey,
+  );
+
+  async function loadChallengeData() {
+    const [teamData, membershipData] = await Promise.all([
+      getTeam(clubSlug, teamSlug),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
+    ]);
+    const approvedClubSlug =
+      teamData?.affiliationStatus === 'approved' && teamData?.approvedClubSlug ? teamData.approvedClubSlug : '';
+
+    setTeam(teamData);
+    setMembership(membershipData);
+    setForm((current) => ({
+      ...current,
+      location:
+        !current.location || current.location === 'Location TBD'
+          ? teamData?.primaryLocation || ''
+          : current.location,
+    }));
+
+    if (!approvedClubSlug) {
+      setEligibleTeams([]);
+      setClubChallenges([]);
+      setTeamChallenges([]);
+      return;
+    }
+
+    const [approvedTeams, openChallenges, relevantChallenges] = await Promise.all([
+      listApprovedClubTeams(approvedClubSlug).catch(() => []),
+      listClubChallenges(approvedClubSlug).catch(() => []),
+      listTeamChallenges({ challengeClubSlug: approvedClubSlug, clubSlug, teamSlug }).catch(() => []),
+    ]);
+
+    setEligibleTeams(
+      approvedTeams.filter((approvedTeam) => approvedTeam.clubSlug !== clubSlug || approvedTeam.teamSlug !== teamSlug),
+    );
+    setClubChallenges(
+      openChallenges.filter(
+        (challenge) => challenge.createdByTeamClubSlug !== clubSlug || challenge.createdByTeamSlug !== teamSlug,
+      ),
+    );
+    setTeamChallenges(relevantChallenges);
+  }
+
+  useEffect(() => {
+    let ignore = false;
+
+    setLoading(true);
+    loadChallengeData()
+      .catch((loadError) => {
+        if (!ignore) {
+          setError(loadError.message ?? 'Unable to load challenges yet.');
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [clubSlug, teamSlug, user?.uid]);
+
+  async function handleCreateChallenge(event) {
+    event.preventDefault();
+
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await createChallenge({
+        clubSlug,
+        dateTbd: form.dateTbd,
+        isoDate: form.isoDate,
+        location: form.location,
+        notes: form.notes,
+        targetTeam: form.visibility === 'targeted' ? selectedTargetTeam : null,
+        teamSlug,
+        timeLabel: buildChallengeTimeLabel(form),
+        user,
+        visibility: form.visibility,
+      });
+      setForm(createEmptyChallengeForm(team?.primaryLocation ?? ''));
+      setMessage('Challenge posted.');
+      await loadChallengeData();
+    } catch (submitError) {
+      setError(submitError.message ?? 'Unable to post that challenge.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleAcceptChallenge(challenge) {
+    setUpdatingChallengeId(challenge.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await acceptChallenge({
+        challengeClubSlug: challenge.challengeClubSlug,
+        challengeId: challenge.id,
+        clubSlug,
+        teamSlug,
+        user,
+      });
+      setMessage('Challenge accepted and added to both schedules.');
+      await loadChallengeData();
+    } catch (acceptError) {
+      setError(acceptError.message ?? 'Unable to accept that challenge.');
+    } finally {
+      setUpdatingChallengeId('');
+    }
+  }
+
+  async function handleDeclineChallenge(challenge) {
+    setUpdatingChallengeId(challenge.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await declineChallenge({
+        challengeClubSlug: challenge.challengeClubSlug,
+        challengeId: challenge.id,
+        clubSlug,
+        teamSlug,
+        user,
+      });
+      setMessage('Challenge declined.');
+      await loadChallengeData();
+    } catch (declineError) {
+      setError(declineError.message ?? 'Unable to decline that challenge.');
+    } finally {
+      setUpdatingChallengeId('');
+    }
+  }
+
+  async function handleCancelChallenge(challenge) {
+    setUpdatingChallengeId(challenge.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await cancelChallenge({
+        challengeClubSlug: challenge.challengeClubSlug,
+        challengeId: challenge.id,
+        clubSlug,
+        teamSlug,
+        user,
+      });
+      setMessage('Challenge cancelled.');
+      await loadChallengeData();
+    } catch (cancelError) {
+      setError(cancelError.message ?? 'Unable to cancel that challenge.');
+    } finally {
+      setUpdatingChallengeId('');
+    }
+  }
+
+  function renderChallengeCard(challenge, actions = null) {
+    const targetLabel =
+      challenge.visibility === 'targeted'
+        ? `To ${challenge.targetTeamName || challenge.targetTeamSlug}`
+        : 'Open to club teams';
+    const scheduleGameId =
+      challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug
+        ? challenge.homeGameId
+        : challenge.awayGameId;
+
+    return (
+      <article key={challenge.id} className="challenge-card">
+        <div className="challenge-card__badge">CH</div>
+        <div className="challenge-card__body">
+          <div className="challenge-card__header">
+            <div className="challenge-card__title">
+              <strong>{challenge.createdByTeamName || challenge.createdByTeamSlug}</strong>
+              <span>{targetLabel}</span>
+            </div>
+            <span className="status-badge">{getChallengeStatusLabel(challenge)}</span>
+          </div>
+
+          <div className="challenge-card__details">
+            <span>Date: {formatChallengeDate(challenge)}</span>
+            <span>Time: {formatChallengeTime(challenge)}</span>
+            <span>Location: {challenge.location || 'Location TBD'}</span>
+            {challenge.status === 'accepted' && scheduleGameId ? (
+              <span>Schedule matchup created</span>
+            ) : null}
+          </div>
+          {challenge.notes ? <p className="challenge-card__notes">{challenge.notes}</p> : null}
+          {actions || (challenge.status === 'accepted' && scheduleGameId) ? (
+            <div className="challenge-card__actions">
+              {challenge.status === 'accepted' && scheduleGameId ? (
+                <Link className="button button--ghost" to="../schedule">
+                  View schedule
+                </Link>
+              ) : null}
+              {actions}
+            </div>
+          ) : null}
+        </div>
+      </article>
+    );
+  }
+
+  const incomingChallenges = teamChallenges.filter(
+    (challenge) =>
+      challenge.status === 'open' &&
+      challenge.visibility === 'targeted' &&
+      challenge.targetTeamClubSlug === clubSlug &&
+      challenge.targetTeamSlug === teamSlug,
+  );
+  const postedChallenges = teamChallenges.filter(
+    (challenge) => challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug,
+  );
+  const acceptedHistoryChallenges = teamChallenges.filter(
+    (challenge) =>
+      challenge.status === 'accepted' &&
+      !(
+        challenge.createdByTeamClubSlug === clubSlug &&
+        challenge.createdByTeamSlug === teamSlug
+      ),
+  );
+
+  return (
+    <div className="page-grid schedule-admin-page">
+      <section className="card">
+        <p className="eyebrow">Challenges</p>
+        <h1>Team challenges</h1>
+        <p>
+          Post an open challenge for your club or send one directly to another approved team.
+          Accepted challenges become scheduled matchups for both teams.
+        </p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
+
+        {loading ? (
+          <div className="state-panel">
+            <p>Loading challenges...</p>
+          </div>
+        ) : !challengeClubSlug ? (
+          <div className="notice notice--info">
+            Challenges are available after this team is approved for a club affiliation.
+          </div>
+        ) : (
+          <div className="challenge-page">
+            {canManage ? (
+              <section className="schedule-admin-card">
+                <div className="schedule-admin-card__header">
+                  <div>
+                    <p className="eyebrow">Create</p>
+                    <h2>Post a challenge</h2>
+                    <p>Create an open club challenge or target another club team.</p>
+                  </div>
+                </div>
+
+                <form
+                  className={`schedule-admin-form challenge-form challenge-form--${form.visibility}`}
+                  onSubmit={handleCreateChallenge}
+                >
+                  <label className="field challenge-form__type">
+                    <span>Challenge type</span>
+                    <select
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          targetTeamKey: event.target.value === 'open' ? '' : current.targetTeamKey,
+                          visibility: event.target.value,
+                        }))
+                      }
+                      value={form.visibility}
+                    >
+                      <option value="open">Open</option>
+                      <option value="targeted">Targeted</option>
+                    </select>
+                  </label>
+                  {form.visibility === 'targeted' ? (
+                    <div className="field challenge-form__target">
+                      <label>
+                        <span>Challenge team</span>
+                        <select
+                          onChange={(event) => setForm((current) => ({ ...current, targetTeamKey: event.target.value }))}
+                          value={form.targetTeamKey}
+                        >
+                          <option value="">Choose team</option>
+                          {eligibleTeams.map((eligibleTeam) => (
+                            <option
+                              key={`${eligibleTeam.clubSlug}:${eligibleTeam.teamSlug}`}
+                              value={`${eligibleTeam.clubSlug}:${eligibleTeam.teamSlug}`}
+                            >
+                              {eligibleTeam.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {eligibleTeams.length === 0 ? (
+                        <span className="field-hint">No other approved teams are available in this club yet.</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <label className="field challenge-form__date">
+                    <span>Date</span>
+                    <input
+                      disabled={form.dateTbd}
+                      onChange={(event) => setForm((current) => ({ ...current, isoDate: event.target.value }))}
+                      type="date"
+                      value={form.isoDate}
+                    />
+                  </label>
+                  <div className="field challenge-form__time">
+                    <span>Time</span>
+                    <div className="challenge-time-selectors">
+                      <select
+                        disabled={form.dateTbd}
+                        onChange={(event) => setForm((current) => ({ ...current, hour: event.target.value }))}
+                        value={form.hour}
+                      >
+                        <option value="">Hour</option>
+                        {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((hour) => (
+                          <option key={hour} value={hour}>
+                            {hour}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        disabled={form.dateTbd}
+                        onChange={(event) => setForm((current) => ({ ...current, minute: event.target.value }))}
+                        value={form.minute}
+                      >
+                        {['00', '15', '30', '45'].map((minute) => (
+                          <option key={minute} value={minute}>
+                            {minute}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        disabled={form.dateTbd}
+                        onChange={(event) => setForm((current) => ({ ...current, period: event.target.value }))}
+                        value={form.period}
+                      >
+                        <option value="AM">AM</option>
+                        <option value="PM">PM</option>
+                      </select>
+                    </div>
+                  </div>
+                  <label className="checkbox-field challenge-form__tbd">
+                    <input
+                      checked={form.dateTbd}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          dateTbd: event.target.checked,
+                          hour: event.target.checked ? '' : current.hour,
+                          isoDate: event.target.checked ? '' : current.isoDate,
+                          minute: event.target.checked ? '00' : current.minute,
+                          period: event.target.checked ? 'PM' : current.period,
+                        }))
+                      }
+                      type="checkbox"
+                    />
+                    <span>Date and time TBD</span>
+                  </label>
+                  <label className="field">
+                    <span>Location</span>
+                    <input
+                      onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
+                      placeholder="Location TBD"
+                      value={form.location}
+                    />
+                  </label>
+                  <label className="field challenge-form__notes">
+                    <span>Notes</span>
+                    <textarea
+                      onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+                      placeholder="Optional details for the other captain"
+                      value={form.notes}
+                    />
+                  </label>
+                  <button className="button challenge-form__submit" disabled={saving} type="submit">
+                    {saving ? 'Posting challenge...' : 'Post challenge'}
+                  </button>
+                </form>
+              </section>
+            ) : (
+              <div className="notice notice--info">
+                Captains and co-captains can create or respond to challenges.
+              </div>
+            )}
+
+            <section className="schedule-admin-card">
+              <div className="schedule-admin-card__header">
+                <div>
+                  <p className="eyebrow">Directory</p>
+                  <h2>Open club challenges</h2>
+                  <p>Accept an open challenge from another approved team in this club.</p>
+                </div>
+              </div>
+              {clubChallenges.length > 0 ? (
+                <div className="challenge-grid">
+                  {clubChallenges.map((challenge) =>
+                    renderChallengeCard(
+                      challenge,
+                      canManage ? (
+                        <button
+                          className="button"
+                          disabled={updatingChallengeId === challenge.id}
+                          onClick={() => handleAcceptChallenge(challenge)}
+                          type="button"
+                        >
+                          {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept challenge'}
+                        </button>
+                      ) : null,
+                    ),
+                  )}
+                </div>
+              ) : (
+                <div className="notice notice--info">No open club challenges are available.</div>
+              )}
+            </section>
+
+            <section className="schedule-admin-card">
+              <div className="schedule-admin-card__header">
+                <div>
+                  <p className="eyebrow">Inbox</p>
+                  <h2>Challenges sent to us</h2>
+                  <p>Respond to direct challenges from other captains.</p>
+                </div>
+              </div>
+              {incomingChallenges.length > 0 ? (
+                <div className="challenge-grid">
+                  {incomingChallenges.map((challenge) =>
+                    renderChallengeCard(
+                      challenge,
+                      canManage ? (
+                        <>
+                          <button
+                            className="button"
+                            disabled={updatingChallengeId === challenge.id}
+                            onClick={() => handleAcceptChallenge(challenge)}
+                            type="button"
+                          >
+                            {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept'}
+                          </button>
+                          <button
+                            className="button button--ghost"
+                            disabled={updatingChallengeId === challenge.id}
+                            onClick={() => handleDeclineChallenge(challenge)}
+                            type="button"
+                          >
+                            Decline
+                          </button>
+                        </>
+                      ) : null,
+                    ),
+                  )}
+                </div>
+              ) : (
+                <div className="notice notice--info">No direct challenges are waiting for this team.</div>
+              )}
+            </section>
+
+            <section className="schedule-admin-card">
+              <div className="schedule-admin-card__header">
+                <div>
+                  <p className="eyebrow">Posted</p>
+                  <h2>Our challenges</h2>
+                  <p>Track challenges this team has posted.</p>
+                </div>
+              </div>
+              {postedChallenges.length > 0 ? (
+                <div className="challenge-grid">
+                  {postedChallenges.map((challenge) =>
+                    renderChallengeCard(
+                      challenge,
+                      canManage && challenge.status === 'open' ? (
+                        <button
+                          className="button button--ghost"
+                          disabled={updatingChallengeId === challenge.id}
+                          onClick={() => handleCancelChallenge(challenge)}
+                          type="button"
+                        >
+                          {updatingChallengeId === challenge.id ? 'Cancelling...' : 'Cancel challenge'}
+                        </button>
+                      ) : null,
+                    ),
+                  )}
+                </div>
+              ) : (
+                <div className="notice notice--info">This team has not posted any challenges yet.</div>
+              )}
+            </section>
+
+            <section className="schedule-admin-card">
+              <div className="schedule-admin-card__header">
+                <div>
+                  <p className="eyebrow">History</p>
+                  <h2>Accepted challenges</h2>
+                  <p>Accepted challenges involving this team are listed here after they become schedule matchups.</p>
+                </div>
+              </div>
+              {acceptedHistoryChallenges.length > 0 ? (
+                <div className="challenge-grid">
+                  {acceptedHistoryChallenges.map((challenge) => renderChallengeCard(challenge))}
+                </div>
+              ) : (
+                <div className="notice notice--info">No accepted challenge history yet.</div>
+              )}
+            </section>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -3613,47 +4262,58 @@ export function SettingsPage() {
                   memberRecord.uid !== user?.uid;
 
                 return (
-                  <div key={memberRecord.uid} className="entity-card entity-card--column">
-                    <div className="member-admin__header">
-                      <div>
-                        <strong>{displayName}</strong>
-                        <span>{secondary}</span>
+                  <div key={memberRecord.uid} className="member-role-card">
+                    <div className="member-role-card__avatar">{buildPlayerInitials(displayName)}</div>
+                    <div className="member-role-card__body">
+                      <div className="member-admin__header">
+                        <div className="member-role-card__identity">
+                          <strong>{displayName}</strong>
+                          <span>{secondary}</span>
+                        </div>
+                        <span className="status-badge">{formatRoleLabel(memberRecord.role)}</span>
                       </div>
-                      <span className="status-badge">{formatRoleLabel(memberRecord.role)}</span>
-                    </div>
 
-                    {canEdit ? (
-                      <div className="choice-row">
-                        <button
-                          className={`choice-button ${memberRecord.role === 'member' ? 'choice-button--active' : ''}`}
-                          disabled={updatingUid === memberRecord.uid}
-                          onClick={() => handleRoleChange(memberRecord, 'member')}
-                          type="button"
-                        >
-                          {updatingUid === memberRecord.uid && memberRecord.role === 'coCaptain'
-                            ? 'Saving...'
-                            : 'Member'}
-                        </button>
-                        <button
-                          className={`choice-button ${memberRecord.role === 'coCaptain' ? 'choice-button--active' : ''}`}
-                          disabled={updatingUid === memberRecord.uid}
-                          onClick={() => handleRoleChange(memberRecord, 'coCaptain')}
-                          type="button"
-                        >
-                          {updatingUid === memberRecord.uid && memberRecord.role === 'member'
-                            ? 'Saving...'
-                            : 'Co-captain'}
-                        </button>
-                      </div>
-                    ) : (
-                      <span>
+                      <p className="member-role-card__description">
                         {memberRecord.role === 'captain'
-                          ? 'Captain role changes are not enabled yet.'
-                          : canManageMembership
-                            ? 'You cannot change your own role here.'
-                            : 'Only the captain can change team roles right now.'}
-                      </span>
-                    )}
+                          ? 'Primary team owner with full captain controls.'
+                          : memberRecord.role === 'coCaptain'
+                            ? 'Can help manage roster, schedule, player info, news, settings, and challenges.'
+                            : 'Standard player access for team pages, availability, schedule, news, and standings.'}
+                      </p>
+
+                      {canEdit ? (
+                        <div className="member-role-card__actions" aria-label={`Change role for ${displayName}`}>
+                          <button
+                            className={`choice-button ${memberRecord.role === 'member' ? 'choice-button--active' : ''}`}
+                            disabled={updatingUid === memberRecord.uid}
+                            onClick={() => handleRoleChange(memberRecord, 'member')}
+                            type="button"
+                          >
+                            {updatingUid === memberRecord.uid && memberRecord.role === 'coCaptain'
+                              ? 'Saving...'
+                              : 'Member'}
+                          </button>
+                          <button
+                            className={`choice-button ${memberRecord.role === 'coCaptain' ? 'choice-button--active' : ''}`}
+                            disabled={updatingUid === memberRecord.uid}
+                            onClick={() => handleRoleChange(memberRecord, 'coCaptain')}
+                            type="button"
+                          >
+                            {updatingUid === memberRecord.uid && memberRecord.role === 'member'
+                              ? 'Saving...'
+                              : 'Co-captain'}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="member-role-card__locked">
+                          {memberRecord.role === 'captain'
+                            ? 'Captain role is locked.'
+                            : canManageMembership
+                              ? 'You cannot change your own role here.'
+                              : 'Only the captain can change team roles.'}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -3729,27 +4389,44 @@ export function SettingsPage() {
 }
 
 export function ClubAffiliationAdminPage() {
-  const { signOutUser, user } = useAuth();
+  const { loading: authLoading, signOutUser, user } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
   const [clubs, setClubs] = useState([]);
-  const [clubName, setClubName] = useState('');
+  const [clubForm, setClubForm] = useState(createEmptyClubForm());
   const [clubDrafts, setClubDrafts] = useState({});
   const [requests, setRequests] = useState([]);
   const [adminTeams, setAdminTeams] = useState([]);
+  const [adminChallenges, setAdminChallenges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creatingClub, setCreatingClub] = useState(false);
   const [updatingClubSlug, setUpdatingClubSlug] = useState('');
+  const [deletingChallengeId, setDeletingChallengeId] = useState('');
+  const [deletingTeamId, setDeletingTeamId] = useState('');
   const [updatingRequestId, setUpdatingRequestId] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [adminSection, setAdminSection] = useState('teams');
-  const isBootstrapSuperAdmin = user?.email?.toLowerCase() === 'demandgendave@gmail.com';
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [clubCropTarget, setClubCropTarget] = useState(null);
+  const [clubCropImageSrc, setClubCropImageSrc] = useState('');
+  const [clubCropFileName, setClubCropFileName] = useState('club-logo.png');
+  const [clubCrop, setClubCrop] = useState({ x: 0, y: 0 });
+  const [clubZoom, setClubZoom] = useState(1);
+  const [clubCropPixels, setClubCropPixels] = useState(null);
+  const [creatingClubCrop, setCreatingClubCrop] = useState(false);
 
   async function loadAdminData() {
+    if (authLoading) {
+      setLoading(true);
+      return;
+    }
+
     if (!user?.uid) {
       setClubs([]);
       setRequests([]);
       setAdminTeams([]);
+      setAdminChallenges([]);
       setLoading(false);
       return;
     }
@@ -3758,21 +4435,36 @@ export function ClubAffiliationAdminPage() {
     setError('');
 
     try {
-      const [clubData, requestData, teamData] = await Promise.all([
+      const platformAdmin = await isPlatformAdmin(user.uid, user.email);
+
+      if (!platformAdmin) {
+        setIsAuthorized(false);
+        setClubs([]);
+        setRequests([]);
+        setAdminTeams([]);
+        setAdminChallenges([]);
+        setError('');
+        return;
+      }
+
+      setIsAuthorized(true);
+      const [clubData, requestData, teamData, challengeData] = await Promise.all([
         listClubs(),
         listClubAffiliationRequests(user),
         listAdminTeamSummaries(user),
+        listAdminChallenges(user),
       ]);
 
       setClubs(clubData);
       setClubDrafts(
         clubData.reduce((drafts, club) => {
-          drafts[club.slug] = club.name;
+          drafts[club.slug] = createEmptyClubForm(club);
           return drafts;
         }, {}),
       );
       setRequests(requestData);
       setAdminTeams(teamData);
+      setAdminChallenges(challengeData);
     } catch (loadError) {
       setError(loadError.message ?? 'Unable to load admin data.');
     } finally {
@@ -3782,7 +4474,110 @@ export function ClubAffiliationAdminPage() {
 
   useEffect(() => {
     loadAdminData();
-  }, [user?.uid]);
+  }, [authLoading, user?.uid]);
+
+  const clubSummaries = useMemo(
+    () =>
+      clubs.map((club) => {
+        const approvedTeamCount = adminTeams.filter((teamSummary) => teamSummary.approvedClubSlug === club.slug).length;
+        const pendingRequestCount = requests.filter(
+          (request) => request.requestedClubSlug === club.slug && request.status === 'pending',
+        ).length;
+
+        return {
+          ...club,
+          approvedTeamCount,
+          pendingRequestCount,
+        };
+      }),
+    [adminTeams, clubs, requests],
+  );
+
+  function clearClubCropper() {
+    setClubCropTarget(null);
+    setClubCropImageSrc('');
+    setClubCropFileName('club-logo.png');
+    setClubCrop({ x: 0, y: 0 });
+    setClubZoom(1);
+    setClubCropPixels(null);
+    setCreatingClubCrop(false);
+  }
+
+  function revokeClubPreview(previewUrl) {
+    if (previewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(previewUrl);
+    }
+  }
+
+  function updateClubDraft(clubSlug, updater) {
+    setClubDrafts((current) => {
+      const currentDraft = current[clubSlug] ?? createEmptyClubForm(clubs.find((club) => club.slug === clubSlug));
+
+      return {
+        ...current,
+        [clubSlug]: updater(currentDraft),
+      };
+    });
+  }
+
+  async function handleClubLogoSelection(target, event) {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    setError('');
+    setMessage('');
+
+    try {
+      const nextCropSource = await readFileAsDataUrl(file);
+      setClubCropTarget(target);
+      setClubCropImageSrc(nextCropSource);
+      setClubCropFileName(file.name || 'club-logo.png');
+      setClubCrop({ x: 0, y: 0 });
+      setClubZoom(1);
+      setClubCropPixels(null);
+    } catch (selectionError) {
+      setError(selectionError.message ?? 'That logo file could not be read as an image.');
+    }
+  }
+
+  async function handleApplyClubLogoCrop() {
+    if (!clubCropTarget || !clubCropImageSrc || !clubCropPixels) {
+      setError('Move and zoom the logo before applying the crop.');
+      return;
+    }
+
+    setCreatingClubCrop(true);
+    setError('');
+    setMessage('');
+
+    try {
+      const croppedFile = await createCroppedLogoFile(clubCropImageSrc, clubCropPixels, clubCropFileName);
+      const previewUrl = URL.createObjectURL(croppedFile);
+
+      if (clubCropTarget === 'create') {
+        setClubForm((current) => {
+          revokeClubPreview(current.logoPreviewUrl);
+          return { ...current, logoFile: croppedFile, logoPreviewUrl: previewUrl };
+        });
+      } else {
+        updateClubDraft(clubCropTarget, (current) => {
+          revokeClubPreview(current.logoPreviewUrl);
+          return { ...current, logoFile: croppedFile, logoPreviewUrl: previewUrl };
+        });
+      }
+
+      clearClubCropper();
+      setMessage('Club logo crop ready. Save the club to publish it.');
+    } catch (cropError) {
+      setError(cropError.message ?? 'Unable to crop that logo.');
+    } finally {
+      setCreatingClubCrop(false);
+    }
+  }
 
   async function handleCreateClub(event) {
     event.preventDefault();
@@ -3791,8 +4586,9 @@ export function ClubAffiliationAdminPage() {
     setMessage('');
 
     try {
-      const club = await createClub({ clubName, user });
-      setClubName('');
+      const club = await createClub({ ...clubForm, user });
+      revokeClubPreview(clubForm.logoPreviewUrl);
+      setClubForm(createEmptyClubForm());
       setMessage(`${club.name} created.`);
       await loadAdminData();
     } catch (createError) {
@@ -3809,11 +4605,12 @@ export function ClubAffiliationAdminPage() {
 
     try {
       await renameClub({
-        clubName: clubDrafts[club.slug] ?? club.name,
+        ...(clubDrafts[club.slug] ?? createEmptyClubForm(club)),
         clubSlug: club.slug,
         user,
       });
-      setMessage(`${clubDrafts[club.slug] ?? club.name} renamed.`);
+      revokeClubPreview(clubDrafts[club.slug]?.logoPreviewUrl);
+      setMessage(`${clubDrafts[club.slug]?.clubName ?? club.name} updated.`);
       await loadAdminData();
     } catch (renameError) {
       setError(renameError.message ?? 'Unable to rename that club.');
@@ -3869,9 +4666,97 @@ export function ClubAffiliationAdminPage() {
     }
   }
 
+  async function handleDeleteChallenge(challenge) {
+    const confirmed = window.confirm(
+      `Delete challenge from ${challenge.createdByTeamName || challenge.createdByTeamSlug}? Accepted challenge schedule matchups will also be removed.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingChallengeId(challenge.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await deleteChallengeAsAdmin({
+        challengeClubSlug: challenge.challengeClubSlug,
+        challengeId: challenge.id,
+        user,
+      });
+      setMessage('Challenge deleted.');
+      await loadAdminData();
+    } catch (deleteError) {
+      setError(deleteError.message ?? 'Unable to delete that challenge.');
+    } finally {
+      setDeletingChallengeId('');
+    }
+  }
+
+  async function handleDeleteTeam(teamSummary) {
+    const confirmed = window.confirm(
+      `Delete ${teamSummary.name}? This removes the team, roster, players, news, team-owned schedule, membership links, affiliation requests, and challenges involving this team. Other teams' saved matchups against this team will stay.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const deleteKey = `${teamSummary.clubSlug}-${teamSummary.teamSlug}`;
+    setDeletingTeamId(deleteKey);
+    setError('');
+    setMessage('');
+
+    try {
+      await deleteTeamAsAdmin({
+        clubSlug: teamSummary.clubSlug,
+        teamSlug: teamSummary.teamSlug,
+        user,
+      });
+      setMessage(`${teamSummary.name} deleted.`);
+      await loadAdminData();
+    } catch (deleteError) {
+      setError(deleteError.message ?? 'Unable to delete that team.');
+    } finally {
+      setDeletingTeamId('');
+    }
+  }
+
   async function handleSignOut() {
     await signOutUser();
     navigate('/', { replace: true });
+  }
+
+  if (!loading && !isAuthorized) {
+    const isSignedIn = Boolean(user?.uid);
+
+    return (
+      <div className="auth-page">
+        <section className="card auth-card">
+          <p className="eyebrow">App admin</p>
+          <h1>{isSignedIn ? 'Admin access required' : 'Log in required'}</h1>
+          <p>
+            {isSignedIn
+              ? 'Only the PKL Universe app admin can access this area.'
+              : 'Log in with the app admin Google account to access this area.'}
+          </p>
+          <div className="team-entry__footer">
+            {!isSignedIn ? (
+              <Link className="button" state={{ from: location }} to="/auth">
+                Log in
+              </Link>
+            ) : null}
+            <Link className="button button--ghost" to="/teams">
+              My Teams
+            </Link>
+            <Link className="button button--ghost" to="/">
+              Home
+            </Link>
+          </div>
+        </section>
+      </div>
+    );
   }
 
   return (
@@ -3882,9 +4767,6 @@ export function ClubAffiliationAdminPage() {
         <p className="admin-sidebar__copy">
           Signed in as <strong>{user?.email ?? user?.displayName ?? 'Unknown user'}</strong>
         </p>
-        <span className="status-badge">
-          {isBootstrapSuperAdmin ? 'Bootstrap super admin' : 'Admin access checked by Firebase'}
-        </span>
         <nav className="sidebar__nav">
           <div className="sidebar__nav-group">
             <button
@@ -3900,6 +4782,13 @@ export function ClubAffiliationAdminPage() {
               type="button"
             >
               Clubs
+            </button>
+            <button
+              className={`nav-link admin-nav-button ${adminSection === 'tools' ? 'nav-link--active' : ''}`}
+              onClick={() => setAdminSection('tools')}
+              type="button"
+            >
+              Challenges
             </button>
           </div>
         </nav>
@@ -3918,11 +4807,19 @@ export function ClubAffiliationAdminPage() {
 
       <section className="card auth-card">
         <p className="eyebrow">App admin</p>
-        <h1>{adminSection === 'teams' ? 'Teams' : 'Clubs'}</h1>
+        <h1>
+          {adminSection === 'teams'
+            ? 'Teams'
+            : adminSection === 'clubs'
+              ? 'Clubs'
+              : 'Challenges'}
+        </h1>
         <p>
           {adminSection === 'teams'
             ? 'Review each team, its club affiliation, captains, and member count.'
-            : 'Create clubs, manage club names, and review teams requesting club affiliation.'}
+            : adminSection === 'clubs'
+              ? 'Create clubs, manage club names, and review teams requesting club affiliation.'
+              : 'Review and clean up challenge records.'}
         </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -3945,43 +4842,59 @@ export function ClubAffiliationAdminPage() {
             ) : adminTeams.length > 0 ? (
               <div className="team-admin-grid">
                 {adminTeams.map((teamSummary) => (
-                  <article
-                    key={`${teamSummary.clubSlug}-${teamSummary.teamSlug}`}
-                    className="entity-card entity-card--column"
-                  >
-                    <div className="member-admin__header">
-                      <div>
-                        <strong>{teamSummary.name}</strong>
-                        <span>
-                          Stored under {teamSummary.clubName} ({teamSummary.clubSlug})
-                        </span>
+                  <article key={`${teamSummary.clubSlug}-${teamSummary.teamSlug}`} className="admin-team-card">
+                    <img
+                      alt={`${teamSummary.name} logo`}
+                      className="admin-team-card__logo"
+                      src={teamSummary.logoUrl || defaultTeamLogo}
+                    />
+                    <div className="admin-team-card__content">
+                      <div className="admin-team-card__header">
+                        <div className="admin-team-card__title">
+                          <strong>{teamSummary.name}</strong>
+                          <span>
+                            Stored under {teamSummary.clubName} ({teamSummary.clubSlug})
+                          </span>
+                        </div>
+                        <span className="status-badge">{teamSummary.affiliationStatus}</span>
                       </div>
-                      <span className="status-badge">{teamSummary.affiliationStatus}</span>
+                      <span>
+                        Club affiliation:{' '}
+                        {teamSummary.approvedClubSlug
+                          ? teamSummary.approvedClubSlug
+                          : teamSummary.requestedClubSlug
+                            ? `Requested ${teamSummary.requestedClubSlug}`
+                            : 'Independent'}
+                      </span>
+                      <span>
+                        Captains:{' '}
+                        {teamSummary.captainNames.length
+                          ? teamSummary.captainNames.join(', ')
+                          : 'TBD'}
+                      </span>
+                      <span>Members: {teamSummary.memberCount}</span>
+                      {teamSummary.primaryLocation ? (
+                        <span>Primary location: {teamSummary.primaryLocation}</span>
+                      ) : null}
+                      <div className="admin-team-card__actions">
+                        <Link
+                          className="button button--ghost"
+                          to={`/c/${teamSummary.clubSlug}/t/${teamSummary.teamSlug}/settings`}
+                        >
+                          Open team settings
+                        </Link>
+                        <button
+                          className="button button--danger"
+                          disabled={deletingTeamId === `${teamSummary.clubSlug}-${teamSummary.teamSlug}`}
+                          onClick={() => handleDeleteTeam(teamSummary)}
+                          type="button"
+                        >
+                          {deletingTeamId === `${teamSummary.clubSlug}-${teamSummary.teamSlug}`
+                            ? 'Deleting team...'
+                            : 'Delete team'}
+                        </button>
+                      </div>
                     </div>
-                    <span>
-                      Club affiliation:{' '}
-                      {teamSummary.approvedClubSlug
-                        ? teamSummary.approvedClubSlug
-                        : teamSummary.requestedClubSlug
-                          ? `Requested ${teamSummary.requestedClubSlug}`
-                          : 'Independent'}
-                    </span>
-                    <span>
-                      Captains:{' '}
-                      {teamSummary.captainNames.length
-                        ? teamSummary.captainNames.join(', ')
-                        : 'TBD'}
-                    </span>
-                    <span>Members: {teamSummary.memberCount}</span>
-                    {teamSummary.primaryLocation ? (
-                      <span>Primary location: {teamSummary.primaryLocation}</span>
-                    ) : null}
-                    <Link
-                      className="button button--ghost"
-                      to={`/c/${teamSummary.clubSlug}/t/${teamSummary.teamSlug}/settings`}
-                    >
-                      Open team settings
-                    </Link>
                   </article>
                 ))}
               </div>
@@ -3989,7 +4902,7 @@ export function ClubAffiliationAdminPage() {
               <div className="notice notice--info">No teams have been created yet.</div>
             )}
           </section>
-        ) : (
+        ) : adminSection === 'clubs' ? (
           <>
             <section className="schedule-admin-card">
               <div className="schedule-admin-card__header">
@@ -4004,9 +4917,68 @@ export function ClubAffiliationAdminPage() {
                 <label className="field">
                   <span>Club name</span>
                   <input
-                    onChange={(event) => setClubName(event.target.value)}
-                    placeholder="Blackhawk Country Club"
-                    value={clubName}
+                    onChange={(event) => setClubForm((current) => ({ ...current, clubName: event.target.value }))}
+                    placeholder="Enter Club Name"
+                    value={clubForm.clubName}
+                  />
+                </label>
+                <label className="field">
+                  <span>Club logo</span>
+                  <div className="club-logo-field">
+                    {clubForm.logoPreviewUrl ? (
+                      <img alt="Club logo preview" className="club-admin-card__logo" src={clubForm.logoPreviewUrl} />
+                    ) : (
+                      <div className="club-admin-card__badge">{buildPlayerInitials(clubForm.clubName || 'Club')}</div>
+                    )}
+                    <input
+                      accept="image/*"
+                      onChange={(event) => handleClubLogoSelection('create', event)}
+                      type="file"
+                    />
+                  </div>
+                </label>
+                <label className="field">
+                  <span>Address</span>
+                  <input
+                    onChange={(event) => setClubForm((current) => ({ ...current, address: event.target.value }))}
+                    placeholder="Street address"
+                    value={clubForm.address}
+                  />
+                </label>
+                <label className="field">
+                  <span>City</span>
+                  <input
+                    onChange={(event) => setClubForm((current) => ({ ...current, city: event.target.value }))}
+                    placeholder="City"
+                    value={clubForm.city}
+                  />
+                </label>
+                <label className="field">
+                  <span>State</span>
+                  <input
+                    onChange={(event) => setClubForm((current) => ({ ...current, state: event.target.value }))}
+                    placeholder="State"
+                    value={clubForm.state}
+                  />
+                </label>
+                <label className="field">
+                  <span>Zip</span>
+                  <input
+                    onChange={(event) => setClubForm((current) => ({ ...current, zip: event.target.value }))}
+                    placeholder="Zip"
+                    value={clubForm.zip}
+                  />
+                </label>
+                <label className="field">
+                  <span>Number of courts</span>
+                  <input
+                    min="0"
+                    onChange={(event) =>
+                      setClubForm((current) => ({ ...current, numberOfCourts: event.target.value }))
+                    }
+                    placeholder="0"
+                    type="number"
+                    value={clubForm.numberOfCourts}
                   />
                 </label>
                 <button className="button" disabled={creatingClub} type="submit">
@@ -4014,42 +4986,143 @@ export function ClubAffiliationAdminPage() {
                 </button>
               </form>
 
-              {clubs.length > 0 ? (
-                <div className="entity-list">
-                  {clubs.map((club) => (
-                    <div key={club.slug} className="entity-card entity-card--column">
-                      <label className="field">
-                        <span>Club name</span>
-                        <input
-                          onChange={(event) =>
-                            setClubDrafts((current) => ({
-                              ...current,
-                              [club.slug]: event.target.value,
-                            }))
-                          }
-                          value={clubDrafts[club.slug] ?? club.name}
+              {clubSummaries.length > 0 ? (
+                <div className="club-admin-grid">
+                  {clubSummaries.map((club) => (
+                    <article key={club.slug} className="club-admin-card">
+                      {clubDrafts[club.slug]?.logoPreviewUrl || club.logoUrl ? (
+                        <img
+                          alt={`${club.name} logo`}
+                          className="club-admin-card__logo"
+                          src={clubDrafts[club.slug]?.logoPreviewUrl || club.logoUrl}
                         />
-                      </label>
-                      <span>Slug: {club.slug}</span>
-                      <div className="choice-row">
-                        <button
-                          className="button"
-                          disabled={updatingClubSlug === club.slug}
-                          onClick={() => handleRenameClub(club)}
-                          type="button"
-                        >
-                          {updatingClubSlug === club.slug ? 'Saving...' : 'Rename club'}
-                        </button>
-                        <button
-                          className="button button--danger"
-                          disabled={updatingClubSlug === club.slug}
-                          onClick={() => handleDeleteClub(club)}
-                          type="button"
-                        >
-                          Delete club
-                        </button>
+                      ) : (
+                        <div className="club-admin-card__badge">{buildPlayerInitials(club.name)}</div>
+                      )}
+                      <div className="club-admin-card__content">
+                        <label className="field">
+                          <span>Club logo</span>
+                          <input
+                            accept="image/*"
+                            onChange={(event) => handleClubLogoSelection(club.slug, event)}
+                            type="file"
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Club name</span>
+                          <input
+                            onChange={(event) =>
+                              setClubDrafts((current) => ({
+                                ...current,
+                                [club.slug]: {
+                                  ...(current[club.slug] ?? createEmptyClubForm(club)),
+                                  clubName: event.target.value,
+                                },
+                              }))
+                            }
+                            value={clubDrafts[club.slug]?.clubName ?? club.name}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Address</span>
+                          <input
+                            onChange={(event) =>
+                              setClubDrafts((current) => ({
+                                ...current,
+                                [club.slug]: {
+                                  ...(current[club.slug] ?? createEmptyClubForm(club)),
+                                  address: event.target.value,
+                                },
+                              }))
+                            }
+                            value={clubDrafts[club.slug]?.address ?? ''}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>City</span>
+                          <input
+                            onChange={(event) =>
+                              setClubDrafts((current) => ({
+                                ...current,
+                                [club.slug]: {
+                                  ...(current[club.slug] ?? createEmptyClubForm(club)),
+                                  city: event.target.value,
+                                },
+                              }))
+                            }
+                            value={clubDrafts[club.slug]?.city ?? ''}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>State</span>
+                          <input
+                            onChange={(event) =>
+                              setClubDrafts((current) => ({
+                                ...current,
+                                [club.slug]: {
+                                  ...(current[club.slug] ?? createEmptyClubForm(club)),
+                                  state: event.target.value,
+                                },
+                              }))
+                            }
+                            value={clubDrafts[club.slug]?.state ?? ''}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Zip</span>
+                          <input
+                            onChange={(event) =>
+                              setClubDrafts((current) => ({
+                                ...current,
+                                [club.slug]: {
+                                  ...(current[club.slug] ?? createEmptyClubForm(club)),
+                                  zip: event.target.value,
+                                },
+                              }))
+                            }
+                            value={clubDrafts[club.slug]?.zip ?? ''}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Number of courts</span>
+                          <input
+                            min="0"
+                            onChange={(event) =>
+                              setClubDrafts((current) => ({
+                                ...current,
+                                [club.slug]: {
+                                  ...(current[club.slug] ?? createEmptyClubForm(club)),
+                                  numberOfCourts: event.target.value,
+                                },
+                              }))
+                            }
+                            type="number"
+                            value={clubDrafts[club.slug]?.numberOfCourts ?? ''}
+                          />
+                        </label>
+                        <span>Slug: {club.slug}</span>
+                        <span>Approved teams: {club.approvedTeamCount}</span>
+                        <span>Pending requests: {club.pendingRequestCount}</span>
+                        <div className="choice-row">
+                          <button
+                            className="button"
+                            disabled={updatingClubSlug === club.slug}
+                            onClick={() => handleRenameClub(club)}
+                            type="button"
+                          >
+                            {updatingClubSlug === club.slug ? 'Saving...' : 'Save club'}
+                          </button>
+                          <button
+                            className="button button--danger"
+                            disabled={updatingClubSlug === club.slug}
+                            onClick={() => handleDeleteClub(club)}
+                            type="button"
+                          >
+                            Delete club
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    </article>
                   ))}
                 </div>
               ) : (
@@ -4075,11 +5148,11 @@ export function ClubAffiliationAdminPage() {
               ) : requests.length > 0 ? (
                 <div className="entity-list">
                   {requests.map((request) => (
-                    <div key={`${request.requestedClubSlug}-${request.id}`} className="entity-card entity-card--column">
-                      <div className="member-admin__header">
-                        <div>
+                    <div key={`${request.requestedClubSlug}-${request.id}`} className="affiliation-request-card">
+                      <div className="affiliation-request-card__header">
+                        <div className="affiliation-request-card__title">
                           <strong>{request.teamName || request.teamSlug}</strong>
-                          <span>
+                          <span className="affiliation-request-card__meta">
                             Requested {request.requestedClubName || request.requestedClubSlug} from{' '}
                             {request.teamClubSlug}/{request.teamSlug}
                           </span>
@@ -4107,7 +5180,7 @@ export function ClubAffiliationAdminPage() {
                           </button>
                         </div>
                       ) : (
-                        <span>
+                        <span className="affiliation-request-card__review">
                           Reviewed by {request.reviewedByLabel || 'an admin'}
                           {request.reviewedAtMs ? ` on ${new Date(request.reviewedAtMs).toLocaleDateString()}` : ''}.
                         </span>
@@ -4122,8 +5195,126 @@ export function ClubAffiliationAdminPage() {
               )}
             </section>
           </>
+        ) : (
+          <section className="schedule-admin-card">
+            <div className="schedule-admin-card__header">
+              <div>
+                <p className="eyebrow">Challenges</p>
+                <h2>All challenges</h2>
+                <p>Review every challenge in the system and delete test or bad records.</p>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="state-panel">
+                <p>Loading challenges...</p>
+              </div>
+            ) : adminChallenges.length > 0 ? (
+              <div className="challenge-grid">
+                {adminChallenges.map((challenge) => (
+                  <article key={`${challenge.challengeClubSlug}-${challenge.id}`} className="challenge-card">
+                    <div className="challenge-card__badge">CH</div>
+                    <div className="challenge-card__body">
+                      <div className="challenge-card__header">
+                        <div className="challenge-card__title">
+                          <strong>{challenge.createdByTeamName || challenge.createdByTeamSlug}</strong>
+                          <span>
+                            {challenge.challengeClubName || challenge.challengeClubSlug} ·{' '}
+                            {challenge.visibility === 'targeted'
+                              ? `To ${challenge.targetTeamName || challenge.targetTeamSlug}`
+                              : 'Open challenge'}
+                          </span>
+                        </div>
+                        <span className="status-badge">{getChallengeStatusLabel(challenge)}</span>
+                      </div>
+                      <div className="challenge-card__details">
+                        <span>Date: {formatChallengeDate(challenge)}</span>
+                        <span>Time: {formatChallengeTime(challenge)}</span>
+                        <span>Location: {challenge.location || 'Location TBD'}</span>
+                        <span>ID: {challenge.id}</span>
+                      </div>
+                      {challenge.notes ? <p className="challenge-card__notes">{challenge.notes}</p> : null}
+                      <div className="challenge-card__actions">
+                        <button
+                          className="button button--danger"
+                          disabled={deletingChallengeId === challenge.id}
+                          onClick={() => handleDeleteChallenge(challenge)}
+                          type="button"
+                        >
+                          {deletingChallengeId === challenge.id ? 'Deleting...' : 'Delete challenge'}
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="notice notice--info">No challenges have been created yet.</div>
+            )}
+          </section>
         )}
       </section>
+
+      {clubCropImageSrc ? (
+        <div className="logo-cropper" role="dialog" aria-modal="true" aria-label="Crop club logo">
+          <button
+            aria-label="Close logo cropper"
+            className="logo-cropper__backdrop"
+            onClick={clearClubCropper}
+            type="button"
+          />
+          <aside className="logo-cropper__panel">
+            <div className="logo-cropper__header">
+              <div>
+                <p className="eyebrow">Crop logo</p>
+                <h2>Square club logo crop</h2>
+                <p className="logo-cropper__copy">
+                  Reposition the image and zoom until the club logo fits well inside the square preview.
+                </p>
+              </div>
+              <button className="button button--ghost" onClick={clearClubCropper} type="button">
+                Cancel
+              </button>
+            </div>
+
+            <div className="logo-cropper__workspace">
+              <div className="logo-cropper__canvas">
+                <Cropper
+                  aspect={1}
+                  crop={clubCrop}
+                  image={clubCropImageSrc}
+                  onCropChange={setClubCrop}
+                  onCropComplete={(_, croppedAreaPixels) => setClubCropPixels(croppedAreaPixels)}
+                  onZoomChange={setClubZoom}
+                  showGrid={false}
+                  zoom={clubZoom}
+                />
+              </div>
+
+              <label className="field logo-cropper__zoom">
+                <span>Zoom</span>
+                <input
+                  max="3"
+                  min="1"
+                  onChange={(event) => setClubZoom(Number(event.target.value))}
+                  step="0.01"
+                  type="range"
+                  value={clubZoom}
+                />
+              </label>
+            </div>
+
+            <div className="settings-admin-form__actions">
+              <button className="button" disabled={creatingClubCrop} onClick={handleApplyClubLogoCrop} type="button">
+                {creatingClubCrop ? 'Preparing crop...' : 'Use cropped logo'}
+              </button>
+              <button className="button button--ghost" onClick={clearClubCropper} type="button">
+                Cancel
+              </button>
+            </div>
+          </aside>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -191,6 +191,7 @@ textarea {
   width: 100%;
   text-align: left;
   cursor: pointer;
+  font: inherit;
 }
 
 .hero__background {
@@ -255,13 +256,20 @@ textarea {
 }
 
 .marketing-section__header {
-  display: grid;
+  display: flex;
   gap: 0.45rem;
+  justify-content: space-between;
+  align-items: end;
+  flex-wrap: wrap;
 }
 
 .marketing-section__header h2,
 .marketing-section__header p {
   margin: 0;
+}
+
+.marketing-section__header-action {
+  justify-self: end;
 }
 
 .marketing-section__copy {
@@ -347,6 +355,16 @@ textarea {
 .field {
   display: grid;
   gap: 0.45rem;
+}
+
+.field label {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.field-hint {
+  color: #9fb6d8;
+  font-size: 0.85rem;
 }
 
 .field input,
@@ -483,6 +501,310 @@ ul {
   gap: 0.9rem;
 }
 
+.team-chooser__intro {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.team-chooser__intro h1,
+.team-chooser__intro p {
+  margin: 0;
+}
+
+.membership-list {
+  grid-template-columns: 1fr;
+}
+
+.team-directory__groups {
+  display: grid;
+  gap: 1.4rem;
+}
+
+.team-directory__group {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.team-directory__group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 1rem;
+  border-bottom: 1px solid rgba(126, 161, 255, 0.16);
+  padding-bottom: 0.5rem;
+}
+
+.team-directory__group-header h2 {
+  margin: 0;
+}
+
+.team-directory__group-header span {
+  color: #9fb6d8;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.club-directory-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.club-directory-card {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+  border-radius: 20px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: linear-gradient(180deg, rgba(13, 29, 48, 0.94) 0%, rgba(11, 25, 42, 0.92) 100%);
+  padding: 1rem;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.2);
+}
+
+.club-directory-card__badge,
+.club-directory-card__logo {
+  width: 108px;
+  height: 100%;
+  min-height: 112px;
+  border-radius: 18px;
+}
+
+.club-directory-card__badge {
+  display: grid;
+  place-items: center;
+  background: rgba(255, 202, 87, 0.14);
+  border: 1px solid rgba(255, 202, 87, 0.16);
+  color: #f5d67a;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.club-directory-card__logo {
+  background:
+    linear-gradient(145deg, rgba(8, 17, 29, 0.96) 0%, rgba(12, 24, 40, 0.96) 100%);
+  box-shadow: inset 0 0 0 1px rgba(126, 161, 255, 0.2);
+  object-fit: contain;
+  padding: 0.35rem;
+}
+
+.club-directory-card__content {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.club-directory-card__content span {
+  color: #9fb6d8;
+  font-size: 0.9rem;
+}
+
+.challenge-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.challenge-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.challenge-card {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: start;
+  border-radius: 18px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: linear-gradient(180deg, rgba(21, 33, 51, 0.86) 0%, rgba(15, 25, 40, 0.92) 100%);
+  padding: 1rem;
+}
+
+.challenge-card__badge {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(8, 17, 29, 0.96) 0%, rgba(12, 24, 40, 0.96) 100%);
+  box-shadow: inset 0 0 0 1px rgba(126, 161, 255, 0.2);
+  color: #f2f5f8;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.challenge-card__body,
+.challenge-card__header {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.challenge-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.challenge-card__title,
+.challenge-card__details {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.challenge-card__title strong {
+  font-size: 1.05rem;
+}
+
+.challenge-card span,
+.challenge-card__notes {
+  color: #9fb6d8;
+  font-size: 0.9rem;
+}
+
+.challenge-card__notes {
+  margin: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #c9d7ea;
+  padding: 0.75rem 0.85rem;
+}
+
+.challenge-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.challenge-form {
+  grid-template-columns: 130px 220px 300px 190px minmax(0, 1fr);
+  align-items: end;
+}
+
+.challenge-form__type {
+  grid-column: 1;
+  grid-row: 1;
+  width: 130px;
+}
+
+.challenge-form__target {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 220px;
+}
+
+.challenge-form__date {
+  grid-row: 1;
+  min-width: 180px;
+}
+
+.challenge-form--open .challenge-form__date {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.challenge-form--targeted .challenge-form__date {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.challenge-form__time {
+  grid-row: 1;
+  min-width: 260px;
+}
+
+.challenge-form--open .challenge-form__time {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.challenge-form--targeted .challenge-form__time {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.challenge-form__tbd {
+  grid-row: 1;
+  align-self: end;
+  display: inline-flex;
+  gap: 0.55rem;
+  align-items: center;
+  min-height: 48px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.challenge-form--open .challenge-form__tbd {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.challenge-form--targeted .challenge-form__tbd {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.challenge-form__location {
+  grid-column: 1 / 4;
+  grid-row: 3;
+}
+
+.challenge-form__notes {
+  grid-column: 1 / -1;
+}
+
+.challenge-form__submit {
+  width: fit-content;
+  min-width: 180px;
+  justify-self: start;
+}
+
+.challenge-time-selectors {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: minmax(84px, 1fr) 72px 76px;
+}
+
+@media (max-width: 980px) {
+  .challenge-form {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .team-admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .club-directory-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .challenge-form__type,
+  .challenge-form__target,
+  .challenge-form__date,
+  .challenge-form__time,
+  .challenge-form__tbd,
+  .challenge-form__location {
+    grid-column: auto;
+    grid-row: auto;
+    width: auto;
+    min-width: 0;
+  }
+}
+
+@media (min-width: 760px) {
+  .membership-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1080px) {
+  .membership-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 .roster-form {
   display: grid;
   gap: 1rem;
@@ -521,6 +843,20 @@ ul {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 0.85rem;
   align-items: center;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.membership-card:hover,
+.membership-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(255, 209, 102, 0.28);
+  background: rgba(255, 255, 255, 0.065);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
+  outline: none;
 }
 
 .membership-card__logo {
@@ -1047,6 +1383,39 @@ ul {
   font-size: 0.9rem;
 }
 
+.affiliation-request-card {
+  display: grid;
+  gap: 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1rem;
+}
+
+.affiliation-request-card__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.affiliation-request-card__title {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.affiliation-request-card__meta,
+.affiliation-request-card__review {
+  color: #9fb6d8;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.affiliation-request-card__review {
+  display: block;
+}
+
 .status-badge {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
@@ -1455,14 +1824,127 @@ ul {
 
 .team-members-grid {
   display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 220px));
+  justify-content: start;
 }
 
 .team-admin-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+.admin-team-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.95rem;
+  align-items: start;
+  border-radius: 20px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: linear-gradient(180deg, rgba(13, 29, 48, 0.94) 0%, rgba(11, 25, 42, 0.92) 100%);
+  padding: 1rem;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.2);
+}
+
+.admin-team-card__logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  background:
+    linear-gradient(145deg, rgba(8, 17, 29, 0.96) 0%, rgba(12, 24, 40, 0.96) 100%);
+  box-shadow: inset 0 0 0 1px rgba(126, 161, 255, 0.2);
+  object-fit: contain;
+  padding: 0.4rem;
+}
+
+.admin-team-card__content {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.admin-team-card__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.admin-team-card__title {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.admin-team-card__content span {
+  color: #9fb6d8;
+  font-size: 0.9rem;
+}
+
+.admin-team-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.65rem;
+}
+
+.club-admin-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.club-admin-card {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: start;
+  border-radius: 16px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1rem;
+}
+
+.club-admin-card__badge,
+.club-admin-card__logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+}
+
+.club-admin-card__badge {
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(145deg, rgba(8, 17, 29, 0.96) 0%, rgba(12, 24, 40, 0.96) 100%);
+  box-shadow: inset 0 0 0 1px rgba(126, 161, 255, 0.2);
+  color: #f2f5f8;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.club-admin-card__logo {
+  background:
+    linear-gradient(145deg, rgba(8, 17, 29, 0.96) 0%, rgba(12, 24, 40, 0.96) 100%);
+  box-shadow: inset 0 0 0 1px rgba(126, 161, 255, 0.2);
+  object-fit: contain;
+  padding: 0.35rem;
+}
+
+.club-admin-card__content {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.club-logo-field {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
+}
+
+.club-admin-card__content span {
+  color: #9fb6d8;
+  font-size: 0.9rem;
 }
 
 .schedule-page {
@@ -1890,6 +2372,63 @@ ul {
   padding-right: 0.25rem;
 }
 
+.member-role-card {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+  border-radius: 18px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.95rem;
+}
+
+.member-role-card__avatar {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(8, 17, 29, 0.96) 0%, rgba(12, 24, 40, 0.96) 100%);
+  box-shadow: inset 0 0 0 1px rgba(126, 161, 255, 0.2);
+  color: #f2f5f8;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.member-role-card__body {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.member-role-card__identity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.45rem;
+  align-items: baseline;
+}
+
+.member-role-card__description,
+.member-role-card__locked {
+  margin: 0;
+  color: #9fb6d8;
+  font-size: 0.9rem;
+}
+
+.member-role-card__locked {
+  border-radius: 14px;
+  border: 1px solid rgba(126, 161, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.7rem 0.8rem;
+}
+
+.member-role-card__actions {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .logo-cropper {
   position: fixed;
   inset: 0;
@@ -1958,12 +2497,12 @@ ul {
 
 .team-member-card {
   display: grid;
-  gap: 1rem;
+  gap: 0.65rem;
   border-radius: 22px;
   border: 1px solid rgba(126, 161, 255, 0.18);
   background: linear-gradient(180deg, rgba(13, 29, 48, 0.94) 0%, rgba(11, 25, 42, 0.92) 100%);
-  padding: 1rem;
-  min-height: 170px;
+  padding: 0.75rem;
+  min-height: 128px;
 }
 
 .team-member-card__top {
@@ -1974,8 +2513,8 @@ ul {
 }
 
 .team-member-card__avatar {
-  width: 48px;
-  height: 48px;
+  width: 38px;
+  height: 38px;
   border-radius: 999px;
   display: grid;
   place-items: center;
@@ -1992,20 +2531,20 @@ ul {
 }
 
 .team-member-card__name {
-  font-size: 1.05rem;
+  font-size: 0.95rem;
 }
 
 .team-member-card__subtitle {
   color: #aebfd7;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
 }
 
 .team-member-card__stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 0.35rem 0.75rem;
   color: #f0c14b;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
@@ -2251,40 +2790,49 @@ ul {
 .sidebar__footer-link,
 .sidebar__signout {
   width: 100%;
-  border-radius: 999px;
-  padding: 0.72rem 0.95rem;
-  text-align: center;
-  font-weight: 700;
+  display: block;
+  border-radius: 16px;
+  padding: 0.8rem 1rem;
+  text-align: left;
+  font: inherit;
+  font-weight: 600;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease,
+    color 140ms ease;
 }
 
 .sidebar__footer-link {
-  border: 1px solid rgba(255, 209, 102, 0.18);
-  background: rgba(255, 209, 102, 0.1);
-  color: #f2f5f8;
-  transition:
-    transform 120ms ease,
-    background 120ms ease,
-    border-color 120ms ease;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #d2def0;
 }
 
 .sidebar__footer-link:hover,
 .sidebar__footer-link:focus-visible {
   transform: translateY(-1px);
   border-color: rgba(255, 209, 102, 0.28);
-  background: rgba(255, 209, 102, 0.16);
+  background: linear-gradient(90deg, rgba(109, 92, 47, 0.24) 0%, rgba(38, 50, 67, 0.12) 100%);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+  color: #f2f5f8;
   outline: none;
 }
 
 .sidebar__signout {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid transparent;
   background: transparent;
-  color: #9fb6d8;
+  color: #d2def0;
   cursor: pointer;
 }
 
 .sidebar__signout:hover,
 .sidebar__signout:focus-visible {
-  background: rgba(255, 255, 255, 0.06);
+  transform: translateY(-1px);
+  border-color: rgba(255, 209, 102, 0.28);
+  background: linear-gradient(90deg, rgba(109, 92, 47, 0.24) 0%, rgba(38, 50, 67, 0.12) 100%);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
   color: #f2f5f8;
   outline: none;
 }

@@ -78,6 +78,12 @@ function buildTeamLogoPath({ clubSlug, teamSlug, fileName }) {
   return `clubs/${clubSlug}/teams/${teamSlug}/branding/${Date.now()}-${safeBaseName}${extension}`;
 }
 
+function buildClubLogoPath({ clubSlug, fileName }) {
+  const safeBaseName = sanitizeFileBaseName(fileName);
+  const extension = getFileExtension(fileName);
+  return `clubs/${clubSlug}/branding/${Date.now()}-${safeBaseName}${extension}`;
+}
+
 async function uploadNewsImage({ clubSlug, file, postId, teamSlug }) {
   if (!storage) {
     throw new Error('Firebase Storage is not configured yet.');
@@ -119,6 +125,25 @@ async function uploadTeamLogo({ clubSlug, file, teamSlug }) {
   };
 }
 
+async function uploadClubLogo({ clubSlug, file }) {
+  if (!storage) {
+    throw new Error('Firebase Storage is not configured yet.');
+  }
+
+  const logoPath = buildClubLogoPath({
+    clubSlug,
+    fileName: file?.name,
+  });
+  const logoRef = ref(storage, logoPath);
+
+  await uploadBytes(logoRef, file);
+
+  return {
+    logoPath,
+    logoUrl: await getDownloadURL(logoRef),
+  };
+}
+
 async function deleteStoragePath(imagePath) {
   if (!storage || !imagePath) {
     return;
@@ -128,6 +153,18 @@ async function deleteStoragePath(imagePath) {
     await deleteObject(ref(storage, imagePath));
   } catch {
     // Ignore missing or already-deleted files during updates.
+  }
+}
+
+async function deleteRefsInBatches(refs) {
+  const batchSize = 450;
+
+  for (let index = 0; index < refs.length; index += batchSize) {
+    const batch = writeBatch(db);
+    refs.slice(index, index + batchSize).forEach((docRef) => {
+      batch.delete(docRef);
+    });
+    await batch.commit();
   }
 }
 
@@ -272,10 +309,17 @@ export async function listClubs({ includeIndependent = false } = {}) {
       const data = entry.data();
 
       return {
+        address: data.address ?? '',
+        city: data.city ?? '',
         id: entry.id,
+        logoPath: data.logoPath ?? '',
+        logoUrl: data.logoUrl ?? '',
         name: data.name ?? entry.id,
+        numberOfCourts: normalizeNullableNumber(data.numberOfCourts),
         slug: data.slug ?? entry.id,
+        state: data.state ?? '',
         status: data.status ?? 'active',
+        zip: data.zip ?? '',
       };
     })
     .filter((club) => club.status === 'active')
@@ -286,7 +330,16 @@ export async function listClubs({ includeIndependent = false } = {}) {
   return clubs;
 }
 
-export async function createClub({ clubName, user }) {
+export async function createClub({
+  address = '',
+  city = '',
+  clubName,
+  logoFile = null,
+  numberOfCourts = '',
+  state = '',
+  user,
+  zip = '',
+}) {
   requireDb();
 
   if (!user?.uid) {
@@ -318,19 +371,38 @@ export async function createClub({ clubName, user }) {
     throw new Error('A club with that name already exists.');
   }
 
+  const uploadedLogo = logoFile ? await uploadClubLogo({ clubSlug, file: logoFile }) : null;
+
   await setDoc(clubRef, {
+    address: address.trim(),
+    city: city.trim(),
     createdAt: serverTimestamp(),
     createdBy: user.uid,
+    logoPath: uploadedLogo?.logoPath ?? '',
+    logoUrl: uploadedLogo?.logoUrl ?? '',
     name: trimmedName,
+    numberOfCourts: normalizeNullableNumber(numberOfCourts),
     slug: clubSlug,
+    state: state.trim(),
     status: 'active',
     updatedAt: serverTimestamp(),
+    zip: zip.trim(),
   });
 
   return { name: trimmedName, slug: clubSlug };
 }
 
-export async function renameClub({ clubName, clubSlug, user }) {
+export async function renameClub({
+  address = '',
+  city = '',
+  clubName,
+  clubSlug,
+  logoFile = null,
+  numberOfCourts = '',
+  state = '',
+  user,
+  zip = '',
+}) {
   requireDb();
 
   if (!user?.uid) {
@@ -353,10 +425,26 @@ export async function renameClub({ clubName, clubSlug, user }) {
     throw new Error('Only app admins can rename clubs.');
   }
 
-  await updateDoc(doc(db, 'clubs', clubSlug), {
+  const clubRef = doc(db, 'clubs', clubSlug);
+  const currentClubSnapshot = await getDoc(clubRef);
+  const currentClub = currentClubSnapshot.data() ?? {};
+  const uploadedLogo = logoFile ? await uploadClubLogo({ clubSlug, file: logoFile }) : null;
+
+  await updateDoc(clubRef, {
+    address: address.trim(),
+    city: city.trim(),
+    logoPath: uploadedLogo?.logoPath ?? currentClub.logoPath ?? '',
+    logoUrl: uploadedLogo?.logoUrl ?? currentClub.logoUrl ?? '',
     name: trimmedName,
+    numberOfCourts: normalizeNullableNumber(numberOfCourts),
+    state: state.trim(),
     updatedAt: serverTimestamp(),
+    zip: zip.trim(),
   });
+
+  if (uploadedLogo?.logoPath && currentClub.logoPath && currentClub.logoPath !== uploadedLogo.logoPath) {
+    await deleteStoragePath(currentClub.logoPath);
+  }
 }
 
 export async function deleteClub({ clubSlug, user }) {
@@ -385,6 +473,79 @@ export async function deleteClub({ clubSlug, user }) {
   await deleteDoc(doc(db, 'clubs', clubSlug));
 }
 
+export async function deleteTeamAsAdmin({ clubSlug, teamSlug, user }) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only the app admin can delete teams.');
+  }
+
+  if (!clubSlug || !teamSlug) {
+    throw new Error('Choose a team to delete.');
+  }
+
+  const teamRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug);
+  const teamSnapshot = await getDoc(teamRef);
+
+  if (!teamSnapshot.exists()) {
+    throw new Error('That team could not be found.');
+  }
+
+  const teamData = teamSnapshot.data();
+  const [membersSnapshot, playersSnapshot, playerLinksSnapshot, gamesSnapshot, newsSnapshot, clubs] = await Promise.all([
+    getDocs(collection(teamRef, 'members')),
+    getDocs(collection(teamRef, 'players')),
+    getDocs(collection(teamRef, 'playerLinks')),
+    getDocs(collection(teamRef, 'games')),
+    getDocs(collection(teamRef, 'newsPosts')),
+    listClubs({ includeIndependent: true }),
+  ]);
+  const [affiliationRequestGroups, challengeGroups] = await Promise.all([
+    Promise.all(clubs.map((club) => getDocs(collection(db, 'clubs', club.slug, 'affiliationRequests')).catch(() => null))),
+    Promise.all(clubs.map((club) => getDocs(collection(db, 'clubs', club.slug, 'challenges')).catch(() => null))),
+  ]);
+  const userMembershipRefs = membersSnapshot.docs
+    .map((memberDoc) => memberDoc.data().uid || memberDoc.id)
+    .filter(Boolean)
+    .map((uid) => doc(db, 'users', uid, 'memberships', `${clubSlug}_${teamSlug}`));
+  const affiliationRequestRefs = affiliationRequestGroups
+    .flatMap((snapshot) => snapshot?.docs ?? [])
+    .filter((requestDoc) => {
+      const request = requestDoc.data();
+      return request.teamClubSlug === clubSlug && request.teamSlug === teamSlug;
+    })
+    .map((requestDoc) => requestDoc.ref);
+  const challengeRefs = challengeGroups
+    .flatMap((snapshot) => snapshot?.docs ?? [])
+    .filter((challengeDoc) => {
+      const challenge = challengeDoc.data();
+      return (
+        (challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug) ||
+        (challenge.targetTeamClubSlug === clubSlug && challenge.targetTeamSlug === teamSlug) ||
+        (challenge.acceptedByTeamClubSlug === clubSlug && challenge.acceptedByTeamSlug === teamSlug)
+      );
+    })
+    .map((challengeDoc) => challengeDoc.ref);
+  const storagePaths = [
+    teamData.logoPath,
+    ...newsSnapshot.docs.map((newsDoc) => newsDoc.data().imagePath),
+  ].filter(Boolean);
+
+  await deleteRefsInBatches([
+    ...affiliationRequestRefs,
+    ...challengeRefs,
+    ...userMembershipRefs,
+    ...newsSnapshot.docs.map((entry) => entry.ref),
+    ...gamesSnapshot.docs.map((entry) => entry.ref),
+    ...playerLinksSnapshot.docs.map((entry) => entry.ref),
+    ...playersSnapshot.docs.map((entry) => entry.ref),
+    ...membersSnapshot.docs.map((entry) => entry.ref),
+    teamRef,
+  ]);
+
+  await Promise.all(storagePaths.map((storagePath) => deleteStoragePath(storagePath)));
+}
+
 function isBootstrapPlatformAdmin(email) {
   return SUPER_ADMIN_EMAILS.includes((email ?? '').trim().toLowerCase());
 }
@@ -392,17 +553,11 @@ function isBootstrapPlatformAdmin(email) {
 export async function isPlatformAdmin(uid, email = '') {
   requireDb();
 
-  if (isBootstrapPlatformAdmin(email)) {
-    return true;
-  }
-
   if (!uid) {
     return false;
   }
 
-  const snapshot = await getDoc(doc(db, 'platformAdmins', uid));
-
-  return snapshot.exists();
+  return isBootstrapPlatformAdmin(email);
 }
 
 export async function listManagedClubs(uid, email = '') {
@@ -467,6 +622,7 @@ export async function listAdminTeamSummaries(user) {
             captainNames: captains,
             clubName: club.name,
             clubSlug: club.slug,
+            logoUrl: team.logoUrl ?? '',
             memberCount: members.length,
             name: team.name ?? teamSlug,
             primaryLocation: team.primaryLocation ?? '',
@@ -491,6 +647,111 @@ export async function listAdminTeamSummaries(user) {
   });
 
   return teams;
+}
+
+export async function listTeamDirectory() {
+  requireDb();
+
+  const clubs = await listClubs({ includeIndependent: true });
+  const clubNameBySlug = new Map(
+    clubs.map((club) => [club.slug, club.slug === INDEPENDENT_CLUB.slug ? 'Independent' : club.name]),
+  );
+  const directoryGroups = new Map();
+
+  clubs.forEach((club) => {
+    const displayName = club.slug === INDEPENDENT_CLUB.slug ? 'Independent' : club.name;
+    directoryGroups.set(club.slug, {
+      clubName: displayName,
+      clubSlug: club.slug,
+      teams: [],
+    });
+  });
+
+  const teamsBySourceClub = await Promise.all(
+    clubs.map(async (club) => {
+      const teamsSnapshot = await getDocs(collection(db, 'clubs', club.slug, 'teams'));
+
+      return Promise.all(teamsSnapshot.docs.map(async (teamEntry) => {
+        const team = teamEntry.data();
+        const teamSlug = team.slug ?? teamEntry.id;
+        let members = [];
+        let players = [];
+
+        try {
+          [members, players] = await Promise.all([
+            listTeamMembers(club.slug, teamSlug),
+            listPlayers(club.slug, teamSlug),
+          ]);
+        } catch {
+          // Directory cards should still render if private roster details are not readable.
+        }
+
+        const playerMap = new Map(players.map((player) => [player.id, player]));
+        const captainNames = members
+          .filter((member) => member.role === 'captain')
+          .map((member) => playerMap.get(member.playerId)?.fullName || member.displayName || member.email || member.uid)
+          .filter(Boolean);
+        const directoryClubSlug =
+          team.affiliationStatus === 'approved' && team.approvedClubSlug
+            ? team.approvedClubSlug
+            : INDEPENDENT_CLUB.slug;
+        const directoryClubName = clubNameBySlug.get(directoryClubSlug) ?? directoryClubSlug;
+
+        return {
+          clubName: directoryClubName,
+          clubSlug: directoryClubSlug,
+          captainNames,
+          logoUrl: team.logoUrl ?? '',
+          memberCount: members.length,
+          name: team.name ?? teamSlug,
+          primaryLocation: team.primaryLocation ?? '',
+          sourceClubSlug: club.slug,
+          teamSlug,
+        };
+      }));
+    }),
+  );
+
+  teamsBySourceClub.flat().forEach((team) => {
+    if (!directoryGroups.has(team.clubSlug)) {
+      directoryGroups.set(team.clubSlug, {
+        clubName: team.clubName,
+        clubSlug: team.clubSlug,
+        teams: [],
+      });
+    }
+
+    directoryGroups.get(team.clubSlug).teams.push(team);
+  });
+
+  return [...directoryGroups.values()]
+    .map((group) => ({
+      ...group,
+      teams: group.teams.sort((left, right) => left.name.localeCompare(right.name)),
+    }))
+    .filter((group) => group.teams.length > 0)
+    .sort((left, right) => left.clubName.localeCompare(right.clubName));
+}
+
+export async function listClubDirectory() {
+  requireDb();
+
+  const [clubs, teamGroups] = await Promise.all([
+    listClubs(),
+    listTeamDirectory(),
+  ]);
+  const teamsByClubSlug = new Map(teamGroups.map((group) => [group.clubSlug, group.teams]));
+
+  return clubs.map((club) => {
+    const teams = teamsByClubSlug.get(club.slug) ?? [];
+    const memberCount = teams.reduce((total, team) => total + (team.memberCount ?? 0), 0);
+
+    return {
+      ...club,
+      memberCount,
+      teamCount: teams.length,
+    };
+  });
 }
 
 async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
@@ -1115,28 +1376,511 @@ export async function listApprovedClubTeams(clubSlug) {
     return [];
   }
 
-  const teamsQuery = query(
-    collectionGroup(db, 'teams'),
-    where('affiliationStatus', '==', 'approved'),
-    where('approvedClubSlug', '==', clubSlug),
-  );
-  const snapshot = await getDocs(teamsQuery);
-  const teams = snapshot.docs.map((entry) => {
-    const data = entry.data();
+  async function readApprovedTeamsFromSnapshot(snapshot, sourceClubSlug = '') {
+    return snapshot.docs
+      .map((entry) => {
+        const data = entry.data();
 
-    return {
-      clubSlug: data.clubId ?? entry.ref.parent.parent?.id ?? '',
-      id: entry.id,
-      logoUrl: data.logoUrl ?? '',
-      name: data.name ?? entry.id,
-      primaryLocation: data.primaryLocation ?? '',
-      teamSlug: data.slug ?? entry.id,
-    };
-  });
+        return {
+          affiliationStatus: data.affiliationStatus ?? 'independent',
+          approvedClubSlug: data.approvedClubSlug ?? '',
+          clubSlug: data.clubId ?? sourceClubSlug ?? entry.ref.parent.parent?.id ?? '',
+          id: entry.id,
+          logoUrl: data.logoUrl ?? '',
+          name: data.name ?? entry.id,
+          primaryLocation: data.primaryLocation ?? '',
+          teamSlug: data.slug ?? entry.id,
+        };
+      })
+      .filter((team) => team.affiliationStatus === 'approved' && team.approvedClubSlug === clubSlug)
+      .map(({ affiliationStatus, approvedClubSlug, ...team }) => team);
+  }
+
+  let teams = [];
+
+  try {
+    const teamsQuery = query(
+      collectionGroup(db, 'teams'),
+      where('affiliationStatus', '==', 'approved'),
+      where('approvedClubSlug', '==', clubSlug),
+    );
+    const snapshot = await getDocs(teamsQuery);
+    teams = await readApprovedTeamsFromSnapshot(snapshot);
+  } catch {
+    const clubs = await listClubs({ includeIndependent: true });
+    const nestedTeamGroups = await Promise.all(
+      clubs.map(async (club) => {
+        const snapshot = await getDocs(collection(db, 'clubs', club.slug, 'teams'));
+        return readApprovedTeamsFromSnapshot(snapshot, club.slug);
+      }),
+    );
+
+    teams = nestedTeamGroups.flat();
+  }
 
   teams.sort((left, right) => left.name.localeCompare(right.name));
 
   return teams;
+}
+
+function normalizeChallenge(entry, challengeClubSlug) {
+  const data = entry.data();
+
+  return {
+    acceptedAtMs: normalizeTimestampMs(data.acceptedAt),
+    acceptedByTeamClubSlug: data.acceptedByTeamClubSlug ?? '',
+    acceptedByTeamName: data.acceptedByTeamName ?? '',
+    acceptedByTeamSlug: data.acceptedByTeamSlug ?? '',
+    cancelledAtMs: normalizeTimestampMs(data.cancelledAt),
+    challengeClubSlug,
+    createdAtMs: normalizeTimestampMs(data.createdAt),
+    createdByTeamClubSlug: data.createdByTeamClubSlug ?? '',
+    createdByTeamName: data.createdByTeamName ?? '',
+    createdByTeamSlug: data.createdByTeamSlug ?? '',
+    dateTbd: data.dateTbd === true,
+    declinedAtMs: normalizeTimestampMs(data.declinedAt),
+    homeGameId: data.homeGameId ?? '',
+    id: entry.id,
+    isoDate: data.isoDate ?? '',
+    location: data.location ?? '',
+    notes: data.notes ?? '',
+    status: data.status ?? 'open',
+    targetTeamClubSlug: data.targetTeamClubSlug ?? '',
+    targetTeamName: data.targetTeamName ?? '',
+    targetTeamSlug: data.targetTeamSlug ?? '',
+    timeLabel: normalizeTimeLabel(data.timeLabel),
+    updatedAtMs: normalizeTimestampMs(data.updatedAt),
+    visibility: data.visibility ?? 'open',
+    awayGameId: data.awayGameId ?? '',
+  };
+}
+
+async function getApprovedChallengeTeam({ challengeClubSlug, teamClubSlug, teamSlug }) {
+  const teamRef = doc(db, 'clubs', teamClubSlug, 'teams', teamSlug);
+  const teamSnapshot = await getDoc(teamRef);
+
+  if (!teamSnapshot.exists()) {
+    throw new Error('That team could not be found.');
+  }
+
+  const team = teamSnapshot.data();
+
+  if (team.affiliationStatus !== 'approved' || team.approvedClubSlug !== challengeClubSlug) {
+    throw new Error('Challenges are only available for approved teams in the same club.');
+  }
+
+  return {
+    clubSlug: teamClubSlug,
+    logoUrl: team.logoUrl ?? '',
+    name: team.name ?? teamSlug,
+    primaryLocation: team.primaryLocation ?? '',
+    teamSlug,
+  };
+}
+
+async function requireTeamManager({ clubSlug, teamSlug, user }) {
+  if (!user?.uid) {
+    throw new Error('You must be signed in to manage challenges.');
+  }
+
+  const membershipSnapshot = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'members', user.uid));
+  const membership = membershipSnapshot.exists() ? membershipSnapshot.data() : null;
+
+  if (!['captain', 'coCaptain'].includes(membership?.role)) {
+    throw new Error('Only captains and co-captains can manage challenges.');
+  }
+
+  return membership;
+}
+
+function buildChallengeGamePayload({
+  challenge,
+  challengeClubSlug,
+  createdBy,
+  linkedGameId,
+  linkedTeam,
+  user,
+}) {
+  const normalizedDateTbd = challenge.dateTbd === true;
+  const isoDate = normalizedDateTbd ? '' : challenge.isoDate || '';
+  const location = challenge.location || 'Location TBD';
+  const timeLabel = normalizedDateTbd ? 'Time TBD' : normalizeTimeLabel(challenge.timeLabel) || 'Time TBD';
+
+  return {
+    attendance: {},
+    challengeClubSlug,
+    challengeId: challenge.id,
+    createdAt: serverTimestamp(),
+    createdBy: user?.uid ?? '',
+    dateLabel: normalizedDateTbd ? 'Date TBD' : isoDate,
+    dateTbd: normalizedDateTbd,
+    isoDate,
+    linkedGameId,
+    linkedTeamClubSlug: linkedTeam.clubSlug,
+    linkedTeamName: linkedTeam.name,
+    linkedTeamSlug: linkedTeam.teamSlug,
+    location,
+    matchStatus: 'scheduled',
+    opponent: linkedTeam.name,
+    opponentScore: null,
+    pairings: createEmptyPairings(),
+    result: 'pending',
+    rosterPlayerIds: [],
+    teamScore: null,
+    timeLabel,
+    updatedAt: serverTimestamp(),
+    source: 'challenge',
+    sourceTeamClubSlug: createdBy.clubSlug,
+    sourceTeamSlug: createdBy.teamSlug,
+  };
+}
+
+export async function createChallenge({
+  clubSlug,
+  dateTbd = false,
+  isoDate = '',
+  location = '',
+  notes = '',
+  targetTeam = null,
+  teamSlug,
+  timeLabel = '',
+  user,
+  visibility = 'open',
+}) {
+  requireDb();
+
+  await requireTeamManager({ clubSlug, teamSlug, user });
+
+  const sourceTeamSnapshot = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug));
+
+  if (!sourceTeamSnapshot.exists()) {
+    throw new Error('That team could not be found.');
+  }
+
+  const sourceTeam = sourceTeamSnapshot.data();
+  const challengeClubSlug = sourceTeam.approvedClubSlug ?? '';
+
+  if (sourceTeam.affiliationStatus !== 'approved' || !challengeClubSlug || challengeClubSlug === INDEPENDENT_CLUB.slug) {
+    throw new Error('Approve this team for a club before posting challenges.');
+  }
+
+  const normalizedVisibility = visibility === 'targeted' ? 'targeted' : 'open';
+  const trimmedIsoDate = isoDate.trim();
+  const trimmedLocation = location.trim();
+  const trimmedNotes = notes.trim();
+  const trimmedTimeLabel = timeLabel.trim();
+  const normalizedDateTbd = dateTbd === true;
+
+  if (!normalizedDateTbd && !trimmedIsoDate) {
+    throw new Error('Choose a date or mark the challenge date as TBD.');
+  }
+
+  let target = null;
+
+  if (normalizedVisibility === 'targeted') {
+    if (!targetTeam?.teamSlug || !targetTeam?.clubSlug) {
+      throw new Error('Choose a team to challenge.');
+    }
+
+    if (targetTeam.teamSlug === teamSlug && targetTeam.clubSlug === clubSlug) {
+      throw new Error('A team cannot challenge itself.');
+    }
+
+    target = await getApprovedChallengeTeam({
+      challengeClubSlug,
+      teamClubSlug: targetTeam.clubSlug,
+      teamSlug: targetTeam.teamSlug,
+    });
+  }
+
+  const challengeId = slugify(`${teamSlug}-${normalizedDateTbd ? 'date-tbd' : trimmedIsoDate}-${Date.now()}`);
+  const challengeRef = doc(db, 'clubs', challengeClubSlug, 'challenges', challengeId);
+
+  await setDoc(challengeRef, {
+    acceptedAt: null,
+    acceptedByTeamClubSlug: '',
+    acceptedByTeamName: '',
+    acceptedByTeamSlug: '',
+    acceptedByUid: '',
+    awayGameId: '',
+    cancelledAt: null,
+    clubSlug: challengeClubSlug,
+    createdAt: serverTimestamp(),
+    createdByTeamClubSlug: clubSlug,
+    createdByTeamName: sourceTeam.name ?? teamSlug,
+    createdByTeamSlug: teamSlug,
+    createdByUid: user.uid,
+    dateTbd: normalizedDateTbd,
+    declinedAt: null,
+    homeGameId: '',
+    isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
+    location: trimmedLocation || sourceTeam.primaryLocation || 'Location TBD',
+    notes: trimmedNotes,
+    status: 'open',
+    targetTeamClubSlug: target?.clubSlug ?? '',
+    targetTeamName: target?.name ?? '',
+    targetTeamSlug: target?.teamSlug ?? '',
+    timeLabel: normalizedDateTbd ? '' : trimmedTimeLabel,
+    updatedAt: serverTimestamp(),
+    visibility: normalizedVisibility,
+  });
+
+  return challengeId;
+}
+
+export async function listClubChallenges(challengeClubSlug) {
+  requireDb();
+
+  if (!challengeClubSlug || challengeClubSlug === INDEPENDENT_CLUB.slug) {
+    return [];
+  }
+
+  const snapshot = await getDocs(collection(db, 'clubs', challengeClubSlug, 'challenges'));
+  const challenges = snapshot.docs
+    .map((entry) => normalizeChallenge(entry, challengeClubSlug))
+    .filter((challenge) => challenge.status === 'open' && challenge.visibility === 'open');
+
+  challenges.sort((left, right) => (right.createdAtMs || 0) - (left.createdAtMs || 0));
+
+  return challenges;
+}
+
+export async function listTeamChallenges({ challengeClubSlug, clubSlug, teamSlug }) {
+  requireDb();
+
+  if (!challengeClubSlug || challengeClubSlug === INDEPENDENT_CLUB.slug || !clubSlug || !teamSlug) {
+    return [];
+  }
+
+  const snapshot = await getDocs(collection(db, 'clubs', challengeClubSlug, 'challenges'));
+  const challenges = snapshot.docs
+    .map((entry) => normalizeChallenge(entry, challengeClubSlug))
+    .filter(
+      (challenge) =>
+        (challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug) ||
+        (challenge.targetTeamClubSlug === clubSlug && challenge.targetTeamSlug === teamSlug) ||
+        (challenge.acceptedByTeamClubSlug === clubSlug && challenge.acceptedByTeamSlug === teamSlug),
+    );
+
+  challenges.sort((left, right) => (right.createdAtMs || 0) - (left.createdAtMs || 0));
+
+  return challenges;
+}
+
+export async function listAdminChallenges(user) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only the app admin can view all challenges.');
+  }
+
+  const clubs = await listClubs();
+  const challengeGroups = await Promise.all(
+    clubs.map(async (club) => {
+      const snapshot = await getDocs(collection(db, 'clubs', club.slug, 'challenges'));
+
+      return snapshot.docs.map((entry) => ({
+        ...normalizeChallenge(entry, club.slug),
+        challengeClubName: club.name,
+      }));
+    }),
+  );
+  const challenges = challengeGroups.flat();
+
+  challenges.sort((left, right) => (right.createdAtMs || 0) - (left.createdAtMs || 0));
+
+  return challenges;
+}
+
+export async function deleteChallengeAsAdmin({ challengeClubSlug, challengeId, user }) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only the app admin can delete challenges.');
+  }
+
+  const challengeRef = doc(db, 'clubs', challengeClubSlug, 'challenges', challengeId);
+  const challengeSnapshot = await getDoc(challengeRef);
+
+  if (!challengeSnapshot.exists()) {
+    throw new Error('That challenge could not be found.');
+  }
+
+  const challenge = normalizeChallenge(challengeSnapshot, challengeClubSlug);
+  const batch = writeBatch(db);
+
+  batch.delete(challengeRef);
+
+  if (challenge.homeGameId && challenge.createdByTeamClubSlug && challenge.createdByTeamSlug) {
+    batch.delete(
+      doc(
+        db,
+        'clubs',
+        challenge.createdByTeamClubSlug,
+        'teams',
+        challenge.createdByTeamSlug,
+        'games',
+        challenge.homeGameId,
+      ),
+    );
+  }
+
+  if (challenge.awayGameId && challenge.acceptedByTeamClubSlug && challenge.acceptedByTeamSlug) {
+    batch.delete(
+      doc(
+        db,
+        'clubs',
+        challenge.acceptedByTeamClubSlug,
+        'teams',
+        challenge.acceptedByTeamSlug,
+        'games',
+        challenge.awayGameId,
+      ),
+    );
+  }
+
+  await batch.commit();
+}
+
+export async function acceptChallenge({ challengeId, challengeClubSlug, clubSlug, teamSlug, user }) {
+  requireDb();
+
+  await requireTeamManager({ clubSlug, teamSlug, user });
+
+  const challengeRef = doc(db, 'clubs', challengeClubSlug, 'challenges', challengeId);
+  const challengeSnapshot = await getDoc(challengeRef);
+
+  if (!challengeSnapshot.exists()) {
+    throw new Error('That challenge could not be found.');
+  }
+
+  const challenge = normalizeChallenge(challengeSnapshot, challengeClubSlug);
+
+  if (challenge.status !== 'open') {
+    throw new Error('This challenge is no longer open.');
+  }
+
+  if (challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug) {
+    throw new Error('A team cannot accept its own challenge.');
+  }
+
+  if (
+    challenge.visibility === 'targeted' &&
+    (challenge.targetTeamClubSlug !== clubSlug || challenge.targetTeamSlug !== teamSlug)
+  ) {
+    throw new Error('Only the challenged team can accept this challenge.');
+  }
+
+  const [createdByTeam, acceptedByTeam] = await Promise.all([
+    getApprovedChallengeTeam({
+      challengeClubSlug,
+      teamClubSlug: challenge.createdByTeamClubSlug,
+      teamSlug: challenge.createdByTeamSlug,
+    }),
+    getApprovedChallengeTeam({
+      challengeClubSlug,
+      teamClubSlug: clubSlug,
+      teamSlug,
+    }),
+  ]);
+  const homeGameId = `challenge-${challengeId}-${createdByTeam.teamSlug}`;
+  const awayGameId = `challenge-${challengeId}-${acceptedByTeam.teamSlug}`;
+  const batch = writeBatch(db);
+
+  batch.update(challengeRef, {
+    acceptedAt: serverTimestamp(),
+    acceptedByTeamClubSlug: acceptedByTeam.clubSlug,
+    acceptedByTeamName: acceptedByTeam.name,
+    acceptedByTeamSlug: acceptedByTeam.teamSlug,
+    acceptedByUid: user.uid,
+    awayGameId,
+    homeGameId,
+    status: 'accepted',
+    updatedAt: serverTimestamp(),
+  });
+  batch.set(
+    doc(db, 'clubs', createdByTeam.clubSlug, 'teams', createdByTeam.teamSlug, 'games', homeGameId),
+    buildChallengeGamePayload({
+      challenge,
+      challengeClubSlug,
+      createdBy: createdByTeam,
+      linkedGameId: awayGameId,
+      linkedTeam: acceptedByTeam,
+      user,
+    }),
+  );
+  batch.set(
+    doc(db, 'clubs', acceptedByTeam.clubSlug, 'teams', acceptedByTeam.teamSlug, 'games', awayGameId),
+    buildChallengeGamePayload({
+      challenge,
+      challengeClubSlug,
+      createdBy: acceptedByTeam,
+      linkedGameId: homeGameId,
+      linkedTeam: createdByTeam,
+      user,
+    }),
+  );
+
+  await batch.commit();
+}
+
+export async function declineChallenge({ challengeId, challengeClubSlug, clubSlug, teamSlug, user }) {
+  requireDb();
+
+  await requireTeamManager({ clubSlug, teamSlug, user });
+
+  const challengeRef = doc(db, 'clubs', challengeClubSlug, 'challenges', challengeId);
+  const challengeSnapshot = await getDoc(challengeRef);
+
+  if (!challengeSnapshot.exists()) {
+    throw new Error('That challenge could not be found.');
+  }
+
+  const challenge = normalizeChallenge(challengeSnapshot, challengeClubSlug);
+
+  if (
+    challenge.status !== 'open' ||
+    challenge.visibility !== 'targeted' ||
+    challenge.targetTeamClubSlug !== clubSlug ||
+    challenge.targetTeamSlug !== teamSlug
+  ) {
+    throw new Error('Only the challenged team can decline an open targeted challenge.');
+  }
+
+  await updateDoc(challengeRef, {
+    declinedAt: serverTimestamp(),
+    status: 'declined',
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function cancelChallenge({ challengeId, challengeClubSlug, clubSlug, teamSlug, user }) {
+  requireDb();
+
+  await requireTeamManager({ clubSlug, teamSlug, user });
+
+  const challengeRef = doc(db, 'clubs', challengeClubSlug, 'challenges', challengeId);
+  const challengeSnapshot = await getDoc(challengeRef);
+
+  if (!challengeSnapshot.exists()) {
+    throw new Error('That challenge could not be found.');
+  }
+
+  const challenge = normalizeChallenge(challengeSnapshot, challengeClubSlug);
+
+  if (
+    challenge.status !== 'open' ||
+    challenge.createdByTeamClubSlug !== clubSlug ||
+    challenge.createdByTeamSlug !== teamSlug
+  ) {
+    throw new Error('Only the posting team can cancel an open challenge.');
+  }
+
+  await updateDoc(challengeRef, {
+    cancelledAt: serverTimestamp(),
+    status: 'cancelled',
+    updatedAt: serverTimestamp(),
+  });
 }
 
 export async function rotateTeamJoinCode({ clubSlug, teamSlug }) {
@@ -1406,6 +2150,10 @@ function gameSortKey(game) {
   return game.isoDate || '9999-12-31';
 }
 
+function normalizeTimeLabel(value) {
+  return (value ?? '').replace(':undefined', ':00');
+}
+
 function createEmptyPairings() {
   return Array.from({ length: 4 }, (_, index) => ({
     courtLabel: `Court ${index + 1}`,
@@ -1477,7 +2225,7 @@ export async function listGames(clubSlug, teamSlug) {
         ),
       rosterPlayerIds: normalizePlayerIdList(data.rosterPlayerIds),
       teamScore: normalizeNullableNumber(data.teamScore),
-      timeLabel: data.timeLabel ?? '',
+      timeLabel: normalizeTimeLabel(data.timeLabel),
     };
   });
 

@@ -40,11 +40,7 @@ service cloud.firestore {
     }
 
     function isPlatformAdmin() {
-      return signedIn()
-        && (
-          isBootstrapPlatformAdmin()
-          || exists(/databases/$(database)/documents/platformAdmins/$(request.auth.uid))
-        );
+      return isBootstrapPlatformAdmin();
     }
 
     function isClubAdmin(clubId) {
@@ -118,12 +114,132 @@ service cloud.firestore {
         && request.resource.data.playerId == uid;
     }
 
+    function teamDoc(teamClubId, teamId) {
+      return get(/databases/$(database)/documents/clubs/$(teamClubId)/teams/$(teamId));
+    }
+
+    function isApprovedClubTeam(challengeClubId, teamClubId, teamId) {
+      return teamDoc(teamClubId, teamId).data.affiliationStatus == 'approved'
+        && teamDoc(teamClubId, teamId).data.approvedClubSlug == challengeClubId;
+    }
+
+    function challengeAfter(challengeClubId, challengeId) {
+      return getAfter(/databases/$(database)/documents/clubs/$(challengeClubId)/challenges/$(challengeId));
+    }
+
+    function safeChallengeCreate(clubId) {
+      return signedIn()
+        && request.resource.data.status == 'open'
+        && request.resource.data.clubSlug == clubId
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.visibility in ['open', 'targeted']
+        && request.resource.data.createdByTeamClubSlug is string
+        && request.resource.data.createdByTeamSlug is string
+        && isManager(request.resource.data.createdByTeamClubSlug, request.resource.data.createdByTeamSlug)
+        && isApprovedClubTeam(clubId, request.resource.data.createdByTeamClubSlug, request.resource.data.createdByTeamSlug)
+        && (
+          request.resource.data.visibility == 'open'
+          || (
+            request.resource.data.targetTeamClubSlug is string
+            && request.resource.data.targetTeamSlug is string
+            && isApprovedClubTeam(clubId, request.resource.data.targetTeamClubSlug, request.resource.data.targetTeamSlug)
+            && !(
+              request.resource.data.targetTeamClubSlug == request.resource.data.createdByTeamClubSlug
+              && request.resource.data.targetTeamSlug == request.resource.data.createdByTeamSlug
+            )
+          )
+        );
+    }
+
+    function safeChallengeCancel() {
+      return resource.data.status == 'open'
+        && isManager(resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
+        && request.resource.data.status == 'cancelled'
+        && request.resource.data.createdByTeamClubSlug == resource.data.createdByTeamClubSlug
+        && request.resource.data.createdByTeamSlug == resource.data.createdByTeamSlug
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'cancelledAt',
+          'status',
+          'updatedAt',
+        ]);
+    }
+
+    function safeChallengeDecline() {
+      return resource.data.status == 'open'
+        && resource.data.visibility == 'targeted'
+        && isManager(resource.data.targetTeamClubSlug, resource.data.targetTeamSlug)
+        && request.resource.data.status == 'declined'
+        && request.resource.data.targetTeamClubSlug == resource.data.targetTeamClubSlug
+        && request.resource.data.targetTeamSlug == resource.data.targetTeamSlug
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'declinedAt',
+          'status',
+          'updatedAt',
+        ]);
+    }
+
+    function safeChallengeAccept(clubId) {
+      return resource.data.status == 'open'
+        && request.resource.data.status == 'accepted'
+        && request.resource.data.acceptedByUid == request.auth.uid
+        && request.resource.data.acceptedByTeamClubSlug is string
+        && request.resource.data.acceptedByTeamSlug is string
+        && isManager(request.resource.data.acceptedByTeamClubSlug, request.resource.data.acceptedByTeamSlug)
+        && isApprovedClubTeam(clubId, request.resource.data.acceptedByTeamClubSlug, request.resource.data.acceptedByTeamSlug)
+        && request.resource.data.createdByTeamClubSlug == resource.data.createdByTeamClubSlug
+        && request.resource.data.createdByTeamSlug == resource.data.createdByTeamSlug
+        && !(
+          request.resource.data.acceptedByTeamClubSlug == resource.data.createdByTeamClubSlug
+          && request.resource.data.acceptedByTeamSlug == resource.data.createdByTeamSlug
+        )
+        && (
+          resource.data.visibility == 'open'
+          || (
+            request.resource.data.acceptedByTeamClubSlug == resource.data.targetTeamClubSlug
+            && request.resource.data.acceptedByTeamSlug == resource.data.targetTeamSlug
+          )
+        )
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'acceptedAt',
+          'acceptedByTeamClubSlug',
+          'acceptedByTeamName',
+          'acceptedByTeamSlug',
+          'acceptedByUid',
+          'awayGameId',
+          'homeGameId',
+          'status',
+          'updatedAt',
+        ]);
+    }
+
+    function safeChallengeGameCreate(clubId, teamId) {
+      let challenge = challengeAfter(request.resource.data.challengeClubSlug, request.resource.data.challengeId).data;
+      return signedIn()
+        && request.resource.data.challengeClubSlug is string
+        && request.resource.data.challengeId is string
+        && challenge.status == 'accepted'
+        && challenge.acceptedByUid == request.auth.uid
+        && (
+          (
+            clubId == challenge.createdByTeamClubSlug
+            && teamId == challenge.createdByTeamSlug
+            && request.resource.data.linkedGameId == challenge.awayGameId
+          )
+          || (
+            clubId == challenge.acceptedByTeamClubSlug
+            && teamId == challenge.acceptedByTeamSlug
+            && request.resource.data.linkedGameId == challenge.homeGameId
+          )
+        );
+    }
+
     match /users/{uid} {
       allow read, create: if isSelf(uid);
       allow update: if isSelf(uid) && request.resource.data.uid == resource.data.uid;
 
       match /memberships/{membershipId} {
         allow read, create, update: if isSelf(uid);
+        allow delete: if isSelf(uid) || isPlatformAdmin();
       }
     }
 
@@ -170,6 +286,16 @@ service cloud.firestore {
             'status',
             'updatedAt',
           ]);
+        allow delete: if isPlatformAdmin();
+      }
+
+      match /challenges/{challengeId} {
+        allow read: if signedIn();
+        allow create: if safeChallengeCreate(clubId);
+        allow update: if safeChallengeAccept(clubId)
+          || safeChallengeDecline()
+          || safeChallengeCancel();
+        allow delete: if isPlatformAdmin();
       }
 
       match /teams/{teamId} {
@@ -220,6 +346,7 @@ service cloud.firestore {
               'updatedAt',
             ])
           );
+        allow delete: if isPlatformAdmin();
 
         match /members/{uid} {
           allow read: if isTeamMember(clubId, teamId) || isAdminContext();
@@ -234,27 +361,31 @@ service cloud.firestore {
           allow update: if safeSelfMembershipUpdate(uid)
             || safeManagerMembershipSync(uid, clubId, teamId)
             || safeCaptainRoleUpdate(uid, clubId, teamId);
+          allow delete: if isPlatformAdmin();
         }
 
         match /players/{playerId} {
           allow read: if isTeamMember(clubId, teamId) || isAdminContext();
           allow create: if safeSelfPlayerWrite(playerId, teamId);
           allow update: if isManager(clubId, teamId) || safeSelfPlayerWrite(playerId, teamId);
+          allow delete: if isPlatformAdmin();
         }
 
         match /playerLinks/{uid} {
-          allow read: if isSelf(uid) || isManager(clubId, teamId);
+          allow read: if isSelf(uid) || isManager(clubId, teamId) || isPlatformAdmin();
           allow create, update: if safeSelfPlayerLinkWrite(uid, teamId) || isManager(clubId, teamId);
+          allow delete: if isPlatformAdmin();
         }
 
         match /games/{gameId} {
-          allow read: if isTeamMember(clubId, teamId);
-          allow create, update, delete: if isManager(clubId, teamId);
+          allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin();
+          allow create: if isManager(clubId, teamId) || safeChallengeGameCreate(clubId, teamId);
+          allow update, delete: if isManager(clubId, teamId) || isPlatformAdmin();
         }
 
         match /newsPosts/{postId} {
-          allow read: if isTeamMember(clubId, teamId);
-          allow create, update, delete: if isManager(clubId, teamId);
+          allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin();
+          allow create, update, delete: if isManager(clubId, teamId) || isPlatformAdmin();
         }
       }
     }

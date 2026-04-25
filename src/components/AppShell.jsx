@@ -23,6 +23,7 @@ const primaryRoutes = [
 ];
 
 const adminRoutes = [
+  { label: 'Challenges', to: 'challenges' },
   { label: 'Roster Mgmt', to: 'roster-mgmt' },
   { label: 'Schedule + Scores', to: 'schedule-scores' },
   { label: 'Player Mgmt', to: 'player-mgmt' },
@@ -205,6 +206,7 @@ export default function AppShell() {
 
         <nav className="sidebar__nav">
           <div className="sidebar__nav-group">
+            <p className="sidebar__nav-heading">Player</p>
             {primaryRoutes.map((route) => (
               <NavLink
                 key={route.label}
@@ -218,7 +220,7 @@ export default function AppShell() {
 
           {canManage ? (
             <div className="sidebar__nav-group">
-              <p className="sidebar__nav-heading">Admin</p>
+              <p className="sidebar__nav-heading">Captain</p>
               {adminRoutes.map((route) => (
                 <NavLink
                   key={route.label}

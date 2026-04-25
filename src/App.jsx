@@ -3,12 +3,15 @@ import AppShell from './components/AppShell';
 import ProtectedRoute from './components/ProtectedRoute';
 import LandingPage from './pages/LandingPage';
 import AuthPage from './pages/AuthPage';
+import ClubDirectoryPage from './pages/ClubDirectoryPage';
 import CreateTeamPage from './pages/CreateTeamPage';
 import JoinTeamPage from './pages/JoinTeamPage';
 import OnboardingPage from './pages/OnboardingPage';
 import TeamChooserPage from './pages/TeamChooserPage';
+import TeamDirectoryPage from './pages/TeamDirectoryPage';
 import {
   AvailabilityPage,
+  ChallengesPage,
   ClubAffiliationAdminPage,
   GameRostersPage,
   NewsPage,
@@ -41,17 +44,25 @@ export default function App() {
       <Route
         element={
           <ProtectedRoute>
-            <ClubAffiliationAdminPage />
+            <TeamDirectoryPage />
           </ProtectedRoute>
         }
-        path="/admin"
+        path="/team-directory"
       />
       <Route
         element={
           <ProtectedRoute>
-            <ClubAffiliationAdminPage />
+            <ClubDirectoryPage />
           </ProtectedRoute>
         }
+        path="/club-directory"
+      />
+      <Route
+        element={<ClubAffiliationAdminPage />}
+        path="/admin"
+      />
+      <Route
+        element={<ClubAffiliationAdminPage />}
         path="/club-admin"
       />
 
@@ -68,6 +79,7 @@ export default function App() {
         <Route element={<RosterPage />} path="roster" />
         <Route element={<RosterPage />} path="player-mgmt" />
         <Route element={<SchedulePage />} path="schedule" />
+        <Route element={<ChallengesPage />} path="challenges" />
         <Route element={<ScheduleScoresPage />} path="schedule-scores" />
         <Route element={<StandingsPage />} path="standings" />
         <Route element={<StandingsPage />} path="team-standing" />
