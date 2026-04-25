@@ -248,6 +248,10 @@ service cloud.firestore {
       allow write: if isPlatformAdmin();
     }
 
+    match /{path=**}/teams/{teamId} {
+      allow read: if signedIn();
+    }
+
     match /clubs/{clubId} {
       allow read: if signedIn();
       allow create: if signedIn()

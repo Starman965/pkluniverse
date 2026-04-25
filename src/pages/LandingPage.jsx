@@ -81,21 +81,24 @@ export default function LandingPage() {
               <span>Starting a new team? Set it up, become captain, and share your first join code.</span>
             </div>
           </Link>
+        </div>
+      </section>
 
-          <Link className="marketing-action-card" to="/team-directory">
-            <img alt="Browse the team directory" className="marketing-action-card__image" src={teamDirectoryImage} />
-            <div className="marketing-action-card__body">
-              <strong>Team Directory</strong>
-              <span>Browse teams by club, captain, member count, and location.</span>
-            </div>
+      <section className="marketing-section">
+        <div className="marketing-section__header">
+          <div>
+            <p className="eyebrow">Explore</p>
+            <h2>Browse the PKL Universe</h2>
+          </div>
+        </div>
+
+        <div className="directory-link-grid">
+          <Link className="directory-link-card" aria-label="Browse the club directory" to="/club-directory">
+            <img alt="Club Directory" className="directory-link-card__image" src={clubDirectoryImage} />
           </Link>
 
-          <Link className="marketing-action-card" to="/club-directory">
-            <img alt="Browse the club directory" className="marketing-action-card__image" src={clubDirectoryImage} />
-            <div className="marketing-action-card__body">
-              <strong>Club Directory</strong>
-              <span>Explore approved clubs and see how many teams are active in each network.</span>
-            </div>
+          <Link className="directory-link-card" aria-label="Browse the team directory" to="/team-directory">
+            <img alt="Team Directory" className="directory-link-card__image" src={teamDirectoryImage} />
           </Link>
         </div>
       </section>

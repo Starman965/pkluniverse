@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { createTeam, joinTeamByCode, listMemberships } from '../lib/data';
+import { clearOnboardingIntent, readOnboardingIntent, writeOnboardingIntent } from '../lib/onboardingIntent';
 import createTeamImage from '../../create_team.png';
 import joinTeamImage from '../../join_team.png';
 
-const ONBOARDING_INTENT_KEY = 'pkl-onboarding-intent';
 const MODE_CONTENT = {
   create: {
     bodyCopy: 'Start with a team name and we will handle the setup.',
@@ -42,26 +42,9 @@ const MODE_CONTENT = {
   },
 };
 
-function readOnboardingIntent() {
-  try {
-    const rawValue = window.sessionStorage.getItem(ONBOARDING_INTENT_KEY);
-    return rawValue ? JSON.parse(rawValue) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeOnboardingIntent(intent) {
-  window.sessionStorage.setItem(ONBOARDING_INTENT_KEY, JSON.stringify(intent));
-}
-
-function clearOnboardingIntent() {
-  window.sessionStorage.removeItem(ONBOARDING_INTENT_KEY);
-}
-
 export default function TeamEntryPage({ mode }) {
   const content = MODE_CONTENT[mode] ?? MODE_CONTENT.join;
-  const { isAuthenticated, isFirebaseConfigured, signInWithGoogle, user } = useAuth();
+  const { isAuthenticated, isFirebaseConfigured, loading, signInWithGoogle, user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [teamName, setTeamName] = useState('');
@@ -136,7 +119,7 @@ export default function TeamEntryPage({ mode }) {
   }
 
   useEffect(() => {
-    if (!isAuthenticated || busyAction) {
+    if (loading || !isAuthenticated || busyAction) {
       return;
     }
 
@@ -158,7 +141,7 @@ export default function TeamEntryPage({ mode }) {
       clearOnboardingIntent();
       submitJoinTeam(intent.joinCode);
     }
-  }, [busyAction, isAuthenticated, mode]);
+  }, [busyAction, isAuthenticated, loading, mode]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -223,10 +206,12 @@ export default function TeamEntryPage({ mode }) {
 
             <button
               className={mode === 'create' ? 'button' : 'button button--ghost'}
-              disabled={!isFirebaseConfigured || busyAction === mode}
+              disabled={!isFirebaseConfigured || loading || busyAction === mode}
               type="submit"
             >
-              {busyAction === mode
+              {loading
+                ? 'Checking sign-in...'
+                : busyAction === mode
                 ? mode === 'create'
                   ? 'Creating team...'
                   : 'Joining team...'

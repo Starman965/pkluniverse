@@ -754,6 +754,28 @@ export async function listClubDirectory() {
   });
 }
 
+async function findTeamByJoinCode(normalizedCode) {
+  const clubs = await listClubs({ includeIndependent: true });
+
+  for (const club of clubs) {
+    const teamsSnapshot = await getDocs(collection(db, 'clubs', club.slug, 'teams'));
+    const matchingTeamDoc = teamsSnapshot.docs.find((teamEntry) => {
+      const joinCode = (teamEntry.data().joinCode ?? '').trim().toUpperCase();
+      return joinCode === normalizedCode;
+    });
+
+    if (matchingTeamDoc) {
+      return {
+        clubSlug: club.slug,
+        team: matchingTeamDoc.data(),
+        teamDoc: matchingTeamDoc,
+      };
+    }
+  }
+
+  return null;
+}
+
 async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
   const playerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'players', user.uid);
   const membershipPlayerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'playerLinks', user.uid);
@@ -919,20 +941,14 @@ export async function joinTeamByCode({ code, user }) {
     throw new Error('Enter a join code first.');
   }
 
-  const teamQuery = query(
-    collectionGroup(db, 'teams'),
-    where('joinCode', '==', normalizedCode),
-    limit(1),
-  );
-  const teamSnapshot = await getDocs(teamQuery);
+  const match = await findTeamByJoinCode(normalizedCode);
 
-  if (teamSnapshot.empty) {
+  if (!match) {
     throw new Error('No team matched that join code.');
   }
 
-  const teamDoc = teamSnapshot.docs[0];
-  const team = teamDoc.data();
-  const teamClubSlug = team.clubId ?? teamDoc.ref.parent.parent?.id ?? INDEPENDENT_CLUB.id;
+  const { team, teamDoc } = match;
+  const teamClubSlug = team.clubId ?? match.clubSlug ?? teamDoc.ref.parent.parent?.id ?? INDEPENDENT_CLUB.id;
   const teamSlug = team.slug ?? teamDoc.id;
   const membershipRef = doc(db, 'clubs', teamClubSlug, 'teams', teamSlug, 'members', user.uid);
   const existingMemberships = await listMemberships(user.uid).catch(() => []);
