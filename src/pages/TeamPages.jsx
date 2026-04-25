@@ -1238,9 +1238,11 @@ export function ScheduleScoresPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(createEmptyScheduleAdminForm());
+  const [teamName, setTeamName] = useState('');
   const [teamPrimaryLocation, setTeamPrimaryLocation] = useState('Blackhawk Country Club');
 
   const canManage = canManageRole(membership?.role);
+  const teamScoreLabel = `${teamName || 'Team'} score`;
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
 
   async function loadScheduleData() {
@@ -1254,6 +1256,7 @@ export function ScheduleScoresPage() {
     setGames(gameData);
     setGameDrafts(buildScheduleAdminDrafts(gameData));
     setMembership(membershipData);
+    setTeamName(teamData?.name ?? '');
     setTeamPrimaryLocation(nextPrimaryLocation);
     setForm((current) =>
       current.location === 'Blackhawk Country Club'
@@ -1541,7 +1544,7 @@ export function ScheduleScoresPage() {
                     </label>
                     <div className="schedule-admin-form__score-grid">
                       <label className="field">
-                        <span>Hawk&apos;n&apos;Roll score</span>
+                        <span>{teamScoreLabel}</span>
                         <input
                           inputMode="numeric"
                           onChange={(event) =>
@@ -1650,7 +1653,7 @@ export function ScheduleScoresPage() {
                   </label>
                   <div className="schedule-admin-form__score-grid">
                     <label className="field">
-                      <span>Hawk&apos;n&apos;Roll score</span>
+                      <span>{teamScoreLabel}</span>
                       <input
                         inputMode="numeric"
                         onChange={(event) => setForm((current) => ({ ...current, teamScore: event.target.value }))}
@@ -1747,7 +1750,7 @@ export function ScheduleScoresPage() {
               </label>
               <div className="schedule-admin-form__score-grid">
                 <label className="field">
-                  <span>Hawk&apos;n&apos;Roll score</span>
+                  <span>{teamScoreLabel}</span>
                   <input
                     inputMode="numeric"
                     onChange={(event) => setForm((current) => ({ ...current, teamScore: event.target.value }))}
@@ -2841,17 +2844,20 @@ export function NewsPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
   const [newsPosts, setNewsPosts] = useState([]);
+  const [teamName, setTeamName] = useState('');
   const [membership, setMembership] = useState(null);
   const [error, setError] = useState('');
 
   async function loadNewsData() {
-    const [posts, membershipData] = await Promise.all([
+    const [posts, membershipData, teamData] = await Promise.all([
       listNewsPosts(clubSlug, teamSlug),
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
+      getTeam(clubSlug, teamSlug),
     ]);
 
     setNewsPosts(posts);
     setMembership(membershipData);
+    setTeamName(teamData?.name ?? '');
   }
 
   useEffect(() => {
@@ -2864,7 +2870,7 @@ export function NewsPage() {
     <div className="page-grid news-page">
       <section className="card">
         <NewsFeedIntro
-          copy="Catch the latest team updates, announcements, photos, and links from Hawk'n'Roll."
+          copy={`Catch the latest team updates, announcements, photos, and links from ${teamName || 'the team'}.`}
           title="News"
         />
 
