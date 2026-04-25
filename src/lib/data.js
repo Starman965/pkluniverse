@@ -941,16 +941,10 @@ export async function joinTeamByCode({ code, user }) {
       (membership) => membership.clubSlug === teamClubSlug && membership.teamSlug === teamSlug,
     ) ?? null;
   const nextRole = existingMembership?.role ?? 'member';
-  const playerId = await ensurePlayerProfile({
-    clubId: teamClubSlug,
-    teamId: teamSlug,
-    teamName: team.name,
-    user,
-  });
 
   if (existingMembership) {
     await updateDoc(membershipRef, {
-      playerId,
+      playerId: user.uid,
       updatedAt: serverTimestamp(),
     });
   } else {
@@ -958,13 +952,27 @@ export async function joinTeamByCode({ code, user }) {
       clubId: teamClubSlug,
       clubSlug: teamClubSlug,
       joinedAt: serverTimestamp(),
-      playerId,
+      playerId: user.uid,
       role: nextRole,
       status: 'active',
       teamId: teamSlug,
       teamName: team.name,
       teamSlug,
       uid: user.uid,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  const playerId = await ensurePlayerProfile({
+    clubId: teamClubSlug,
+    teamId: teamSlug,
+    teamName: team.name,
+    user,
+  });
+
+  if (playerId !== user.uid) {
+    await updateDoc(membershipRef, {
+      playerId,
       updatedAt: serverTimestamp(),
     });
   }

@@ -349,7 +349,7 @@ service cloud.firestore {
         allow delete: if isPlatformAdmin();
 
         match /members/{uid} {
-          allow read: if isTeamMember(clubId, teamId) || isAdminContext();
+          allow read: if isSelf(uid) || isTeamMember(clubId, teamId) || isAdminContext();
           allow create: if signedIn()
             && request.auth.uid == uid
             && request.resource.data.uid == uid
