@@ -114,6 +114,21 @@ service cloud.firestore {
         && request.resource.data.playerId == uid;
     }
 
+    function safeSelfAvailabilityUpdate(clubId, teamId) {
+      let playerId = memberDoc(clubId, teamId).data.playerId;
+      return isTeamMember(clubId, teamId)
+        && playerId is string
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'attendance',
+          'updatedAt',
+        ])
+        && request.resource.data.attendance.diff(resource.data.attendance).affectedKeys().hasOnly([playerId])
+        && (
+          !request.resource.data.attendance.keys().hasAny([playerId])
+          || request.resource.data.attendance[playerId] in ['in', 'out']
+        );
+    }
+
     function teamDoc(teamClubId, teamId) {
       return get(/databases/$(database)/documents/clubs/$(teamClubId)/teams/$(teamId));
     }
@@ -384,7 +399,8 @@ service cloud.firestore {
         match /games/{gameId} {
           allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin();
           allow create: if isManager(clubId, teamId) || safeChallengeGameCreate(clubId, teamId);
-          allow update, delete: if isManager(clubId, teamId) || isPlatformAdmin();
+          allow update: if isManager(clubId, teamId) || isPlatformAdmin() || safeSelfAvailabilityUpdate(clubId, teamId);
+          allow delete: if isManager(clubId, teamId) || isPlatformAdmin();
         }
 
         match /newsPosts/{postId} {

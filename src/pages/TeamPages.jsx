@@ -131,6 +131,35 @@ function createPairingDraft(game) {
   };
 }
 
+function getPairingCountForRoster(rosterPlayerIds = []) {
+  return Math.min(4, Math.max(1, Math.ceil(rosterPlayerIds.length / 2)));
+}
+
+function normalizeDraftPairings(pairings = [], rosterPlayerIds = []) {
+  const selectedIds = new Set(rosterPlayerIds);
+  const seen = new Set();
+
+  return Array.from({ length: getPairingCountForRoster(rosterPlayerIds) }, (_, index) => {
+    const sourcePairing = pairings[index] ?? {};
+    const playerIds = (sourcePairing.playerIds ?? []).filter((playerId) => {
+      if (!selectedIds.has(playerId) || seen.has(playerId)) {
+        return false;
+      }
+
+      seen.add(playerId);
+      return true;
+    });
+
+    return {
+      courtLabel:
+        typeof sourcePairing.courtLabel === 'string' && sourcePairing.courtLabel.trim()
+          ? sourcePairing.courtLabel.trim()
+          : `Court ${index + 1}`,
+      playerIds: playerIds.slice(0, 2),
+    };
+  });
+}
+
 function buildPairingDrafts(games) {
   return games.reduce((accumulator, game) => {
     accumulator[game.id] = createPairingDraft(game);
@@ -151,7 +180,13 @@ function assignPlayerToNextOpenPairingSlot(pairings, playerId) {
     }
   }
 
-  return nextPairings;
+  return [
+    ...nextPairings,
+    {
+      courtLabel: `Court ${nextPairings.length + 1}`,
+      playerIds: [playerId],
+    },
+  ].slice(0, 4);
 }
 
 function formatMatchupLabel(game) {
@@ -410,18 +445,20 @@ function getGameRosterBadge(game, todayDateKey) {
 }
 
 function buildRosterPairings(game, players) {
-  return buildPairingSummary(game, players).pairings.map((pairing) => {
-    const teamDupr = pairing.players.reduce(
-      (total, player) => (typeof player.dupr === 'number' ? total + player.dupr : total),
-      0,
-    );
+  return buildPairingSummary(game, players).pairings
+    .filter((pairing) => pairing.players.length > 0)
+    .map((pairing) => {
+      const teamDupr = pairing.players.reduce(
+        (total, player) => (typeof player.dupr === 'number' ? total + player.dupr : total),
+        0,
+      );
 
-    return {
-      ...pairing,
-      filledSlots: pairing.players.length,
-      teamDupr,
-    };
-  });
+      return {
+        ...pairing,
+        filledSlots: pairing.players.length,
+        teamDupr,
+      };
+    });
 }
 
 function formatNewsPostDate(post) {
@@ -1926,20 +1963,20 @@ export function GameRostersPage() {
               </span>
             </div>
 
-            <div className="game-roster-board__pairs">
-              {rosterPairings.map((pairing) => (
-                <section key={pairing.courtLabel} className="game-roster-pair-card">
-                  <div className="game-roster-pair-card__header">
-                    <div className="game-roster-pair-card__title-row">
-                      <strong>{pairing.courtLabel}</strong>
-                      <span>Team DUPR: {formatDupr(pairing.teamDupr)}</span>
+            {rosterPairings.length > 0 ? (
+              <div className="game-roster-board__pairs">
+                {rosterPairings.map((pairing) => (
+                  <section key={pairing.courtLabel} className="game-roster-pair-card">
+                    <div className="game-roster-pair-card__header">
+                      <div className="game-roster-pair-card__title-row">
+                        <strong>{pairing.courtLabel}</strong>
+                        <span>Team DUPR: {formatDupr(pairing.teamDupr)}</span>
+                      </div>
+                      <span className="game-roster-pair-card__count">{pairing.filledSlots}/2</span>
                     </div>
-                    <span className="game-roster-pair-card__count">{pairing.filledSlots}/2</span>
-                  </div>
 
-                  <div className="game-roster-pair-card__players">
-                    {pairing.players.length > 0 ? (
-                      pairing.players.map((player) => (
+                    <div className="game-roster-pair-card__players">
+                      {pairing.players.map((player) => (
                         <article key={player.id} className="game-roster-player-card">
                           <div className="game-roster-player-card__identity">
                             <div className="game-roster-player-card__avatar">
@@ -1954,14 +1991,14 @@ export function GameRostersPage() {
                             DUPR {formatDupr(player.dupr)}
                           </span>
                         </article>
-                      ))
-                    ) : (
-                      <p className="sidebar__empty">No players assigned yet.</p>
-                    )}
-                  </div>
-                </section>
-              ))}
-            </div>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <p className="sidebar__empty">No players assigned yet.</p>
+            )}
           </article>
         ) : (
           <p>No matchups are available for game rosters yet.</p>
@@ -2013,9 +2050,46 @@ export function RosterMgmtPage() {
   }, [clubSlug, teamSlug, user?.uid]);
 
   const activeGame = games.find((game) => game.id === selectedGameId) ?? games[0] ?? null;
+  const availablePlayers = useMemo(
+    () => activePlayers.filter((player) => activeGame?.attendance?.[player.id] === 'in'),
+    [activeGame, activePlayers],
+  );
+  const availablePlayerIds = useMemo(
+    () => new Set(availablePlayers.map((player) => player.id)),
+    [availablePlayers],
+  );
   const activeDraft = activeGame
     ? pairingDrafts[activeGame.id] ?? createPairingDraft(activeGame)
     : null;
+
+  useEffect(() => {
+    if (!activeGame) {
+      return;
+    }
+
+    setPairingDrafts((current) => {
+      const draft = current[activeGame.id] ?? createPairingDraft(activeGame);
+      const rosterPlayerIds = draft.rosterPlayerIds.filter((playerId) => availablePlayerIds.has(playerId));
+      const pairings = normalizeDraftPairings(draft.pairings, rosterPlayerIds);
+
+      if (
+        rosterPlayerIds.length === draft.rosterPlayerIds.length &&
+        JSON.stringify(pairings) === JSON.stringify(draft.pairings)
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [activeGame.id]: {
+          ...draft,
+          pairings,
+          rosterPlayerIds,
+        },
+      };
+    });
+  }, [activeGame, availablePlayerIds]);
+
   const pairingSummary = useMemo(() => {
     if (!activeGame || !activeDraft) {
       return {
@@ -2046,6 +2120,11 @@ export function RosterMgmtPage() {
   }
 
   function toggleRosterPlayer(playerId) {
+    if (!availablePlayerIds.has(playerId)) {
+      setError('Only players marked Available for this matchup can be added to the roster.');
+      return;
+    }
+
     updateDraft((draft) => {
       const exists = draft.rosterPlayerIds.includes(playerId);
 
@@ -2058,7 +2137,7 @@ export function RosterMgmtPage() {
         ? draft.rosterPlayerIds.filter((id) => id !== playerId)
         : [...draft.rosterPlayerIds, playerId];
       const selectedIds = new Set(rosterPlayerIds);
-      let pairings = draft.pairings.map((pairing) => ({
+      let pairings = normalizeDraftPairings(draft.pairings, rosterPlayerIds).map((pairing) => ({
         ...pairing,
         playerIds: pairing.playerIds.filter((id) => selectedIds.has(id)),
       }));
@@ -2070,7 +2149,7 @@ export function RosterMgmtPage() {
       setError('');
       return {
         ...draft,
-        pairings,
+        pairings: normalizeDraftPairings(pairings, rosterPlayerIds),
         rosterPlayerIds,
       };
     });
@@ -2101,7 +2180,7 @@ export function RosterMgmtPage() {
 
       return {
         ...draft,
-        pairings: nextPairings,
+        pairings: normalizeDraftPairings(nextPairings, draft.rosterPlayerIds),
       };
     });
   }
@@ -2198,32 +2277,36 @@ export function RosterMgmtPage() {
             {canManage ? (
               <>
                 <p>
-                  Select up to eight active players for this matchup. Clicking a player adds them to
-                  the pool and auto-fills the next open court slot. Availability is shown as a guide.
+                  Select up to eight players marked Available for this matchup. Clicking a player adds
+                  them to the pool and auto-fills the next open court slot.
                 </p>
-                <div className="pairing-pool">
-                  {activePlayers.map((player) => {
-                    const selected = activeDraft?.rosterPlayerIds.includes(player.id);
-                    const attendanceStatus = formatAttendanceStatus(
-                      activeGame.attendance?.[player.id] ?? 'unknown',
-                    );
+                {availablePlayers.length > 0 ? (
+                  <div className="pairing-pool">
+                    {availablePlayers.map((player) => {
+                      const selected = activeDraft?.rosterPlayerIds.includes(player.id);
+                      const attendanceStatus = formatAttendanceStatus(
+                        activeGame.attendance?.[player.id] ?? 'unknown',
+                      );
 
-                    return (
-                      <button
-                        key={player.id}
-                        className={`pairing-chip ${selected ? 'pairing-chip--active' : ''}`}
-                        onClick={() => toggleRosterPlayer(player.id)}
-                        type="button"
-                      >
-                        <strong>{player.fullName || 'Unnamed player'}</strong>
-                        <span>
-                          {attendanceStatus}
-                          {player.skillLevel ? ` · ${player.skillLevel}` : ''}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                      return (
+                        <button
+                          key={player.id}
+                          className={`pairing-chip ${selected ? 'pairing-chip--active' : ''}`}
+                          onClick={() => toggleRosterPlayer(player.id)}
+                          type="button"
+                        >
+                          <strong>{player.fullName || 'Unnamed player'}</strong>
+                          <span>
+                            {attendanceStatus}
+                            {player.skillLevel ? ` · ${player.skillLevel}` : ''}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p>No players are marked Available for this matchup yet.</p>
+                )}
               </>
             ) : (
               <>
@@ -3952,6 +4035,7 @@ export function SettingsPage() {
         primaryLocation: form.primaryLocation,
         teamName: form.teamName,
         teamSlug,
+        user,
       });
       setMessage('Team settings saved.');
       await loadSettingsData();

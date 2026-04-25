@@ -6,7 +6,6 @@ import {
   deleteDoc,
   getDoc,
   getDocs,
-  limit,
   query,
   serverTimestamp,
   setDoc,
@@ -1118,7 +1117,7 @@ export async function listTeamMembers(clubSlug, teamSlug) {
   return members;
 }
 
-async function syncTeamNameReferences({ clubSlug, teamName, teamSlug }) {
+async function syncTeamNameReferences({ clubSlug, teamName, teamSlug, user }) {
   const membersRef = collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'members');
   const membersSnapshot = await getDocs(membersRef);
 
@@ -1129,27 +1128,30 @@ async function syncTeamNameReferences({ clubSlug, teamName, teamSlug }) {
   const batch = writeBatch(db);
 
   membersSnapshot.docs.forEach((entry) => {
-    const data = entry.data();
-    const uid = data.uid ?? entry.id;
-
     batch.update(entry.ref, {
       teamName,
       updatedAt: serverTimestamp(),
     });
+  });
+
+  const currentMember = membersSnapshot.docs.find((entry) => (entry.data().uid ?? entry.id) === user?.uid);
+
+  if (currentMember) {
+    const data = currentMember.data();
 
     batch.set(
-      doc(db, 'users', uid, 'memberships', `${clubSlug}_${teamSlug}`),
+      doc(db, 'users', user.uid, 'memberships', `${clubSlug}_${teamSlug}`),
       {
         clubSlug,
         role: data.role ?? 'member',
         teamName,
         teamSlug,
-        uid,
+        uid: user.uid,
         updatedAt: serverTimestamp(),
       },
       { merge: true },
     );
-  });
+  }
 
   await batch.commit();
 }
@@ -1161,6 +1163,7 @@ export async function updateTeamSettings({
   status = 'active',
   teamName,
   teamSlug,
+  user,
 }) {
   requireDb();
 
@@ -1207,6 +1210,7 @@ export async function updateTeamSettings({
       clubSlug,
       teamName: normalizedName,
       teamSlug,
+      user,
     });
   }
 }
@@ -1946,27 +1950,10 @@ export async function updateTeamMemberRole({
     throw new Error('Captain reassignment is not supported here yet.');
   }
 
-  const batch = writeBatch(db);
-
-  batch.update(membershipRef, {
+  await updateDoc(membershipRef, {
     role,
     updatedAt: serverTimestamp(),
   });
-
-  batch.set(
-    doc(db, 'users', targetUid, 'memberships', `${clubSlug}_${teamSlug}`),
-    {
-      clubSlug,
-      role,
-      teamName: membership.teamName ?? '',
-      teamSlug,
-      uid: targetUid,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
-
-  await batch.commit();
 }
 
 function normalizeNullableNumber(value) {
@@ -2178,8 +2165,13 @@ function normalizeTimeLabel(value) {
   return (value ?? '').replace(':undefined', ':00');
 }
 
-function createEmptyPairings() {
-  return Array.from({ length: 4 }, (_, index) => ({
+function getPairingCountForRoster(rosterPlayerIds = []) {
+  const selectedCount = normalizePlayerIdList(rosterPlayerIds).length;
+  return Math.min(4, Math.max(1, Math.ceil(selectedCount / 2)));
+}
+
+function createEmptyPairings(pairingCount = 1) {
+  return Array.from({ length: pairingCount }, (_, index) => ({
     courtLabel: `Court ${index + 1}`,
     playerIds: [],
   }));
@@ -2200,7 +2192,7 @@ function normalizePairings(pairings, rosterPlayerIds = []) {
   const source = Array.isArray(pairings) ? pairings : [];
   const seen = new Set();
 
-  return createEmptyPairings().map((defaultPairing, index) => {
+  return createEmptyPairings(getPairingCountForRoster(rosterPlayerIds)).map((defaultPairing, index) => {
     const pair = source[index];
     const playerIds = normalizePlayerIdList(pair?.playerIds).filter((playerId) => {
       if (!allowedPlayerIds.has(playerId) || seen.has(playerId)) {

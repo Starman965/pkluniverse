@@ -33,7 +33,7 @@ const MODE_CONTENT = {
     inputLabel: 'Team code',
     introLabel: 'New player',
     pageTitle: 'Join a team',
-    placeholder: 'ACE7F2',
+    placeholder: 'Enter team code',
     signedOutLabel: 'Continue with Google',
     submitHeading: 'Enter join code',
     submitText: "Enter the code provided to you by the team's captain or other team member.",
