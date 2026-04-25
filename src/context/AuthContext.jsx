@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
   getRedirectResult,
   onAuthStateChanged,
-  signInWithPopup,
   signInWithRedirect,
   signOut,
 } from 'firebase/auth';
@@ -60,18 +59,8 @@ export function AuthProvider({ children }) {
     setAuthError('');
 
     try {
-      await signInWithPopup(auth, googleProvider);
+      await signInWithRedirect(auth, googleProvider);
     } catch (error) {
-      const popupBlocked =
-        error?.code === 'auth/popup-blocked' ||
-        error?.code === 'auth/cancelled-popup-request' ||
-        error?.code === 'auth/popup-closed-by-user';
-
-      if (popupBlocked) {
-        await signInWithRedirect(auth, googleProvider);
-        return;
-      }
-
       setAuthError(error.message ?? 'Unable to sign in right now.');
       throw error;
     }
