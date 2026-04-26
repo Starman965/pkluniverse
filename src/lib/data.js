@@ -65,6 +65,10 @@ function makeJoinCode(seed) {
   return `${normalizedSeed}${random}`;
 }
 
+function makeTeamId() {
+  return `team_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function sanitizeFileBaseName(fileName) {
   const withoutExtension = (fileName ?? '').replace(/\.[^/.]+$/, '');
   return slugify(withoutExtension).slice(0, 32) || 'image';
@@ -555,6 +559,401 @@ export async function deleteTeamAsAdmin({ clubSlug, teamSlug, user }) {
   await Promise.all(storagePaths.map((storagePath) => deleteStoragePath(storagePath)));
 }
 
+export async function listAdminTeamPlayers({ clubSlug, teamSlug, user }) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only the app admin can load team players.');
+  }
+
+  if (!clubSlug || !teamSlug) {
+    return [];
+  }
+
+  const [players, members] = await Promise.all([
+    listPlayers(clubSlug, teamSlug),
+    listTeamMembers(clubSlug, teamSlug),
+  ]);
+  const memberByPlayerId = new Map(
+    members
+      .filter((member) => member.playerId)
+      .map((member) => [member.playerId, member]),
+  );
+  const memberByUid = new Map(members.map((member) => [member.uid, member]));
+
+  return players.map((player) => {
+    const linkedMember = memberByPlayerId.get(player.id) ?? (player.uid ? memberByUid.get(player.uid) : null);
+
+    return {
+      ...player,
+      memberRole: linkedMember?.role ?? '',
+      memberUid: linkedMember?.uid ?? player.uid ?? '',
+    };
+  });
+}
+
+export async function copyPlayersToTeamAsAdmin({
+  sourceClubSlug,
+  sourceTeamSlug,
+  targetClubSlug,
+  targetTeamSlug,
+  playerIds = [],
+  user,
+}) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only the app admin can copy players between teams.');
+  }
+
+  if (!sourceClubSlug || !sourceTeamSlug || !targetClubSlug || !targetTeamSlug) {
+    throw new Error('Choose a source team and a target team.');
+  }
+
+  if (sourceClubSlug === targetClubSlug && sourceTeamSlug === targetTeamSlug) {
+    throw new Error('Choose a different target team.');
+  }
+
+  const selectedPlayerIds = normalizePlayerIdList(playerIds);
+
+  if (!selectedPlayerIds.length) {
+    throw new Error('Choose at least one player to copy.');
+  }
+
+  const targetTeamRef = doc(db, 'clubs', targetClubSlug, 'teams', targetTeamSlug);
+  const targetTeamSnapshot = await getDoc(targetTeamRef);
+
+  if (!targetTeamSnapshot.exists()) {
+    throw new Error('The target team could not be found.');
+  }
+
+  const targetTeam = targetTeamSnapshot.data();
+  const targetTeamName = targetTeam.name ?? targetTeamSlug;
+  const [sourcePlayersSnapshot, sourceMembersSnapshot, targetMembersSnapshot] = await Promise.all([
+    getDocs(collection(db, 'clubs', sourceClubSlug, 'teams', sourceTeamSlug, 'players')),
+    getDocs(collection(db, 'clubs', sourceClubSlug, 'teams', sourceTeamSlug, 'members')),
+    getDocs(collection(targetTeamRef, 'members')),
+  ]);
+  const sourcePlayerDocs = new Map(sourcePlayersSnapshot.docs.map((entry) => [entry.id, entry]));
+  const sourceMembers = sourceMembersSnapshot.docs.map((entry) => ({ ...entry.data(), id: entry.id }));
+  const sourceMemberByPlayerId = new Map(
+    sourceMembers
+      .filter((member) => member.playerId)
+      .map((member) => [member.playerId, member]),
+  );
+  const targetMemberByUid = new Map(targetMembersSnapshot.docs.map((entry) => [entry.id, entry.data()]));
+  const batch = writeBatch(db);
+  let copiedCount = 0;
+  let unlinkedCount = 0;
+
+  selectedPlayerIds.forEach((playerId) => {
+    const sourcePlayerDoc = sourcePlayerDocs.get(playerId);
+
+    if (!sourcePlayerDoc) {
+      return;
+    }
+
+    const player = sourcePlayerDoc.data();
+    const playerUid = player.uid || sourceMemberByPlayerId.get(playerId)?.uid || '';
+
+    batch.set(
+      doc(targetTeamRef, 'players', playerId),
+      {
+        ...player,
+        teamId: targetTeamSlug,
+        teamName: targetTeamName,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    if (playerUid) {
+      const existingTargetMember = targetMemberByUid.get(playerUid);
+      const targetRole = existingTargetMember?.role ?? 'member';
+
+      batch.set(
+        doc(targetTeamRef, 'members', playerUid),
+        {
+          clubId: targetClubSlug,
+          clubSlug: targetClubSlug,
+          joinedAt: existingTargetMember?.joinedAt ?? serverTimestamp(),
+          playerId,
+          role: targetRole,
+          status: existingTargetMember?.status ?? 'active',
+          teamId: targetTeamSlug,
+          teamName: targetTeamName,
+          teamSlug: targetTeamSlug,
+          uid: playerUid,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      batch.set(
+        doc(targetTeamRef, 'playerLinks', playerUid),
+        {
+          playerId,
+          teamId: targetTeamSlug,
+          uid: playerUid,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      batch.set(
+        doc(db, 'users', playerUid, 'memberships', `${targetClubSlug}_${targetTeamSlug}`),
+        {
+          clubSlug: targetClubSlug,
+          role: targetRole,
+          teamName: targetTeamName,
+          teamSlug: targetTeamSlug,
+          uid: playerUid,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } else {
+      unlinkedCount += 1;
+    }
+
+    copiedCount += 1;
+  });
+
+  if (!copiedCount) {
+    throw new Error('None of the selected players could be found on the source team.');
+  }
+
+  await batch.commit();
+
+  return { copiedCount, unlinkedCount };
+}
+
+export async function listAdminPlayers(user) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only the app admin can load all players.');
+  }
+
+  const clubs = await listClubs({ includeIndependent: true });
+  const clubPlayers = await Promise.all(
+    clubs.map(async (club) => {
+      const teamsSnapshot = await getDocs(collection(db, 'clubs', club.slug, 'teams'));
+
+      return Promise.all(
+        teamsSnapshot.docs.map(async (teamEntry) => {
+          const team = teamEntry.data();
+          const teamSlug = teamEntry.id;
+          const [players, members] = await Promise.all([
+            listPlayers(club.slug, teamSlug),
+            listTeamMembers(club.slug, teamSlug),
+          ]);
+          const memberByPlayerId = new Map(
+            members
+              .filter((member) => member.playerId)
+              .map((member) => [member.playerId, member]),
+          );
+          const memberByUid = new Map(members.map((member) => [member.uid, member]));
+
+          return players.map((player) => {
+            const linkedMember = memberByPlayerId.get(player.id) ?? (player.uid ? memberByUid.get(player.uid) : null);
+
+            return {
+              ...player,
+              assignmentKey: `${club.slug}::${teamSlug}::${player.id}`,
+              memberRole: linkedMember?.role ?? '',
+              memberUid: linkedMember?.uid ?? player.uid ?? '',
+              sourceClubName: club.name,
+              sourceClubSlug: club.slug,
+              sourceTeamName: team.name ?? teamSlug,
+              sourceTeamSlug: teamSlug,
+            };
+          });
+        }),
+      );
+    }),
+  );
+  const players = clubPlayers.flat(2);
+
+  players.sort((left, right) => {
+    const nameCompare = (left.fullName || '').localeCompare(right.fullName || '');
+
+    if (nameCompare !== 0) {
+      return nameCompare;
+    }
+
+    return left.sourceTeamName.localeCompare(right.sourceTeamName);
+  });
+
+  return players;
+}
+
+export async function assignPlayersToTeamAsAdmin({ playerRefs = [], targetClubSlug, targetTeamSlug, user }) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only the app admin can assign players to teams.');
+  }
+
+  if (!targetClubSlug || !targetTeamSlug) {
+    throw new Error('Choose a target team.');
+  }
+
+  const normalizedPlayerRefs = playerRefs
+    .map((playerRef) => ({
+      playerId: playerRef.playerId ?? '',
+      sourceClubSlug: playerRef.sourceClubSlug ?? '',
+      sourceTeamSlug: playerRef.sourceTeamSlug ?? '',
+    }))
+    .filter((playerRef) => playerRef.playerId && playerRef.sourceClubSlug && playerRef.sourceTeamSlug);
+  const uniquePlayerRefs = Array.from(
+    new Map(
+      normalizedPlayerRefs.map((playerRef) => [
+        `${playerRef.sourceClubSlug}::${playerRef.sourceTeamSlug}::${playerRef.playerId}`,
+        playerRef,
+      ]),
+    ).values(),
+  );
+
+  if (!uniquePlayerRefs.length) {
+    throw new Error('Choose at least one player to assign.');
+  }
+
+  const targetTeamRef = doc(db, 'clubs', targetClubSlug, 'teams', targetTeamSlug);
+  const targetTeamSnapshot = await getDoc(targetTeamRef);
+
+  if (!targetTeamSnapshot.exists()) {
+    throw new Error('The target team could not be found.');
+  }
+
+  const targetTeam = targetTeamSnapshot.data();
+  const targetTeamName = targetTeam.name ?? targetTeamSlug;
+  const targetMembersSnapshot = await getDocs(collection(targetTeamRef, 'members'));
+  const targetMemberByUid = new Map(targetMembersSnapshot.docs.map((entry) => [entry.id, entry.data()]));
+  const sourceGroups = new Map();
+
+  uniquePlayerRefs.forEach((playerRef) => {
+    const sourceKey = `${playerRef.sourceClubSlug}::${playerRef.sourceTeamSlug}`;
+    const group = sourceGroups.get(sourceKey) ?? {
+      playerIds: [],
+      sourceClubSlug: playerRef.sourceClubSlug,
+      sourceTeamSlug: playerRef.sourceTeamSlug,
+    };
+
+    group.playerIds.push(playerRef.playerId);
+    sourceGroups.set(sourceKey, group);
+  });
+
+  const batch = writeBatch(db);
+  let assignedCount = 0;
+  let alreadyOnTargetCount = 0;
+  let unlinkedCount = 0;
+
+  for (const sourceGroup of sourceGroups.values()) {
+    const [sourcePlayersSnapshot, sourceMembersSnapshot] = await Promise.all([
+      getDocs(collection(db, 'clubs', sourceGroup.sourceClubSlug, 'teams', sourceGroup.sourceTeamSlug, 'players')),
+      getDocs(collection(db, 'clubs', sourceGroup.sourceClubSlug, 'teams', sourceGroup.sourceTeamSlug, 'members')),
+    ]);
+    const sourcePlayerDocs = new Map(sourcePlayersSnapshot.docs.map((entry) => [entry.id, entry]));
+    const sourceMembers = sourceMembersSnapshot.docs.map((entry) => ({ ...entry.data(), id: entry.id }));
+    const sourceMemberByPlayerId = new Map(
+      sourceMembers
+        .filter((member) => member.playerId)
+        .map((member) => [member.playerId, member]),
+    );
+
+    sourceGroup.playerIds.forEach((playerId) => {
+      if (sourceGroup.sourceClubSlug === targetClubSlug && sourceGroup.sourceTeamSlug === targetTeamSlug) {
+        alreadyOnTargetCount += 1;
+        return;
+      }
+
+      const sourcePlayerDoc = sourcePlayerDocs.get(playerId);
+
+      if (!sourcePlayerDoc) {
+        return;
+      }
+
+      const player = sourcePlayerDoc.data();
+      const playerUid = player.uid || sourceMemberByPlayerId.get(playerId)?.uid || '';
+
+      batch.set(
+        doc(targetTeamRef, 'players', playerId),
+        {
+          ...player,
+          teamId: targetTeamSlug,
+          teamName: targetTeamName,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      if (playerUid) {
+        const existingTargetMember = targetMemberByUid.get(playerUid);
+        const targetRole = existingTargetMember?.role ?? 'member';
+
+        batch.set(
+          doc(targetTeamRef, 'members', playerUid),
+          {
+            clubId: targetClubSlug,
+            clubSlug: targetClubSlug,
+            joinedAt: existingTargetMember?.joinedAt ?? serverTimestamp(),
+            playerId,
+            role: targetRole,
+            status: existingTargetMember?.status ?? 'active',
+            teamId: targetTeamSlug,
+            teamName: targetTeamName,
+            teamSlug: targetTeamSlug,
+            uid: playerUid,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        batch.set(
+          doc(targetTeamRef, 'playerLinks', playerUid),
+          {
+            playerId,
+            teamId: targetTeamSlug,
+            uid: playerUid,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        batch.set(
+          doc(db, 'users', playerUid, 'memberships', `${targetClubSlug}_${targetTeamSlug}`),
+          {
+            clubSlug: targetClubSlug,
+            role: targetRole,
+            teamName: targetTeamName,
+            teamSlug: targetTeamSlug,
+            uid: playerUid,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
+      } else {
+        unlinkedCount += 1;
+      }
+
+      assignedCount += 1;
+    });
+  }
+
+  if (!assignedCount && alreadyOnTargetCount) {
+    throw new Error('The selected players are already on the target team.');
+  }
+
+  if (!assignedCount) {
+    throw new Error('None of the selected players could be assigned.');
+  }
+
+  await batch.commit();
+
+  return { assignedCount, alreadyOnTargetCount, unlinkedCount };
+}
+
 function isBootstrapPlatformAdmin(email) {
   return SUPER_ADMIN_EMAILS.includes((email ?? '').trim().toLowerCase());
 }
@@ -614,10 +1013,11 @@ export async function listAdminTeamSummaries(user) {
       return Promise.all(
         teamsSnapshot.docs.map(async (teamEntry) => {
           const team = teamEntry.data();
-          const teamSlug = team.slug ?? teamEntry.id;
+          const sourceTeamSlug = teamEntry.id;
+          const teamSlug = team.slug ?? sourceTeamSlug;
           const [members, players] = await Promise.all([
-            listTeamMembers(club.slug, teamSlug),
-            listPlayers(club.slug, teamSlug),
+            listTeamMembers(club.slug, sourceTeamSlug),
+            listPlayers(club.slug, sourceTeamSlug),
           ]);
           const playerMap = new Map(players.map((player) => [player.id, player]));
           const captains = members
@@ -636,7 +1036,7 @@ export async function listAdminTeamSummaries(user) {
             name: team.name ?? teamSlug,
             primaryLocation: team.primaryLocation ?? '',
             requestedClubSlug: team.requestedClubSlug ?? '',
-            teamSlug,
+            teamSlug: sourceTeamSlug,
           };
         }),
       );
@@ -682,14 +1082,15 @@ export async function listTeamDirectory() {
 
       return Promise.all(teamsSnapshot.docs.map(async (teamEntry) => {
         const team = teamEntry.data();
-        const teamSlug = team.slug ?? teamEntry.id;
+        const sourceTeamSlug = teamEntry.id;
+        const teamSlug = team.slug ?? sourceTeamSlug;
         let members = [];
         let players = [];
 
         try {
           [members, players] = await Promise.all([
-            listTeamMembers(club.slug, teamSlug),
-            listPlayers(club.slug, teamSlug),
+            listTeamMembers(club.slug, sourceTeamSlug),
+            listPlayers(club.slug, sourceTeamSlug),
           ]);
         } catch {
           // Directory cards should still render if private roster details are not readable.
@@ -715,7 +1116,7 @@ export async function listTeamDirectory() {
           name: team.name ?? teamSlug,
           primaryLocation: team.primaryLocation ?? '',
           sourceClubSlug: club.slug,
-          teamSlug,
+          teamSlug: sourceTeamSlug,
         };
       }));
     }),
@@ -868,20 +1269,23 @@ export async function createTeam({ teamName, user }) {
   }
 
   const club = await ensureIndependentClub();
-  const teamSlug = slugify(trimmedName);
+  const publicSlug = slugify(trimmedName);
 
-  if (!teamSlug) {
+  if (!publicSlug) {
     throw new Error('That team name cannot be converted into a valid URL slug.');
   }
 
-  const teamRef = doc(db, 'clubs', club.id, 'teams', teamSlug);
-  const existingTeam = await getDoc(teamRef);
+  let teamSlug = makeTeamId();
+  let teamRef = doc(db, 'clubs', club.id, 'teams', teamSlug);
+  let existingTeam = await getDoc(teamRef);
 
-  if (existingTeam.exists()) {
-    throw new Error('A team with that slug already exists. Try a slightly different name.');
+  while (existingTeam.exists()) {
+    teamSlug = makeTeamId();
+    teamRef = doc(db, 'clubs', club.id, 'teams', teamSlug);
+    existingTeam = await getDoc(teamRef);
   }
 
-  const joinCode = makeJoinCode(teamSlug);
+  const joinCode = makeJoinCode(publicSlug);
 
   await setDoc(teamRef, {
     affiliationStatus: 'independent',
@@ -896,6 +1300,7 @@ export async function createTeam({ teamName, user }) {
     logoUrl: '',
     name: trimmedName,
     primaryLocation: '',
+    publicSlug,
     requestedClubSlug: '',
     slug: teamSlug,
     status: 'active',
@@ -961,7 +1366,7 @@ export async function joinTeamByCode({ code, user }) {
 
   const { team, teamDoc } = match;
   const teamClubSlug = team.clubId ?? match.clubSlug ?? teamDoc.ref.parent.parent?.id ?? INDEPENDENT_CLUB.id;
-  const teamSlug = team.slug ?? teamDoc.id;
+  const teamSlug = teamDoc.id;
   const membershipRef = doc(db, 'clubs', teamClubSlug, 'teams', teamSlug, 'members', user.uid);
   const existingMemberships = await listMemberships(user.uid).catch(() => []);
   const existingMembership =
@@ -1210,6 +1615,7 @@ export async function updateTeamSettings({
     logoUrl: uploadedLogo?.logoUrl ?? currentTeam.logoUrl ?? '',
     name: normalizedName,
     primaryLocation: normalizedPrimaryLocation,
+    publicSlug: slugify(normalizedName),
     status,
     updatedAt: serverTimestamp(),
   });
@@ -1421,6 +1827,7 @@ export async function listApprovedClubTeams(clubSlug) {
     return snapshot.docs
       .map((entry) => {
         const data = entry.data();
+          const teamSlug = entry.id;
 
         return {
           affiliationStatus: data.affiliationStatus ?? 'independent',
@@ -1430,7 +1837,7 @@ export async function listApprovedClubTeams(clubSlug) {
           logoUrl: data.logoUrl ?? '',
           name: data.name ?? entry.id,
           primaryLocation: data.primaryLocation ?? '',
-          teamSlug: data.slug ?? entry.id,
+            teamSlug,
         };
       })
       .filter((team) => team.affiliationStatus === 'approved' && team.approvedClubSlug === clubSlug)

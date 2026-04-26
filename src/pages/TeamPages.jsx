@@ -7,6 +7,7 @@ import {
   PLAYER_AVAILABLE_DAYS,
   PLAYER_SKILL_LEVELS,
   acceptChallenge,
+  assignPlayersToTeamAsAdmin,
   buildPairingSummary,
   buildStandingsSummary,
   cancelChallenge,
@@ -22,6 +23,7 @@ import {
   getMembership,
   getTeam,
   isPlatformAdmin,
+  listAdminPlayers,
   listAdminTeamSummaries,
   listAdminChallenges,
   listApprovedClubTeams,
@@ -554,6 +556,14 @@ function createEmptyClubForm(club = {}) {
     numberOfCourts: club.numberOfCourts ?? '',
     state: club.state ?? '',
     zip: club.zip ?? '',
+  };
+}
+
+function createEmptyPlayerCopyForm() {
+  return {
+    playerKeys: [],
+    searchText: '',
+    targetTeamKey: '',
   };
 }
 
@@ -1837,25 +1847,37 @@ export function ScheduleScoresPage() {
                   ) : null}
                 </div>
 
-                <form className="schedule-admin-form" onSubmit={handleEditorSubmit}>
-                  <MatchupLabelField
-                    onChange={(nextOpponent) => setForm((current) => ({ ...current, opponent: nextOpponent }))}
-                    value={form.opponent}
-                  />
-                  <label className="field schedule-admin-form__date-field">
-                    <span>Game date</span>
-                    <input
-                      disabled={form.dateTbd}
-                      onChange={(event) => setForm((current) => ({ ...current, isoDate: event.target.value }))}
-                      type="date"
-                      value={form.isoDate}
+                <form className="schedule-admin-form schedule-admin-form--compact" onSubmit={handleEditorSubmit}>
+                  <div className="schedule-admin-form__main-fields">
+                    <MatchupLabelField
+                      onChange={(nextOpponent) => setForm((current) => ({ ...current, opponent: nextOpponent }))}
+                      value={form.opponent}
                     />
-                  </label>
-                  <TimePickerField
-                    disabled={form.dateTbd}
-                    onChange={(nextTimeLabel) => setForm((current) => ({ ...current, timeLabel: nextTimeLabel }))}
-                    value={form.timeLabel}
-                  />
+                    <label className="field">
+                      <span>Location</span>
+                      <input
+                        onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
+                        placeholder="Club, court(s), address, or notes"
+                        value={form.location}
+                      />
+                    </label>
+                  </div>
+                  <div className="schedule-admin-form__datetime-row">
+                    <label className="field schedule-admin-form__date-field">
+                      <span>Game date</span>
+                      <input
+                        disabled={form.dateTbd}
+                        onChange={(event) => setForm((current) => ({ ...current, isoDate: event.target.value }))}
+                        type="date"
+                        value={form.isoDate}
+                      />
+                    </label>
+                    <TimePickerField
+                      disabled={form.dateTbd}
+                      onChange={(nextTimeLabel) => setForm((current) => ({ ...current, timeLabel: nextTimeLabel }))}
+                      value={form.timeLabel}
+                    />
+                  </div>
                   <label className="checkbox-field schedule-admin-form__tbd">
                     <input
                       checked={form.dateTbd}
@@ -1871,43 +1893,37 @@ export function ScheduleScoresPage() {
                     />
                     <span>Date and time TBD</span>
                   </label>
-                  <label className="field">
-                    <span>Location</span>
-                    <input
-                      onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
-                      placeholder="Club, court(s), address, or notes"
-                      value={form.location}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Match status</span>
-                    <select
-                      onChange={(event) => setForm((current) => ({ ...current, matchStatus: event.target.value }))}
-                      value={form.matchStatus}
-                    >
-                      <option value="scheduled">Scheduled</option>
-                      <option value="completed">Completed</option>
-                    </select>
-                  </label>
-                  <div className="schedule-admin-form__score-grid">
-                    <label className="field">
-                      <span>{teamScoreLabel}</span>
-                      <input
-                        inputMode="numeric"
-                        onChange={(event) => setForm((current) => ({ ...current, teamScore: event.target.value }))}
-                        value={form.teamScore}
-                      />
+                  <div className="schedule-admin-form__status-score-row">
+                    <label className="field schedule-admin-form__status-field">
+                      <span>Match status</span>
+                      <select
+                        onChange={(event) => setForm((current) => ({ ...current, matchStatus: event.target.value }))}
+                        value={form.matchStatus}
+                      >
+                        <option value="scheduled">Scheduled</option>
+                        <option value="completed">Completed</option>
+                      </select>
                     </label>
-                    <label className="field">
-                      <span>Opponent score</span>
-                      <input
-                        inputMode="numeric"
-                        onChange={(event) =>
-                          setForm((current) => ({ ...current, opponentScore: event.target.value }))
-                        }
-                        value={form.opponentScore}
-                      />
-                    </label>
+                    <div className="schedule-admin-form__score-grid">
+                      <label className="field">
+                        <span>{teamScoreLabel}</span>
+                        <input
+                          inputMode="numeric"
+                          onChange={(event) => setForm((current) => ({ ...current, teamScore: event.target.value }))}
+                          value={form.teamScore}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Opponent score</span>
+                        <input
+                          inputMode="numeric"
+                          onChange={(event) =>
+                            setForm((current) => ({ ...current, opponentScore: event.target.value }))
+                          }
+                          value={form.opponentScore}
+                        />
+                      </label>
+                    </div>
                   </div>
                   <div className="schedule-admin-form__actions">
                     <button className="button" disabled={saving} type="submit">
@@ -4066,6 +4082,11 @@ export function SettingsPage() {
   const clubOptions = clubs.filter((club) => club.slug !== 'independent');
   const playerMap = useMemo(() => new Map(players.map((player) => [player.id, player])), [players]);
   const displayedLogoUrl = logoPreviewUrl || team?.logoUrl || defaultTeamLogo;
+  const inviteLink = team?.joinCode
+    ? `${window.location.origin}${window.location.pathname}#/join?code=${encodeURIComponent(team.joinCode)}`
+    : '';
+  const affiliatedClubName =
+    clubs.find((club) => club.slug === team?.approvedClubSlug)?.name ?? team?.approvedClubSlug ?? '';
 
   function replaceLogoPreview(nextUrl) {
     setLogoPreviewUrl((current) => {
@@ -4250,8 +4271,6 @@ export function SettingsPage() {
       return;
     }
 
-    const inviteLink = `${window.location.origin}${window.location.pathname}#/join?code=${encodeURIComponent(team.joinCode)}`;
-
     setError('');
     setMessage('');
 
@@ -4270,7 +4289,7 @@ export function SettingsPage() {
         document.body.removeChild(textArea);
       }
 
-      setMessage('Invite link copied.');
+      setMessage('Invite link copied. Send it to players so they can join this team.');
     } catch (copyError) {
       setError(copyError.message ?? 'Unable to copy the invite link.');
     }
@@ -4314,17 +4333,33 @@ export function SettingsPage() {
         <div className="settings-admin-overview">
           <div className="detail-grid">
             <div className="detail-card settings-admin-join-card">
-              <span>Current join code</span>
-              <strong>{team?.joinCode ?? 'Not available yet'}</strong>
+              <div className="settings-admin-join-copy">
+                <p className="eyebrow">Invite Players</p>
+                <h2>Send this link to teammates</h2>
+                <p>
+                  Players can use the invite link or enter the join code on the Join Team page. New players will appear
+                  in Player Mgmt after they join.
+                </p>
+              </div>
+              <div className="settings-admin-invite-details">
+                <div>
+                  <span>Join code</span>
+                  <strong>{team?.joinCode ?? 'Not available yet'}</strong>
+                </div>
+                <div>
+                  <span>Invite link</span>
+                  <code>{inviteLink || 'Not available yet'}</code>
+                </div>
+              </div>
               {canManage ? (
                 <div className="settings-admin-join-actions">
                   <button
-                    className="button button--ghost settings-admin-join-action"
+                    className="button settings-admin-join-action"
                     disabled={!team?.joinCode}
                     onClick={handleCopyInviteLink}
                     type="button"
                   >
-                    Copy invite link
+                    Copy Invite Link
                   </button>
                   <button
                     className="button button--ghost settings-admin-join-action"
@@ -4332,7 +4367,7 @@ export function SettingsPage() {
                     onClick={handleRotateJoinCode}
                     type="button"
                   >
-                    {rotating ? 'Rotating code...' : 'Rotate join code'}
+                    {rotating ? 'Changing code...' : 'Change Join Code'}
                   </button>
                 </div>
               ) : null}
@@ -4351,47 +4386,44 @@ export function SettingsPage() {
             <div>
               <p className="eyebrow">Branding</p>
               <h2>Team profile</h2>
-              <p>Update the team name and crop a logo before upload.</p>
+              <p>Upload your own custom logo, and add your primary match location.</p>
             </div>
           </div>
 
           {canManage ? (
             <form className="schedule-admin-form settings-admin-form" onSubmit={handleSubmit}>
-              <label className="field">
-                <span>Team name</span>
-                <input
-                  onChange={(event) => setForm((current) => ({ ...current, teamName: event.target.value }))}
-                  value={form.teamName}
-                />
-              </label>
-              <label className="field">
-                <span>Primary location</span>
-                <input
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, primaryLocation: event.target.value }))
-                  }
-                  placeholder="Optional, e.g. Blackhawk Country Club"
-                  value={form.primaryLocation}
-                />
-              </label>
-              <div className="settings-admin-branding-preview">
-                <div>
+              <div className="settings-admin-branding-grid">
+                <div className="settings-admin-branding-preview">
                   <p className="eyebrow">Current logo</p>
                   <img
                     alt={`${team?.name ?? 'Team'} logo`}
                     className="settings-admin-logo-preview"
                     src={displayedLogoUrl}
                   />
-                </div>
-              </div>
-              <div className="field settings-admin-form__logo-field">
-                <span>Team logo</span>
-                <div className="settings-admin-form__logo-actions">
                   <label className="button button--ghost settings-admin-form__file-button">
                     <input accept="image/*" className="settings-admin-form__file-input" onChange={handleLogoSelection} type="file" />
-                    Choose logo image
+                    Change Logo
                   </label>
-                  <button className="button" disabled={saving} type="submit">
+                </div>
+                <div className="settings-admin-branding-fields">
+                  <label className="field">
+                    <span>Team name</span>
+                    <input
+                      onChange={(event) => setForm((current) => ({ ...current, teamName: event.target.value }))}
+                      value={form.teamName}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Primary location</span>
+                    <input
+                      onChange={(event) =>
+                        setForm((current) => ({ ...current, primaryLocation: event.target.value }))
+                      }
+                      placeholder="Optional, e.g. Blackhawk Country Club"
+                      value={form.primaryLocation}
+                    />
+                  </label>
+                  <button className="button settings-admin-save-button" disabled={saving} type="submit">
                     {saving ? 'Saving settings...' : 'Save Settings'}
                   </button>
                 </div>
@@ -4409,47 +4441,46 @@ export function SettingsPage() {
           <div className="schedule-admin-card__header">
             <div>
               <p className="eyebrow">Club affiliation</p>
-              <h2>Join a club network</h2>
-              <p>Request approval so this team can appear with other teams in a club.</p>
+              <h2>{team?.affiliationStatus === 'approved' ? 'Connected to club' : 'Join a club network'}</h2>
+              <p>
+                {team?.affiliationStatus === 'approved'
+                  ? 'This team is already approved and listed with its club.'
+                  : 'Request approval so this team can appear with other teams in a club.'}
+              </p>
             </div>
-          </div>
-
-          <div className="detail-card">
-            <span>Current status</span>
-            <strong>
-              {team?.affiliationStatus === 'approved'
-                ? 'Approved'
-                : team?.affiliationStatus === 'pending'
-                  ? 'Pending approval'
-                  : team?.affiliationStatus === 'rejected'
-                    ? 'Rejected'
-                    : 'Independent'}
-            </strong>
-            <span>
-              {team?.approvedClubSlug
-                ? `Approved for ${team.approvedClubSlug}`
-                : team?.requestedClubSlug
-                  ? `Requested ${team.requestedClubSlug}`
-                  : 'Not affiliated with a club yet.'}
-            </span>
           </div>
 
           {team?.affiliationStatus === 'approved' ? (
-            <div className="detail-card">
-              <span>Challenge-ready club teams</span>
-              <strong>{approvedClubTeams.length}</strong>
-              <span>
-                {approvedClubTeams.length
-                  ? approvedClubTeams.map((clubTeam) => clubTeam.name).join(', ')
-                  : 'No other approved teams are in this club yet.'}
-              </span>
+            <div className="settings-club-status settings-club-status--approved">
+              <div>
+                <span className="status-badge status-badge--active">Approved</span>
+                <h3>{affiliatedClubName || 'Approved club'}</h3>
+                <p>
+                  Your team is visible in this club.{' '}
+                  {approvedClubTeams.length
+                    ? `${approvedClubTeams.length} other team${approvedClubTeams.length === 1 ? '' : 's'} can be challenged.`
+                    : 'No other approved teams are in this club yet.'}
+                </p>
+              </div>
             </div>
-          ) : null}
-
-          {canManage ? (
+          ) : canManage ? (
             <div className="schedule-admin-form settings-admin-form">
+              <div className="settings-club-status">
+                <span className="status-badge">
+                  {team?.affiliationStatus === 'pending'
+                    ? 'Pending'
+                    : team?.affiliationStatus === 'rejected'
+                      ? 'Rejected'
+                      : 'Independent'}
+                </span>
+                <p>
+                  {team?.requestedClubSlug
+                    ? `Request sent to ${team.requestedClubSlug}.`
+                    : 'Pick a club and send a request when this team is ready.'}
+                </p>
+              </div>
               <label className="field">
-                <span>Request club</span>
+                <span>Club</span>
                 <select
                   disabled={team?.affiliationStatus === 'pending'}
                   onChange={(event) => setRequestedClubSlug(event.target.value)}
@@ -4478,7 +4509,7 @@ export function SettingsPage() {
               </button>
               {team?.affiliationStatus === 'pending' ? (
                 <div className="notice notice--info">
-                  This team already has a pending club affiliation request.
+                  Request sent. An app admin or club admin needs to approve it.
                 </div>
               ) : null}
             </div>
@@ -4510,7 +4541,7 @@ export function SettingsPage() {
                   memberRecord.uid !== user?.uid;
 
                 return (
-                  <div key={memberRecord.uid} className="member-role-card">
+                  <div key={memberRecord.uid} className={`member-role-card member-role-card--${memberRecord.role}`}>
                     <div className="member-role-card__avatar">{buildPlayerInitials(displayName)}</div>
                     <div className="member-role-card__body">
                       <div className="member-admin__header">
@@ -4518,7 +4549,9 @@ export function SettingsPage() {
                           <strong>{displayName}</strong>
                           <span>{secondary}</span>
                         </div>
-                        <span className="status-badge">{formatRoleLabel(memberRecord.role)}</span>
+                        <span className={`status-badge member-role-card__badge member-role-card__badge--${memberRecord.role}`}>
+                          {formatRoleLabel(memberRecord.role)}
+                        </span>
                       </div>
 
                       <p className="member-role-card__description">
@@ -4555,10 +4588,10 @@ export function SettingsPage() {
                       ) : (
                         <div className="member-role-card__locked">
                           {memberRecord.role === 'captain'
-                            ? 'Captain role is locked.'
+                            ? 'Locked primary captain'
                             : canManageMembership
-                              ? 'You cannot change your own role here.'
-                              : 'Only the captain can change team roles.'}
+                              ? 'You cannot change your own role here'
+                              : 'Only the captain can change team roles'}
                         </div>
                       )}
                     </div>
@@ -4656,6 +4689,10 @@ export function ClubAffiliationAdminPage() {
   const [message, setMessage] = useState('');
   const [adminSection, setAdminSection] = useState('teams');
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [playerCopyForm, setPlayerCopyForm] = useState(createEmptyPlayerCopyForm());
+  const [adminPlayers, setAdminPlayers] = useState([]);
+  const [loadingAdminPlayers, setLoadingAdminPlayers] = useState(false);
+  const [copyingPlayers, setCopyingPlayers] = useState(false);
   const [clubCropTarget, setClubCropTarget] = useState(null);
   const [clubCropImageSrc, setClubCropImageSrc] = useState('');
   const [clubCropFileName, setClubCropFileName] = useState('club-logo.png');
@@ -4740,6 +4777,183 @@ export function ClubAffiliationAdminPage() {
       }),
     [adminTeams, clubs, requests],
   );
+
+  const playerCopyTeamOptions = useMemo(
+    () =>
+      adminTeams
+        .map((team) => ({
+          key: `${team.clubSlug}::${team.teamSlug}`,
+          label: `${team.name} (${team.clubName})`,
+          team,
+        }))
+        .sort((first, second) => first.label.localeCompare(second.label)),
+    [adminTeams],
+  );
+
+  const filteredAdminPlayers = useMemo(() => {
+    const searchText = playerCopyForm.searchText.trim().toLowerCase();
+
+    if (!searchText) {
+      return adminPlayers;
+    }
+
+    return adminPlayers.filter((player) =>
+      [
+        player.fullName,
+        player.email,
+        player.phone,
+        player.sourceTeamName,
+        player.sourceClubName,
+      ]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(searchText)),
+    );
+  }, [adminPlayers, playerCopyForm.searchText]);
+  const selectedPlayerCount = playerCopyForm.playerKeys.length;
+  const filteredSelectedPlayerCount = filteredAdminPlayers.filter((player) =>
+    playerCopyForm.playerKeys.includes(player.assignmentKey),
+  ).length;
+  const playerCopyTargetTeam = parsePlayerCopyTeamKey(playerCopyForm.targetTeamKey);
+
+  useEffect(() => {
+    if (!playerCopyTeamOptions.length || playerCopyForm.targetTeamKey) {
+      return;
+    }
+
+    setPlayerCopyForm((current) => ({
+      ...current,
+      targetTeamKey: playerCopyTeamOptions[0]?.key ?? '',
+    }));
+  }, [playerCopyForm.targetTeamKey, playerCopyTeamOptions]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadAdminPlayers() {
+      if (!user?.uid || !isAuthorized) {
+        setAdminPlayers([]);
+        return;
+      }
+
+      setLoadingAdminPlayers(true);
+      setError('');
+
+      try {
+        const players = await listAdminPlayers(user);
+
+        if (!ignore) {
+          setAdminPlayers(players);
+          setPlayerCopyForm((current) => ({
+            ...current,
+            playerKeys: current.playerKeys.filter((playerKey) =>
+              players.some((player) => player.assignmentKey === playerKey),
+            ),
+          }));
+        }
+      } catch (loadPlayersError) {
+        if (!ignore) {
+          setAdminPlayers([]);
+          setError(loadPlayersError.message ?? 'Unable to load players.');
+        }
+      } finally {
+        if (!ignore) {
+          setLoadingAdminPlayers(false);
+        }
+      }
+    }
+
+    loadAdminPlayers();
+
+    return () => {
+      ignore = true;
+    };
+  }, [isAuthorized, user?.uid]);
+
+  function parsePlayerCopyTeamKey(teamKey) {
+    const [clubSlug = '', teamSlug = ''] = teamKey.split('::');
+
+    return { clubSlug, teamSlug };
+  }
+
+  function updatePlayerCopyForm(field, value) {
+    setPlayerCopyForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    setMessage('');
+    setError('');
+  }
+
+  function togglePlayerCopySelection(playerKey) {
+    setPlayerCopyForm((current) => {
+      const isSelected = current.playerKeys.includes(playerKey);
+
+      return {
+        ...current,
+        playerKeys: isSelected
+          ? current.playerKeys.filter((selectedPlayerKey) => selectedPlayerKey !== playerKey)
+          : [...current.playerKeys, playerKey],
+      };
+    });
+    setMessage('');
+    setError('');
+  }
+
+  function setAllPlayerCopySelections(checked) {
+    setPlayerCopyForm((current) => ({
+      ...current,
+      playerKeys: checked ? filteredAdminPlayers.map((player) => player.assignmentKey) : [],
+    }));
+    setMessage('');
+    setError('');
+  }
+
+  function parsePlayerAssignmentKey(playerKey) {
+    const [sourceClubSlug = '', sourceTeamSlug = '', playerId = ''] = playerKey.split('::');
+
+    return { playerId, sourceClubSlug, sourceTeamSlug };
+  }
+
+  async function handleCopyPlayersSubmit(event) {
+    event.preventDefault();
+
+    if (copyingPlayers) {
+      return;
+    }
+
+    setCopyingPlayers(true);
+    setMessage('');
+    setError('');
+
+    try {
+      const result = await assignPlayersToTeamAsAdmin({
+        playerRefs: playerCopyForm.playerKeys.map(parsePlayerAssignmentKey),
+        targetClubSlug: playerCopyTargetTeam.clubSlug,
+        targetTeamSlug: playerCopyTargetTeam.teamSlug,
+        user,
+      });
+      const unlinkedCopy =
+        result.unlinkedCount > 0
+          ? ` ${result.unlinkedCount} assigned player${result.unlinkedCount === 1 ? '' : 's'} did not have a linked login, so only the player profile was copied.`
+          : '';
+      const skippedCopy =
+        result.alreadyOnTargetCount > 0
+          ? ` ${result.alreadyOnTargetCount} player${result.alreadyOnTargetCount === 1 ? ' was' : 's were'} already on the target team.`
+          : '';
+
+      setMessage(
+        `Assigned ${result.assignedCount} player${result.assignedCount === 1 ? '' : 's'} to the target team.${unlinkedCopy}${skippedCopy}`,
+      );
+      setPlayerCopyForm((current) => ({ ...current, playerKeys: [] }));
+      const players = await listAdminPlayers(user);
+      setAdminPlayers(players);
+      await loadAdminData();
+    } catch (copyError) {
+      setError(copyError.message ?? 'Unable to assign selected players.');
+    } finally {
+      setCopyingPlayers(false);
+    }
+  }
 
   function clearClubCropper() {
     setClubCropTarget(null);
@@ -5032,6 +5246,13 @@ export function ClubAffiliationAdminPage() {
               Clubs
             </button>
             <button
+              className={`nav-link admin-nav-button ${adminSection === 'players' ? 'nav-link--active' : ''}`}
+              onClick={() => setAdminSection('players')}
+              type="button"
+            >
+              Players
+            </button>
+            <button
               className={`nav-link admin-nav-button ${adminSection === 'tools' ? 'nav-link--active' : ''}`}
               onClick={() => setAdminSection('tools')}
               type="button"
@@ -5060,14 +5281,18 @@ export function ClubAffiliationAdminPage() {
             ? 'Teams'
             : adminSection === 'clubs'
               ? 'Clubs'
-              : 'Challenges'}
+              : adminSection === 'players'
+                ? 'Player Tools'
+                : 'Challenges'}
         </h1>
         <p>
           {adminSection === 'teams'
             ? 'Review each team, its club affiliation, captains, and member count.'
             : adminSection === 'clubs'
               ? 'Create clubs, manage club names, and review teams requesting club affiliation.'
-              : 'Review and clean up challenge records.'}
+              : adminSection === 'players'
+                ? 'Copy existing players from one team into another without asking them to rejoin.'
+                : 'Review and clean up challenge records.'}
         </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -5443,6 +5668,106 @@ export function ClubAffiliationAdminPage() {
               )}
             </section>
           </>
+        ) : adminSection === 'players' ? (
+          <section className="schedule-admin-card">
+            <div className="schedule-admin-card__header">
+              <div>
+                <p className="eyebrow">Player Tools</p>
+                <h2>Assign players to a team</h2>
+                <p>
+                  Search all players, select the people you want, and assign them to a target team. This does not
+                  remove them from any current team.
+                </p>
+              </div>
+            </div>
+
+            <form className="schedule-admin-form player-copy-tool" onSubmit={handleCopyPlayersSubmit}>
+              <div className="player-admin-form__row">
+                <label className="field">
+                  <span>Find player</span>
+                  <input
+                    onChange={(event) => updatePlayerCopyForm('searchText', event.target.value)}
+                    placeholder="Search by name, email, phone, team, or club"
+                    value={playerCopyForm.searchText}
+                  />
+                </label>
+                <label className="field">
+                  <span>Target team</span>
+                  <select
+                    onChange={(event) => updatePlayerCopyForm('targetTeamKey', event.target.value)}
+                    value={playerCopyForm.targetTeamKey}
+                  >
+                    <option value="">Choose target team</option>
+                    {playerCopyTeamOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="player-copy-tool__header">
+                <div>
+                  <h3>All players</h3>
+                  <p>
+                    {loadingAdminPlayers
+                      ? 'Loading players...'
+                      : `${filteredAdminPlayers.length} of ${adminPlayers.length} player${adminPlayers.length === 1 ? '' : 's'} shown.`}
+                  </p>
+                </div>
+                <label className="checkbox-option player-copy-tool__select-all">
+                  <input
+                    checked={filteredAdminPlayers.length > 0 && filteredSelectedPlayerCount === filteredAdminPlayers.length}
+                    disabled={!filteredAdminPlayers.length}
+                    onChange={(event) => setAllPlayerCopySelections(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Select shown</span>
+                </label>
+              </div>
+
+              {loadingAdminPlayers ? (
+                <div className="state-panel">
+                  <p>Loading players...</p>
+                </div>
+              ) : filteredAdminPlayers.length > 0 ? (
+                <div className="player-copy-tool__list">
+                  {filteredAdminPlayers.map((player) => (
+                    <label key={player.assignmentKey} className="player-copy-tool__player">
+                      <input
+                        checked={playerCopyForm.playerKeys.includes(player.assignmentKey)}
+                        onChange={() => togglePlayerCopySelection(player.assignmentKey)}
+                        type="checkbox"
+                      />
+                      <span className="player-copy-tool__player-name">{player.fullName || 'Unnamed player'}</span>
+                      <span>{player.email || 'No email'}</span>
+                      <span>{player.sourceTeamName}</span>
+                      <span>{player.memberUid ? 'Linked login' : 'Profile only'}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div className="notice notice--info">No players match this search.</div>
+              )}
+
+              <div className="player-admin-form__actions">
+                <button
+                  className="button"
+                  disabled={
+                    copyingPlayers ||
+                    !selectedPlayerCount ||
+                    !playerCopyTargetTeam.clubSlug
+                  }
+                  type="submit"
+                >
+                  {copyingPlayers
+                    ? 'Assigning players...'
+                    : `Assign ${selectedPlayerCount || 'selected'} player${selectedPlayerCount === 1 ? '' : 's'}`}
+                </button>
+              </div>
+            </form>
+          </section>
         ) : (
           <section className="schedule-admin-card">
             <div className="schedule-admin-card__header">
