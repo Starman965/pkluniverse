@@ -194,6 +194,7 @@ service cloud.firestore {
         && request.resource.data.status == 'open'
         && request.resource.data.clubSlug == clubId
         && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.playersNeeded in [2, 4, 6, 8]
         && request.resource.data.visibility in ['open', 'targeted']
         && request.resource.data.createdByTeamClubSlug is string
         && request.resource.data.createdByTeamSlug is string
@@ -223,6 +224,43 @@ service cloud.firestore {
           'cancelledAt',
           'status',
           'updatedAt',
+        ]);
+    }
+
+    function safeChallengeEdit(clubId) {
+      return resource.data.status == 'open'
+        && request.resource.data.status == 'open'
+        && isManager(resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
+        && request.resource.data.createdByTeamClubSlug == resource.data.createdByTeamClubSlug
+        && request.resource.data.createdByTeamSlug == resource.data.createdByTeamSlug
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.clubSlug == resource.data.clubSlug
+        && request.resource.data.playersNeeded in [2, 4, 6, 8]
+        && request.resource.data.visibility in ['open', 'targeted']
+        && (
+          request.resource.data.visibility == 'open'
+          || (
+            request.resource.data.targetTeamClubSlug is string
+            && request.resource.data.targetTeamSlug is string
+            && isApprovedClubTeam(clubId, request.resource.data.targetTeamClubSlug, request.resource.data.targetTeamSlug)
+            && !(
+              request.resource.data.targetTeamClubSlug == resource.data.createdByTeamClubSlug
+              && request.resource.data.targetTeamSlug == resource.data.createdByTeamSlug
+            )
+          )
+        )
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'dateTbd',
+          'isoDate',
+          'location',
+          'notes',
+          'playersNeeded',
+          'targetTeamClubSlug',
+          'targetTeamName',
+          'targetTeamSlug',
+          'timeLabel',
+          'updatedAt',
+          'visibility',
         ]);
     }
 
@@ -279,6 +317,10 @@ service cloud.firestore {
       return signedIn()
         && request.resource.data.challengeClubSlug is string
         && request.resource.data.challengeId is string
+        && (
+          request.resource.data.playersNeeded == challenge.playersNeeded
+          || (!challenge.keys().hasAny(['playersNeeded']) && request.resource.data.playersNeeded == 8)
+        )
         && challenge.status == 'accepted'
         && challenge.acceptedByUid == request.auth.uid
         && (
@@ -360,6 +402,7 @@ service cloud.firestore {
         allow read: if signedIn();
         allow create: if safeChallengeCreate(clubId);
         allow update: if safeChallengeAccept(clubId)
+          || safeChallengeEdit(clubId)
           || safeChallengeDecline()
           || safeChallengeCancel();
         allow delete: if isPlatformAdmin();

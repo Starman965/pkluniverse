@@ -26,10 +26,6 @@ export default function LandingPage() {
           <Link className="hero__top-link" to="/create">
             Create A Team
           </Link>
-          <span className="hero__top-separator">|</span>
-          <Link className="hero__top-link" rel="noreferrer" target="_blank" to="/admin">
-            App Admin
-          </Link>
         </div>
 
         <div className="hero__content hero__content--landing">

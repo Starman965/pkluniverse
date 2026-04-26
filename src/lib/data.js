@@ -1873,6 +1873,9 @@ export async function listApprovedClubTeams(clubSlug) {
 
 function normalizeChallenge(entry, challengeClubSlug) {
   const data = entry.data();
+  const normalizedPlayersNeeded = [2, 4, 6, 8].includes(Number(data.playersNeeded))
+    ? Number(data.playersNeeded)
+    : 8;
 
   return {
     acceptedAtMs: normalizeTimestampMs(data.acceptedAt),
@@ -1892,6 +1895,7 @@ function normalizeChallenge(entry, challengeClubSlug) {
     isoDate: data.isoDate ?? '',
     location: data.location ?? '',
     notes: data.notes ?? '',
+    playersNeeded: normalizedPlayersNeeded,
     status: data.status ?? 'open',
     targetTeamClubSlug: data.targetTeamClubSlug ?? '',
     targetTeamName: data.targetTeamName ?? '',
@@ -1972,6 +1976,7 @@ function buildChallengeGamePayload({
     opponent: linkedTeam.name,
     opponentScore: null,
     pairings: createEmptyPairings(),
+    playersNeeded: challenge.playersNeeded ?? 8,
     result: 'pending',
     rosterPlayerIds: [],
     teamScore: null,
@@ -1989,6 +1994,7 @@ export async function createChallenge({
   isoDate = '',
   location = '',
   notes = '',
+  playersNeeded = 8,
   targetTeam = null,
   teamSlug,
   timeLabel = '',
@@ -2018,6 +2024,7 @@ export async function createChallenge({
   const trimmedNotes = notes.trim();
   const trimmedTimeLabel = timeLabel.trim();
   const normalizedDateTbd = dateTbd === true;
+  const normalizedPlayersNeeded = [2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
 
   if (!normalizedDateTbd && !trimmedIsoDate) {
     throw new Error('Choose a date or mark the challenge date as TBD.');
@@ -2064,6 +2071,7 @@ export async function createChallenge({
     isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
     location: trimmedLocation || sourceTeam.primaryLocation || 'Location TBD',
     notes: trimmedNotes,
+    playersNeeded: normalizedPlayersNeeded,
     status: 'open',
     targetTeamClubSlug: target?.clubSlug ?? '',
     targetTeamName: target?.name ?? '',
@@ -2074,6 +2082,87 @@ export async function createChallenge({
   });
 
   return challengeId;
+}
+
+export async function updateChallenge({
+  challengeClubSlug,
+  challengeId,
+  clubSlug,
+  dateTbd = false,
+  isoDate = '',
+  location = '',
+  notes = '',
+  playersNeeded = 8,
+  targetTeam = null,
+  teamSlug,
+  timeLabel = '',
+  user,
+  visibility = 'open',
+}) {
+  requireDb();
+
+  await requireTeamManager({ clubSlug, teamSlug, user });
+
+  const challengeRef = doc(db, 'clubs', challengeClubSlug, 'challenges', challengeId);
+  const challengeSnapshot = await getDoc(challengeRef);
+
+  if (!challengeSnapshot.exists()) {
+    throw new Error('That challenge could not be found.');
+  }
+
+  const challenge = normalizeChallenge(challengeSnapshot, challengeClubSlug);
+
+  if (
+    challenge.status !== 'open' ||
+    challenge.createdByTeamClubSlug !== clubSlug ||
+    challenge.createdByTeamSlug !== teamSlug
+  ) {
+    throw new Error('Only the posting team can edit an open challenge.');
+  }
+
+  const normalizedVisibility = visibility === 'targeted' ? 'targeted' : 'open';
+  const trimmedIsoDate = isoDate.trim();
+  const trimmedLocation = location.trim();
+  const trimmedNotes = notes.trim();
+  const trimmedTimeLabel = timeLabel.trim();
+  const normalizedDateTbd = dateTbd === true;
+  const normalizedPlayersNeeded = [2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
+
+  if (!normalizedDateTbd && !trimmedIsoDate) {
+    throw new Error('Choose a date or mark the challenge date as TBD.');
+  }
+
+  let target = null;
+
+  if (normalizedVisibility === 'targeted') {
+    if (!targetTeam?.teamSlug || !targetTeam?.clubSlug) {
+      throw new Error('Choose a team to challenge.');
+    }
+
+    if (targetTeam.teamSlug === teamSlug && targetTeam.clubSlug === clubSlug) {
+      throw new Error('A team cannot challenge itself.');
+    }
+
+    target = await getApprovedChallengeTeam({
+      challengeClubSlug,
+      teamClubSlug: targetTeam.clubSlug,
+      teamSlug: targetTeam.teamSlug,
+    });
+  }
+
+  await updateDoc(challengeRef, {
+    dateTbd: normalizedDateTbd,
+    isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
+    location: trimmedLocation || 'Location TBD',
+    notes: trimmedNotes,
+    playersNeeded: normalizedPlayersNeeded,
+    targetTeamClubSlug: target?.clubSlug ?? '',
+    targetTeamName: target?.name ?? '',
+    targetTeamSlug: target?.teamSlug ?? '',
+    timeLabel: normalizedDateTbd ? '' : trimmedTimeLabel,
+    updatedAt: serverTimestamp(),
+    visibility: normalizedVisibility,
+  });
 }
 
 export async function listClubChallenges(challengeClubSlug) {

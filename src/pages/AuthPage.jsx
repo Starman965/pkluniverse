@@ -95,10 +95,10 @@ export default function AuthPage() {
     <div className="auth-page">
       <section className="card auth-card">
         <div className="auth-card__intro">
-          <p className="eyebrow">Login</p>
-          <h1>Log in with Google</h1>
+          <p className="eyebrow">Sign in</p>
+          <h1>Welcome to PKL Universe</h1>
           <p className="auth-card__copy">
-            Use Google Sign-in to access your team.
+            Use Google Sign-In to access your teams, browse directories, and manage your PKL Universe profile.
           </p>
         </div>
 
@@ -124,7 +124,7 @@ export default function AuthPage() {
             onClick={handleSignIn}
             type="button"
           >
-            {loading ? 'Checking sign-in...' : 'Log in with Google'}
+            {loading ? 'Checking sign-in...' : 'Continue with Google'}
           </button>
 
           <Link className="button button--ghost" to="/">

@@ -47,6 +47,7 @@ import {
   savePlayer,
   setAvailability,
   toggleNewsReaction,
+  updateChallenge,
   updateTeamMemberRole,
   updateTeamSettings,
 } from '../lib/data';
@@ -125,6 +126,7 @@ function createEmptyChallengeForm(primaryLocation = '') {
     minute: '00',
     notes: '',
     period: 'PM',
+    playersNeeded: 8,
     targetTeamKey: '',
     visibility: 'open',
   };
@@ -3385,6 +3387,7 @@ export function NewsPage() {
   const [newsPosts, setNewsPosts] = useState([]);
   const [teamName, setTeamName] = useState('');
   const [membership, setMembership] = useState(null);
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [form, setForm] = useState({ body: '', imageFile: null, imagePreviewUrl: '' });
   const [commentDrafts, setCommentDrafts] = useState({});
   const [saving, setSaving] = useState(false);
@@ -3434,6 +3437,7 @@ export function NewsPage() {
         URL.revokeObjectURL(form.imagePreviewUrl);
       }
       setForm({ body: '', imageFile: null, imagePreviewUrl: '' });
+      setIsComposerOpen(false);
       setMessage('Post shared.');
       await loadNewsData();
     } catch (submitError) {
@@ -3547,6 +3551,17 @@ export function NewsPage() {
     });
   }
 
+  function closeComposer() {
+    setForm((current) => {
+      if (current.imagePreviewUrl) {
+        URL.revokeObjectURL(current.imagePreviewUrl);
+      }
+
+      return { body: '', imageFile: null, imagePreviewUrl: '' };
+    });
+    setIsComposerOpen(false);
+  }
+
   return (
     <div className="page-grid news-page">
       <section className="card">
@@ -3558,40 +3573,64 @@ export function NewsPage() {
         {error ? <div className="notice notice--error">{error}</div> : null}
         {message ? <div className="notice notice--success">{message}</div> : null}
 
-        <form className="news-composer" onSubmit={handleSubmit}>
-          <label className="field">
-            <span>Create a post</span>
-            <textarea
-              onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))}
-              placeholder="Share a photo, practice note, drill idea, match recap, or team update..."
-              rows={4}
-              value={form.body}
-            />
-          </label>
-          <div className="news-composer__footer">
-            <label className="news-composer__file" htmlFor={imageInputId}>
-              Choose Image
-              <input
-                id={imageInputId}
-                accept="image/*"
-                onChange={(event) => handleImageSelected(event.target.files?.[0] ?? null)}
-                type="file"
-                value=""
+        {isComposerOpen ? (
+          <form className="news-composer" onSubmit={handleSubmit}>
+            <label className="field">
+              <span>What&apos;s new with the team?</span>
+              <textarea
+                onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))}
+                placeholder="Share a photo, practice note, drill idea, match recap, or team update..."
+                rows={4}
+                value={form.body}
               />
             </label>
-            <button className="button" disabled={saving} type="submit">
-              {saving ? 'Sharing...' : 'Share Post'}
+            <div className="news-composer__footer">
+              <label className="news-composer__file" htmlFor={imageInputId}>
+                Choose Image
+                <input
+                  id={imageInputId}
+                  accept="image/*"
+                  onChange={(event) => handleImageSelected(event.target.files?.[0] ?? null)}
+                  type="file"
+                  value=""
+                />
+              </label>
+              <div className="news-composer__actions">
+                <button className="button button--ghost" disabled={saving} onClick={closeComposer} type="button">
+                  Cancel
+                </button>
+                <button
+                  className="button"
+                  disabled={saving || (!form.body.trim() && !form.imageFile)}
+                  type="submit"
+                >
+                  {saving ? 'Sharing...' : 'Share Post'}
+                </button>
+              </div>
+            </div>
+            {form.imagePreviewUrl ? (
+              <div className="news-composer-preview">
+                <img alt="Selected post preview" src={form.imagePreviewUrl} />
+                <button className="news-feed-card__action" onClick={removeSelectedImage} type="button">
+                  Remove image
+                </button>
+              </div>
+            ) : null}
+          </form>
+        ) : (
+          <div className="news-composer-prompt">
+            <button
+              className="news-composer-prompt__text"
+              onClick={() => setIsComposerOpen(true)}
+              type="button"
+            >
+              What&apos;s new with the team?
+            </button>
+            <button className="button" onClick={() => setIsComposerOpen(true)} type="button">
+              Create Post
             </button>
           </div>
-          {form.imagePreviewUrl ? (
-            <div className="news-composer-preview">
-              <img alt="Selected post preview" src={form.imagePreviewUrl} />
-              <button className="news-feed-card__action" onClick={removeSelectedImage} type="button">
-                Remove image
-              </button>
-            </div>
-          ) : null}
-        </form>
+        )}
 
         <NewsFeed
           canManage={canManage}
@@ -3971,6 +4010,26 @@ function buildChallengeTimeLabel(form) {
   return `${form.hour}:${form.minute} ${form.period}`;
 }
 
+function createChallengeFormFromChallenge(challenge, primaryLocation = '') {
+  const match = String(challenge.timeLabel ?? '').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+
+  return {
+    dateTbd: challenge.dateTbd === true,
+    hour: challenge.dateTbd === true ? '' : match?.[1] ?? '',
+    isoDate: challenge.dateTbd === true ? '' : challenge.isoDate ?? '',
+    location: challenge.location && challenge.location !== 'Location TBD' ? challenge.location : primaryLocation,
+    minute: challenge.dateTbd === true ? '00' : match?.[2] ?? '00',
+    notes: challenge.notes ?? '',
+    period: challenge.dateTbd === true ? 'PM' : match?.[3]?.toUpperCase() ?? 'PM',
+    playersNeeded: challenge.playersNeeded ?? 8,
+    targetTeamKey:
+      challenge.visibility === 'targeted'
+        ? `${challenge.targetTeamClubSlug}:${challenge.targetTeamSlug}`
+        : '',
+    visibility: challenge.visibility === 'targeted' ? 'targeted' : 'open',
+  };
+}
+
 function getChallengeStatusLabel(challenge) {
   if (challenge.status === 'accepted') {
     return 'Accepted';
@@ -3996,6 +4055,7 @@ export function ChallengesPage() {
   const [clubChallenges, setClubChallenges] = useState([]);
   const [teamChallenges, setTeamChallenges] = useState([]);
   const [form, setForm] = useState(createEmptyChallengeForm());
+  const [editingChallengeId, setEditingChallengeId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [updatingChallengeId, setUpdatingChallengeId] = useState('');
@@ -4080,26 +4140,52 @@ export function ChallengesPage() {
     setMessage('');
 
     try {
-      await createChallenge({
+      const challengePayload = {
         clubSlug,
         dateTbd: form.dateTbd,
         isoDate: form.isoDate,
         location: form.location,
         notes: form.notes,
+        playersNeeded: form.playersNeeded,
         targetTeam: form.visibility === 'targeted' ? selectedTargetTeam : null,
         teamSlug,
         timeLabel: buildChallengeTimeLabel(form),
         user,
         visibility: form.visibility,
-      });
+      };
+
+      if (editingChallengeId) {
+        await updateChallenge({
+          ...challengePayload,
+          challengeClubSlug,
+          challengeId: editingChallengeId,
+        });
+      } else {
+        await createChallenge(challengePayload);
+      }
+
       setForm(createEmptyChallengeForm(team?.primaryLocation ?? ''));
-      setMessage('Match request posted.');
+      setEditingChallengeId('');
+      setMessage(editingChallengeId ? 'Match request updated.' : 'Match request posted.');
       await loadChallengeData();
     } catch (submitError) {
-      setError(submitError.message ?? 'Unable to post that match request.');
+      setError(submitError.message ?? 'Unable to save that match request.');
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleEditChallenge(challenge) {
+    setForm(createChallengeFormFromChallenge(challenge, team?.primaryLocation ?? ''));
+    setEditingChallengeId(challenge.id);
+    setError('');
+    setMessage('');
+  }
+
+  function handleCancelEditChallenge() {
+    setForm(createEmptyChallengeForm(team?.primaryLocation ?? ''));
+    setEditingChallengeId('');
+    setError('');
   }
 
   async function handleAcceptChallenge(challenge) {
@@ -4193,6 +4279,7 @@ export function ChallengesPage() {
           <div className="challenge-card__details">
             <span>Date: {formatChallengeDate(challenge)}</span>
             <span>Time: {formatChallengeTime(challenge)}</span>
+            <span>Players needed: {challenge.playersNeeded ?? 8}</span>
             <span>Location: {challenge.location || 'Location TBD'}</span>
             {challenge.status === 'accepted' && scheduleGameId ? (
               <span>Scheduled match created</span>
@@ -4260,9 +4347,13 @@ export function ChallengesPage() {
               <section className="schedule-admin-card">
                 <div className="schedule-admin-card__header">
                   <div>
-                    <p className="eyebrow">Create</p>
-                    <h2>Post a match request</h2>
-                    <p>Create an open club match request or send one directly to another team.</p>
+                    <p className="eyebrow">{editingChallengeId ? 'Edit' : 'Create'}</p>
+                    <h2>{editingChallengeId ? 'Edit match request' : 'Post a match request'}</h2>
+                    <p>
+                      {editingChallengeId
+                        ? 'Update this request before another team accepts it.'
+                        : 'Create an open club match request or send one directly to another team.'}
+                    </p>
                   </div>
                 </div>
 
@@ -4372,6 +4463,21 @@ export function ChallengesPage() {
                           </select>
                         </div>
                       </div>
+                      <label className="field challenge-form__players-needed">
+                        <span>Players needed</span>
+                        <select
+                          onChange={(event) =>
+                            setForm((current) => ({ ...current, playersNeeded: Number(event.target.value) }))
+                          }
+                          value={form.playersNeeded}
+                        >
+                          {[2, 4, 6, 8].map((count) => (
+                            <option key={count} value={count}>
+                              {count}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <label className="checkbox-field challenge-form__tbd">
                         <input
                           checked={form.dateTbd}
@@ -4408,9 +4514,27 @@ export function ChallengesPage() {
                       value={form.notes}
                     />
                   </label>
-                  <button className="button challenge-form__submit" disabled={saving} type="submit">
-                    {saving ? 'Posting request...' : 'Post Match Request'}
-                  </button>
+                  <div className="challenge-form__actions">
+                    {editingChallengeId ? (
+                      <button
+                        className="button button--ghost"
+                        disabled={saving}
+                        onClick={handleCancelEditChallenge}
+                        type="button"
+                      >
+                        Cancel Edit
+                      </button>
+                    ) : null}
+                    <button className="button challenge-form__submit" disabled={saving} type="submit">
+                      {saving
+                        ? editingChallengeId
+                          ? 'Saving request...'
+                          : 'Posting request...'
+                        : editingChallengeId
+                          ? 'Save Match Request'
+                          : 'Post Match Request'}
+                    </button>
+                  </div>
                 </form>
               </section>
             ) : (
@@ -4505,14 +4629,24 @@ export function ChallengesPage() {
                     renderChallengeCard(
                       challenge,
                       canManage && challenge.status === 'open' ? (
-                        <button
-                          className="button button--ghost"
-                          disabled={updatingChallengeId === challenge.id}
-                          onClick={() => handleCancelChallenge(challenge)}
-                          type="button"
-                        >
-                          {updatingChallengeId === challenge.id ? 'Cancelling...' : 'Cancel Request'}
-                        </button>
+                        <>
+                          <button
+                            className="button"
+                            disabled={updatingChallengeId === challenge.id}
+                            onClick={() => handleEditChallenge(challenge)}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="button button--ghost"
+                            disabled={updatingChallengeId === challenge.id}
+                            onClick={() => handleCancelChallenge(challenge)}
+                            type="button"
+                          >
+                            {updatingChallengeId === challenge.id ? 'Cancelling...' : 'Cancel Request'}
+                          </button>
+                        </>
                       ) : null,
                     ),
                   )}
