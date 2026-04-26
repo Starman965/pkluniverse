@@ -1114,6 +1114,10 @@ export async function listTeamDirectory() {
 
       return Promise.all(teamsSnapshot.docs.map(async (teamEntry) => {
         const team = teamEntry.data();
+        if ((team.status ?? 'active') !== 'active') {
+          return null;
+        }
+
         const sourceTeamSlug = teamEntry.id;
         const teamSlug = team.slug ?? sourceTeamSlug;
         let members = [];
@@ -1154,7 +1158,7 @@ export async function listTeamDirectory() {
     }),
   );
 
-  teamsBySourceClub.flat().forEach((team) => {
+  teamsBySourceClub.flat().filter(Boolean).forEach((team) => {
     if (!directoryGroups.has(team.clubSlug)) {
       directoryGroups.set(team.clubSlug, {
         clubName: team.clubName,
@@ -1202,6 +1206,10 @@ async function findTeamByJoinCode(normalizedCode) {
   for (const club of clubs) {
     const teamsSnapshot = await getDocs(collection(db, 'clubs', club.slug, 'teams'));
     const matchingTeamDoc = teamsSnapshot.docs.find((teamEntry) => {
+      if ((teamEntry.data().status ?? 'active') !== 'active') {
+        return false;
+      }
+
       const joinCode = (teamEntry.data().joinCode ?? '').trim().toUpperCase();
       return joinCode === normalizedCode;
     });
@@ -1695,6 +1703,62 @@ export async function updateTeamSettings({
   }
 }
 
+export async function archiveTeam({ clubSlug, teamSlug, user }) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to archive this team.');
+  }
+
+  const teamRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug);
+  const [teamSnapshot, membershipSnapshot] = await Promise.all([
+    getDoc(teamRef),
+    getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'members', user.uid)),
+  ]);
+  const team = teamSnapshot.exists() ? teamSnapshot.data() : null;
+  const membership = membershipSnapshot.exists() ? membershipSnapshot.data() : null;
+
+  if (!team) {
+    throw new Error('That team could not be found.');
+  }
+
+  if ((team.status ?? 'active') !== 'active') {
+    throw new Error('This team is already archived.');
+  }
+
+  if (!['captain', 'coCaptain'].includes(membership?.role)) {
+    throw new Error('Only captains and co-captains can archive this team.');
+  }
+
+  const batch = writeBatch(db);
+  batch.update(teamRef, {
+    archivedAt: serverTimestamp(),
+    archivedBy: user.uid,
+    joinCode: '',
+    status: 'archived',
+    updatedAt: serverTimestamp(),
+  });
+
+  if (team.approvedClubSlug && team.approvedClubSlug !== INDEPENDENT_CLUB.slug) {
+    const challengesSnapshot = await getDocs(query(
+      collection(db, 'clubs', team.approvedClubSlug, 'challenges'),
+      where('createdByTeamClubSlug', '==', clubSlug),
+      where('createdByTeamSlug', '==', teamSlug),
+      where('status', '==', 'open'),
+    ));
+
+    challengesSnapshot.forEach((challengeDoc) => {
+      batch.update(challengeDoc.ref, {
+        cancelledAt: serverTimestamp(),
+        status: 'cancelled',
+        updatedAt: serverTimestamp(),
+      });
+    });
+  }
+
+  await batch.commit();
+}
+
 export async function requestClubAffiliation({
   clubSlug,
   requestedClubSlug,
@@ -1993,6 +2057,10 @@ async function getApprovedChallengeTeam({ challengeClubSlug, teamClubSlug, teamS
 
   const team = teamSnapshot.data();
 
+  if ((team.status ?? 'active') !== 'active') {
+    throw new Error('Challenges are only available for active teams.');
+  }
+
   if (team.affiliationStatus !== 'approved' || team.approvedClubSlug !== challengeClubSlug) {
     throw new Error('Challenges are only available for approved teams in the same club.');
   }
@@ -2089,6 +2157,10 @@ export async function createChallenge({
 
   const sourceTeam = sourceTeamSnapshot.data();
   const challengeClubSlug = sourceTeam.approvedClubSlug ?? '';
+
+  if ((sourceTeam.status ?? 'active') !== 'active') {
+    throw new Error('Archived teams cannot post new match requests.');
+  }
 
   if (sourceTeam.affiliationStatus !== 'approved' || !challengeClubSlug || challengeClubSlug === INDEPENDENT_CLUB.slug) {
     throw new Error('Approve this team for a club before posting challenges.');
@@ -2194,6 +2266,13 @@ export async function updateChallenge({
     challenge.createdByTeamSlug !== teamSlug
   ) {
     throw new Error('Only the posting team can edit an open challenge.');
+  }
+
+  const sourceTeamSnapshot = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug));
+  const sourceTeam = sourceTeamSnapshot.exists() ? sourceTeamSnapshot.data() : null;
+
+  if (!sourceTeam || (sourceTeam.status ?? 'active') !== 'active') {
+    throw new Error('Archived teams cannot edit match requests.');
   }
 
   const normalizedVisibility = visibility === 'targeted' ? 'targeted' : 'open';
@@ -3132,6 +3211,8 @@ export async function listNewsPosts(clubSlug, teamSlug) {
           body: (comment.body ?? '').trim(),
           createdAtMs: normalizeTimestampMs(comment.createdAt),
           id: commentEntry.id,
+          updatedAtMs: normalizeTimestampMs(comment.updatedAt),
+          updatedBy: comment.updatedBy ?? '',
         };
       })
       .sort((left, right) => (left.createdAtMs || 0) - (right.createdAtMs || 0));
@@ -3300,6 +3381,38 @@ export async function deleteNewsComment({ clubSlug, commentId, postId, teamSlug 
   requireDb();
 
   await deleteDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', postId, 'comments', commentId));
+}
+
+export async function updateNewsComment({ body, clubSlug, commentId, postId, teamSlug, user }) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to edit a comment.');
+  }
+
+  const normalizedBody = body.trim();
+
+  if (!normalizedBody) {
+    throw new Error('Write a comment before saving.');
+  }
+
+  const commentRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', postId, 'comments', commentId);
+  const commentSnapshot = await getDoc(commentRef);
+  const comment = commentSnapshot.exists() ? commentSnapshot.data() : null;
+
+  if (!comment) {
+    throw new Error('That comment could not be found.');
+  }
+
+  if ((comment.authorUid ?? comment.createdBy) !== user.uid) {
+    throw new Error('Only the comment author can edit this comment.');
+  }
+
+  await updateDoc(commentRef, {
+    body: normalizedBody,
+    updatedAt: serverTimestamp(),
+    updatedBy: user.uid,
+  });
 }
 
 export async function toggleNewsReaction({ clubSlug, post, teamSlug, type = 'like', user }) {

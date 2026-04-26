@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getUserProfileData, listMemberships } from '../lib/data';
+import { getTeam, getUserProfileData, listMemberships } from '../lib/data';
 
 function buildTeamPath(membership) {
   return `/c/${membership.clubSlug}/t/${membership.teamSlug}/news`;
@@ -34,19 +34,30 @@ export default function AuthPage() {
     let cancelled = false;
 
     Promise.all([listMemberships(user.uid), getUserProfileData(user.uid).catch(() => null)])
-      .then(([items, userProfile]) => {
+      .then(async ([items, userProfile]) => {
         if (cancelled) {
           return;
         }
 
-        if (items.length === 1) {
+        const activeItems = (await Promise.all(
+          items.map(async (membership) => {
+            const team = await getTeam(membership.clubSlug, membership.teamSlug).catch(() => null);
+            return (team?.status ?? 'active') === 'active' ? membership : null;
+          }),
+        )).filter(Boolean);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (activeItems.length === 1) {
           setRedirectMessage('Signed in. Opening your team...');
-          navigate(buildTeamPath(items[0]), { replace: true });
+          navigate(buildTeamPath(activeItems[0]), { replace: true });
           return;
         }
 
         const lastActiveMembership =
-          items.find(
+          activeItems.find(
             (membership) =>
               membership.clubSlug === userProfile?.lastActiveClubId &&
               membership.teamSlug === userProfile?.lastActiveTeamId,
@@ -58,7 +69,7 @@ export default function AuthPage() {
           return;
         }
 
-        if (items.length > 1) {
+        if (activeItems.length > 1) {
           setRedirectMessage('Signed in. Opening your teams...');
           navigate('/teams', { replace: true });
           return;

@@ -11,6 +11,7 @@ import {
   assignPlayersToTeamAsAdmin,
   buildPairingSummary,
   buildStandingsSummary,
+  archiveTeam,
   cancelChallenge,
   createClub,
   createChallenge,
@@ -48,6 +49,7 @@ import {
   setAvailability,
   toggleNewsReaction,
   updateChallenge,
+  updateNewsComment,
   updateTeamMemberRole,
   updateTeamSettings,
 } from '../lib/data';
@@ -545,6 +547,24 @@ function createEmptyNewsForm() {
   };
 }
 
+function PencilIcon() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" />
+      <path d="M16 4.5l3.5 3.5 1.2-1.2a1.3 1.3 0 0 0 0-1.8L19 3.3a1.3 1.3 0 0 0-1.8 0L16 4.5z" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path d="M7 8h10l-.7 12H7.7L7 8z" />
+      <path d="M9 5h6l.7 1.5H20V8H4V6.5h4.3L9 5z" />
+    </svg>
+  );
+}
+
 function createEmptyTeamSettingsForm(teamName = '', primaryLocation = '') {
   return {
     logoFile: null,
@@ -854,6 +874,64 @@ export function TeamDashboardPage() {
           <li>Load team-specific news and standings snapshots.</li>
           <li>Expose captain and co-captain actions around roster and pairings.</li>
         </ul>
+      </section>
+    </div>
+  );
+}
+
+export function HelpFeedbackPage() {
+  return (
+    <div className="page-grid help-page">
+      <section className="card help-hero-card">
+        <p className="eyebrow">Help & Feedback</p>
+        <h1>PKL Universe is in beta</h1>
+        <p className="help-page__lead">
+          I&apos;m building this with feedback from local captains and players within the Blackhawk Country Club
+          community, so questions, bugs, confusing screens, and feature ideas are welcome.
+        </p>
+        <p className="help-page__contact">
+          Contact Dave on WhatsApp or by phone at <a href="tel:+19259806777">925-980-6777</a>, or email{' '}
+          <a href="mailto:demandgendave@gmail.com">demandgendave@gmail.com</a>.
+        </p>
+      </section>
+
+      <section className="help-grid">
+        <article className="schedule-admin-card help-card">
+          <div>
+            <p className="eyebrow">Captains</p>
+            <h2>When to reach out</h2>
+          </div>
+          <ul className="help-list">
+            <li>Team setup, roster, or player invite questions</li>
+            <li>Match requests, scheduling, scores, or availability issues</li>
+            <li>Club affiliation questions</li>
+            <li>Ideas that would make captain work easier</li>
+          </ul>
+        </article>
+
+        <article className="schedule-admin-card help-card">
+          <div>
+            <p className="eyebrow">Players</p>
+            <h2>Good things to send</h2>
+          </div>
+          <ul className="help-list">
+            <li>Login or join-team problems</li>
+            <li>Profile, availability, or schedule questions</li>
+            <li>Something that feels confusing or hard to find</li>
+            <li>Bug reports or error messages</li>
+          </ul>
+        </article>
+      </section>
+
+      <section className="schedule-admin-card help-card help-card--wide">
+        <div>
+          <p className="eyebrow">Bug reports</p>
+          <h2>What helps me fix things faster</h2>
+        </div>
+        <p>
+          If something breaks, send the page you were on, what you expected to happen, what actually happened, and a
+          screenshot if you have one. Short WhatsApp notes are perfect.
+        </p>
       </section>
     </div>
   );
@@ -3133,16 +3211,30 @@ function getReactionSummary(reactions = []) {
 function NewsFeed({
   canManage = false,
   commentDrafts = {},
+  commentEditDraft = '',
   currentUser,
   deletingCommentId = '',
   deletingPostId = '',
+  editingCommentId = '',
+  editingPostId = '',
   newsPosts,
+  onCancelCommentEdit,
+  onCancelPostEdit,
   onCommentChange,
+  onCommentEditChange,
   onCommentSubmit,
   onDeleteComment,
   onDeletePost,
+  onEditComment,
+  onEditPost,
+  onPostEditChange,
   onReactionToggle,
+  onSaveCommentEdit,
+  onSavePostEdit,
+  postEditDraft = '',
   reactingPostId = '',
+  savingCommentId = '',
+  savingPostId = '',
 }) {
   if (!newsPosts.length) {
     return <p>No team posts yet. Share the first photo, update, or team note.</p>;
@@ -3155,6 +3247,8 @@ function NewsFeed({
         const currentReactionMeta = NEWS_REACTIONS.find((reaction) => reaction.id === currentUserReaction?.type);
         const reactionSummary = getReactionSummary(post.reactions);
         const canDeletePost = canManage || post.authorUid === currentUser?.uid;
+        const canEditPost = post.authorUid === currentUser?.uid;
+        const isEditingPost = editingPostId === post.id;
 
         return (
           <article key={post.id} className="news-feed-card">
@@ -3172,15 +3266,33 @@ function NewsFeed({
                   <span>{formatNewsPostDate(post)}</span>
                 </div>
               </div>
-              {canDeletePost ? (
-                <button
-                  className="news-feed-card__action"
-                  disabled={deletingPostId === post.id}
-                  onClick={() => onDeletePost?.(post)}
-                  type="button"
-                >
-                  {deletingPostId === post.id ? 'Deleting...' : 'Delete'}
-                </button>
+              {canDeletePost || canEditPost ? (
+                <div className="news-feed-icon-actions">
+                  {canEditPost ? (
+                    <button
+                      aria-label="Edit post"
+                      className="news-icon-button"
+                      disabled={isEditingPost || savingPostId === post.id}
+                      onClick={() => onEditPost?.(post)}
+                      title="Edit post"
+                      type="button"
+                    >
+                      <PencilIcon />
+                    </button>
+                  ) : null}
+                  {canDeletePost ? (
+                    <button
+                      aria-label={deletingPostId === post.id ? 'Deleting post' : 'Delete post'}
+                      className="news-icon-button news-icon-button--danger"
+                      disabled={deletingPostId === post.id}
+                      onClick={() => onDeletePost?.(post)}
+                      title="Delete post"
+                      type="button"
+                    >
+                      <TrashIcon />
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
 
@@ -3190,7 +3302,37 @@ function NewsFeed({
               </div>
             ) : null}
 
-            {post.body ? (
+            {isEditingPost ? (
+              <form
+                className="news-edit-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  onSavePostEdit?.(post);
+                }}
+              >
+                <label className="field">
+                  <span>Edit post</span>
+                  <textarea
+                    onChange={(event) => onPostEditChange?.(event.target.value)}
+                    rows={4}
+                    value={postEditDraft}
+                  />
+                </label>
+                <div className="news-edit-form__actions">
+                  <button
+                    className="button button--ghost"
+                    disabled={savingPostId === post.id}
+                    onClick={onCancelPostEdit}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button className="button" disabled={savingPostId === post.id || !postEditDraft.trim()} type="submit">
+                    {savingPostId === post.id ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </form>
+            ) : post.body ? (
               <p className="news-feed-card__text">
                 <LinkifiedText text={post.body} />
               </p>
@@ -3229,24 +3371,79 @@ function NewsFeed({
             <div className="news-feed-comments">
               {post.comments?.map((comment) => {
                 const canDeleteComment = canManage || comment.authorUid === currentUser?.uid;
+                const canEditComment = comment.authorUid === currentUser?.uid;
+                const isEditingComment = editingCommentId === comment.id;
 
                 return (
                   <div key={comment.id} className="news-feed-comment">
-                    <div>
+                    <div className="news-feed-comment__body">
                       <strong>{comment.authorName || 'Teammate'}</strong>
-                      <p>
-                        <LinkifiedText text={comment.body} />
-                      </p>
+                      {isEditingComment ? (
+                        <form
+                          className="news-edit-form news-edit-form--comment"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            onSaveCommentEdit?.(post, comment);
+                          }}
+                        >
+                          <textarea
+                            aria-label="Edit comment"
+                            onChange={(event) => onCommentEditChange?.(event.target.value)}
+                            rows={2}
+                            value={commentEditDraft}
+                          />
+                          <div className="news-edit-form__actions">
+                            <button
+                              className="button button--ghost"
+                              disabled={savingCommentId === comment.id}
+                              onClick={onCancelCommentEdit}
+                              type="button"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              className="button"
+                              disabled={savingCommentId === comment.id || !commentEditDraft.trim()}
+                              type="submit"
+                            >
+                              {savingCommentId === comment.id ? 'Saving...' : 'Save'}
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <p>
+                          <LinkifiedText text={comment.body} />
+                          {comment.updatedAtMs ? <span className="news-feed-comment__edited"> Edited</span> : null}
+                        </p>
+                      )}
                     </div>
-                    {canDeleteComment ? (
-                      <button
-                        className="news-feed-card__action"
-                        disabled={deletingCommentId === comment.id}
-                        onClick={() => onDeleteComment?.(post, comment)}
-                        type="button"
-                      >
-                        {deletingCommentId === comment.id ? 'Deleting...' : 'Delete'}
-                      </button>
+                    {canDeleteComment || canEditComment ? (
+                      <div className="news-feed-icon-actions">
+                        {canEditComment ? (
+                          <button
+                            aria-label="Edit comment"
+                            className="news-icon-button"
+                            disabled={isEditingComment || savingCommentId === comment.id}
+                            onClick={() => onEditComment?.(comment)}
+                            title="Edit comment"
+                            type="button"
+                          >
+                            <PencilIcon />
+                          </button>
+                        ) : null}
+                        {canDeleteComment ? (
+                          <button
+                            aria-label={deletingCommentId === comment.id ? 'Deleting comment' : 'Delete comment'}
+                            className="news-icon-button news-icon-button--danger"
+                            disabled={deletingCommentId === comment.id}
+                            onClick={() => onDeleteComment?.(post, comment)}
+                            title="Delete comment"
+                            type="button"
+                          >
+                            <TrashIcon />
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 );
@@ -3390,7 +3587,13 @@ export function NewsPage() {
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [form, setForm] = useState({ body: '', imageFile: null, imagePreviewUrl: '' });
   const [commentDrafts, setCommentDrafts] = useState({});
+  const [editingPostId, setEditingPostId] = useState('');
+  const [postEditDraft, setPostEditDraft] = useState('');
+  const [editingCommentId, setEditingCommentId] = useState('');
+  const [commentEditDraft, setCommentEditDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const [savingPostId, setSavingPostId] = useState('');
+  const [savingCommentId, setSavingCommentId] = useState('');
   const [deletingPostId, setDeletingPostId] = useState('');
   const [deletingCommentId, setDeletingCommentId] = useState('');
   const [reactingPostId, setReactingPostId] = useState('');
@@ -3463,6 +3666,47 @@ export function NewsPage() {
     }
   }
 
+  function handleEditPost(post) {
+    setEditingPostId(post.id);
+    setPostEditDraft(post.body ?? '');
+    setEditingCommentId('');
+    setCommentEditDraft('');
+    setError('');
+    setMessage('');
+  }
+
+  function handleCancelPostEdit() {
+    setEditingPostId('');
+    setPostEditDraft('');
+  }
+
+  async function handleSavePostEdit(post) {
+    setSavingPostId(post.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await saveNewsPost({
+        body: postEditDraft,
+        clubSlug,
+        imageFile: null,
+        linkUrl: post.linkUrl ?? '',
+        post,
+        teamSlug,
+        title: post.title || `${user?.displayName || 'Team'} post`,
+        user,
+      });
+      setEditingPostId('');
+      setPostEditDraft('');
+      setMessage('Post updated.');
+      await loadNewsData();
+    } catch (editError) {
+      setError(editError.message ?? 'Unable to update that post.');
+    } finally {
+      setSavingPostId('');
+    }
+  }
+
   async function handleCommentSubmit(event, post) {
     event.preventDefault();
     setError('');
@@ -3500,6 +3744,44 @@ export function NewsPage() {
       setError(deleteError.message ?? 'Unable to delete that comment.');
     } finally {
       setDeletingCommentId('');
+    }
+  }
+
+  function handleEditComment(comment) {
+    setEditingCommentId(comment.id);
+    setCommentEditDraft(comment.body ?? '');
+    setEditingPostId('');
+    setPostEditDraft('');
+    setError('');
+    setMessage('');
+  }
+
+  function handleCancelCommentEdit() {
+    setEditingCommentId('');
+    setCommentEditDraft('');
+  }
+
+  async function handleSaveCommentEdit(post, comment) {
+    setSavingCommentId(comment.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateNewsComment({
+        body: commentEditDraft,
+        clubSlug,
+        commentId: comment.id,
+        postId: post.id,
+        teamSlug,
+        user,
+      });
+      setEditingCommentId('');
+      setCommentEditDraft('');
+      await loadNewsData();
+    } catch (editError) {
+      setError(editError.message ?? 'Unable to update that comment.');
+    } finally {
+      setSavingCommentId('');
     }
   }
 
@@ -3635,16 +3917,30 @@ export function NewsPage() {
         <NewsFeed
           canManage={canManage}
           commentDrafts={commentDrafts}
+          commentEditDraft={commentEditDraft}
           currentUser={user}
           deletingCommentId={deletingCommentId}
           deletingPostId={deletingPostId}
+          editingCommentId={editingCommentId}
+          editingPostId={editingPostId}
           newsPosts={newsPosts}
+          onCancelCommentEdit={handleCancelCommentEdit}
+          onCancelPostEdit={handleCancelPostEdit}
           onCommentChange={(postId, value) => setCommentDrafts((current) => ({ ...current, [postId]: value }))}
+          onCommentEditChange={setCommentEditDraft}
           onCommentSubmit={handleCommentSubmit}
           onDeleteComment={handleDeleteComment}
           onDeletePost={handleDeletePost}
+          onEditComment={handleEditComment}
+          onEditPost={handleEditPost}
+          onPostEditChange={setPostEditDraft}
           onReactionToggle={(post, reactionType) => handleReactionToggle(post, reactionType)}
+          onSaveCommentEdit={handleSaveCommentEdit}
+          onSavePostEdit={handleSavePostEdit}
+          postEditDraft={postEditDraft}
           reactingPostId={reactingPostId}
+          savingCommentId={savingCommentId}
+          savingPostId={savingPostId}
         />
       </section>
     </div>
@@ -4689,6 +4985,7 @@ export function SettingsPage() {
   const [players, setPlayers] = useState([]);
   const [membership, setMembership] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [requestingAffiliation, setRequestingAffiliation] = useState(false);
   const [creatingCrop, setCreatingCrop] = useState(false);
@@ -4709,6 +5006,8 @@ export function SettingsPage() {
   const clubOptions = clubs.filter((club) => club.slug !== 'independent');
   const playerMap = useMemo(() => new Map(players.map((player) => [player.id, player])), [players]);
   const displayedLogoUrl = logoPreviewUrl || team?.logoUrl || defaultTeamLogo;
+  const isTeamArchived = team?.status === 'archived';
+  const canManageActiveTeam = canManage && !isTeamArchived;
   const inviteLink = team?.joinCode
     ? `${window.location.origin}${window.location.pathname}#/join?code=${encodeURIComponent(team.joinCode)}`
     : '';
@@ -4945,6 +5244,35 @@ export function SettingsPage() {
     }
   }
 
+  async function handleArchiveTeam() {
+    const confirmed = window.confirm(
+      `Archive ${team?.name || 'this team'}? Players will no longer use this as an active team, and new joins will be disabled. Team history will be kept.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setArchiving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await archiveTeam({
+        clubSlug,
+        teamSlug,
+        user,
+      });
+      setMessage('Team archived. Roster, news, and match history are kept for records.');
+      await loadSettingsData();
+      window.dispatchEvent(new Event('team-updated'));
+    } catch (archiveError) {
+      setError(archiveError.message ?? 'Unable to archive this team.');
+    } finally {
+      setArchiving(false);
+    }
+  }
+
   return (
     <div className="page-grid schedule-admin-page settings-admin-page">
       <section className="card">
@@ -4978,7 +5306,7 @@ export function SettingsPage() {
                   <span>Join code</span>
                   <div className="settings-admin-invite-control">
                     <strong>{team?.joinCode ?? 'Not available yet'}</strong>
-                    {canManage ? (
+                    {canManageActiveTeam ? (
                       <button
                         className="button button--ghost settings-admin-join-action"
                         disabled={rotating}
@@ -4994,7 +5322,7 @@ export function SettingsPage() {
                   <span>Invite link</span>
                   <div className="settings-admin-invite-control settings-admin-invite-control--link">
                     <code>{inviteLink || 'Not available yet'}</code>
-                    {canManage ? (
+                    {canManageActiveTeam ? (
                       <button
                         className="button settings-admin-join-action"
                         disabled={!team?.joinCode}
@@ -5022,7 +5350,7 @@ export function SettingsPage() {
             </div>
           </div>
 
-          {canManage ? (
+          {canManageActiveTeam ? (
             <form className="schedule-admin-form settings-admin-form" onSubmit={handleSubmit}>
               <div className="settings-admin-branding-grid">
                 <div className="settings-admin-branding-preview">
@@ -5061,6 +5389,10 @@ export function SettingsPage() {
                 </div>
               </div>
             </form>
+          ) : isTeamArchived ? (
+            <div className="notice notice--info">
+              This team is archived, so active team profile settings are locked.
+            </div>
           ) : (
             <div className="notice notice--info">
               Captains and co-captains can edit team settings. Your current role is{' '}
@@ -5095,7 +5427,7 @@ export function SettingsPage() {
                 </p>
               </div>
             </div>
-          ) : canManage ? (
+          ) : canManageActiveTeam ? (
             <div className="schedule-admin-form settings-admin-form">
               <div className="settings-club-status">
                 <span className="status-badge">
@@ -5144,6 +5476,10 @@ export function SettingsPage() {
                   Request sent. An app admin or club admin needs to approve it.
                 </div>
               ) : null}
+            </div>
+          ) : isTeamArchived ? (
+            <div className="notice notice--info">
+              Archived teams cannot request or change club affiliation.
             </div>
           ) : (
             <div className="notice notice--info">
@@ -5233,6 +5569,33 @@ export function SettingsPage() {
             </div>
           ) : (
             <p>No team members found yet.</p>
+          )}
+        </section>
+
+        <section className="schedule-admin-card settings-admin-lifecycle-card">
+          <div className="schedule-admin-card__header">
+            <div>
+              <p className="eyebrow">Team lifecycle</p>
+              <h2>Archive team</h2>
+              <p>
+                Archive this team when it is no longer active. Archived teams are hidden from active team lists and
+                cannot accept new joins, but roster, news, and match history are kept for records.
+              </p>
+            </div>
+          </div>
+
+          {isTeamArchived ? (
+            <div className="notice notice--info">
+              This team is archived. Its history is retained, but it is no longer available for new joins.
+            </div>
+          ) : canManage ? (
+            <button className="button button--danger" disabled={archiving} onClick={handleArchiveTeam} type="button">
+              {archiving ? 'Archiving team...' : 'Archive Team'}
+            </button>
+          ) : (
+            <div className="notice notice--info">
+              Captains and co-captains can archive this team when it is no longer active.
+            </div>
           )}
         </section>
       </div>

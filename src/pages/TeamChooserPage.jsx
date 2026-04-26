@@ -69,7 +69,7 @@ export default function TeamChooserPage() {
         const clubNameBySlug = new Map(
           clubs.map((club) => [club.slug, club.slug === 'independent' ? 'Independent' : club.name]),
         );
-        const enrichedItems = await Promise.all(
+        const enrichedItems = (await Promise.all(
           items.map(async (membership) => {
             try {
               const [team, members, players] = await Promise.all([
@@ -77,6 +77,10 @@ export default function TeamChooserPage() {
                 listTeamMembers(membership.clubSlug, membership.teamSlug),
                 listPlayers(membership.clubSlug, membership.teamSlug),
               ]);
+
+              if ((team?.status ?? 'active') !== 'active') {
+                return null;
+              }
 
               return {
                 ...membership,
@@ -96,7 +100,7 @@ export default function TeamChooserPage() {
               };
             }
           }),
-        );
+        )).filter(Boolean);
 
         if (!cancelled) {
           setMemberships(enrichedItems);

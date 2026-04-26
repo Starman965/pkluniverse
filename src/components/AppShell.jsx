@@ -99,14 +99,20 @@ export default function AppShell() {
 
     try {
       const items = await listMemberships(user.uid);
+      const activeItems = (await Promise.all(
+        items.map(async (item) => {
+          const team = await getTeam(item.clubSlug, item.teamSlug).catch(() => null);
+          return (team?.status ?? 'active') === 'active' ? item : null;
+        }),
+      )).filter(Boolean);
 
-      if (!items.length && clubSlug && teamSlug) {
+      if (!activeItems.length && clubSlug && teamSlug) {
         const [team, membership] = await Promise.all([
           getTeam(clubSlug, teamSlug),
           getMembership(clubSlug, teamSlug, user.uid, user),
         ]);
 
-        if (team && membership) {
+        if (team && (team.status ?? 'active') === 'active' && membership) {
           setMemberships([
             {
               clubSlug,
@@ -120,7 +126,7 @@ export default function AppShell() {
         }
       }
 
-      setMemberships(items);
+      setMemberships(activeItems);
       setMembershipError('');
     } catch (error) {
       setMembershipError(error.message ?? 'Unable to load your teams yet.');
@@ -284,6 +290,9 @@ export default function AppShell() {
                 My Teams
               </NavLink>
             ) : null}
+            <NavLink className="sidebar__footer-link" to="help">
+              Help & Feedback
+            </NavLink>
             {isAppAdmin ? (
               <NavLink className="sidebar__footer-link" rel="noreferrer" target="_blank" to="/admin">
                 App Admin

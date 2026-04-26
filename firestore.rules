@@ -210,6 +210,7 @@ service cloud.firestore {
 
     function isApprovedClubTeam(challengeClubId, teamClubId, teamId) {
       return teamDoc(teamClubId, teamId).data.affiliationStatus == 'approved'
+        && teamDoc(teamClubId, teamId).data.status == 'active'
         && teamDoc(teamClubId, teamId).data.approvedClubSlug == challengeClubId;
     }
 
@@ -259,6 +260,7 @@ service cloud.firestore {
       return resource.data.status == 'open'
         && request.resource.data.status == 'open'
         && isManager(resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
+        && isApprovedClubTeam(clubId, resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
         && request.resource.data.createdByTeamClubSlug == resource.data.createdByTeamClubSlug
         && request.resource.data.createdByTeamSlug == resource.data.createdByTeamSlug
         && request.resource.data.createdByUid == resource.data.createdByUid
@@ -313,6 +315,7 @@ service cloud.firestore {
         && request.resource.data.acceptedByTeamClubSlug is string
         && request.resource.data.acceptedByTeamSlug is string
         && isManager(request.resource.data.acceptedByTeamClubSlug, request.resource.data.acceptedByTeamSlug)
+        && isApprovedClubTeam(clubId, resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
         && isApprovedClubTeam(clubId, request.resource.data.acceptedByTeamClubSlug, request.resource.data.acceptedByTeamSlug)
         && request.resource.data.createdByTeamClubSlug == resource.data.createdByTeamClubSlug
         && request.resource.data.createdByTeamSlug == resource.data.createdByTeamSlug
@@ -454,6 +457,7 @@ service cloud.firestore {
             && request.resource.data.clubId == resource.data.clubId
             && request.resource.data.slug == resource.data.slug
             && request.resource.data.createdBy == resource.data.createdBy
+            && request.resource.data.status == resource.data.status
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
               'affiliationStatus',
               'joinCode',
@@ -475,6 +479,23 @@ service cloud.firestore {
               ])
               || request.resource.data.affiliationStatus == 'pending'
             )
+          )
+          || (
+            isManager(clubId, teamId)
+            && resource.data.status == 'active'
+            && request.resource.data.status == 'archived'
+            && request.resource.data.clubId == resource.data.clubId
+            && request.resource.data.slug == resource.data.slug
+            && request.resource.data.createdBy == resource.data.createdBy
+            && request.resource.data.joinCode == ''
+            && request.resource.data.archivedBy == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'archivedAt',
+              'archivedBy',
+              'joinCode',
+              'status',
+              'updatedAt',
+            ])
           )
           || (
             isClubApprover(resource.data.requestedClubSlug)
@@ -561,7 +582,15 @@ service cloud.firestore {
             allow create: if isTeamMember(clubId, teamId)
               && request.resource.data.authorUid == request.auth.uid
               && request.resource.data.createdBy == request.auth.uid;
-            allow update: if false;
+            allow update: if isTeamMember(clubId, teamId)
+              && (resource.data.authorUid == request.auth.uid || resource.data.createdBy == request.auth.uid)
+              && request.resource.data.updatedBy == request.auth.uid
+              && request.resource.data.body is string
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'body',
+                'updatedAt',
+                'updatedBy',
+              ]);
             allow delete: if isPlatformAdmin()
               || isManager(clubId, teamId)
               || (
