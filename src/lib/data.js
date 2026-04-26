@@ -232,6 +232,38 @@ async function syncMembershipSummary({ clubSlug, role, teamName, teamSlug, uid }
   );
 }
 
+async function createAdminNotification({
+  clubSlug = '',
+  message,
+  teamName = '',
+  teamSlug = '',
+  title,
+  type,
+  user,
+  metadata = {},
+}) {
+  if (!type || !title || !message || !user?.uid) {
+    return;
+  }
+
+  const notificationRef = doc(collection(db, 'adminNotifications'));
+
+  await setDoc(notificationRef, {
+    clubSlug,
+    createdAt: serverTimestamp(),
+    createdByEmail: user.email ?? '',
+    createdByName: user.displayName ?? '',
+    createdByUid: user.uid,
+    message,
+    metadata,
+    status: 'new',
+    teamName,
+    teamSlug,
+    title,
+    type,
+  });
+}
+
 export async function syncUserProfile(user) {
   requireDb();
 
@@ -1342,6 +1374,20 @@ export async function createTeam({ teamName, user }) {
     uid: user.uid,
   });
 
+  await createAdminNotification({
+    clubSlug: club.slug,
+    message: `${trimmedName} was created by ${user.displayName || user.email || 'a new captain'}.`,
+    teamName: trimmedName,
+    teamSlug,
+    title: 'New team created',
+    type: 'team.created',
+    user,
+    metadata: {
+      joinCode,
+      publicSlug,
+    },
+  });
+
   return { clubSlug: club.slug, joinCode, teamSlug };
 }
 
@@ -1423,6 +1469,21 @@ export async function joinTeamByCode({ code, user }) {
     teamSlug,
     uid: user.uid,
   });
+
+  if (!existingMembership) {
+    await createAdminNotification({
+      clubSlug: teamClubSlug,
+      message: `${user.displayName || user.email || 'A player'} joined ${team.name || teamSlug}.`,
+      teamName: team.name ?? teamSlug,
+      teamSlug,
+      title: 'New team member joined',
+      type: 'teamMember.joined',
+      user,
+      metadata: {
+        role: nextRole,
+      },
+    });
+  }
 
   return { clubSlug: teamClubSlug, teamSlug };
 }
@@ -1699,6 +1760,21 @@ export async function requestClubAffiliation({
   });
 
   await batch.commit();
+
+  await createAdminNotification({
+    clubSlug,
+    message: `${team.name ?? teamSlug} requested affiliation with ${requestedClub.name ?? requestedClubSlug}.`,
+    teamName: team.name ?? teamSlug,
+    teamSlug,
+    title: 'Club affiliation requested',
+    type: 'clubAffiliation.requested',
+    user,
+    metadata: {
+      requestId,
+      requestedClubName: requestedClub.name ?? requestedClubSlug,
+      requestedClubSlug,
+    },
+  });
 }
 
 function mapAffiliationRequest(snapshot) {

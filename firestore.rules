@@ -60,6 +60,34 @@ service cloud.firestore {
       return clubId in ['independent'];
     }
 
+    function safeAdminNotificationCreate() {
+      return signedIn()
+        && request.resource.data.keys().hasOnly([
+          'clubSlug',
+          'createdAt',
+          'createdByEmail',
+          'createdByName',
+          'createdByUid',
+          'message',
+          'metadata',
+          'status',
+          'teamName',
+          'teamSlug',
+          'title',
+          'type',
+        ])
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.status == 'new'
+        && request.resource.data.type in [
+          'team.created',
+          'teamMember.joined',
+          'clubAffiliation.requested',
+        ]
+        && request.resource.data.title is string
+        && request.resource.data.message is string
+        && request.resource.data.metadata is map;
+    }
+
     function safeSelfMembershipUpdate(uid) {
       return isSelf(uid)
         && request.resource.data.uid == resource.data.uid
@@ -335,6 +363,12 @@ service cloud.firestore {
             && request.resource.data.linkedGameId == challenge.homeGameId
           )
         );
+    }
+
+    match /adminNotifications/{notificationId} {
+      allow read, delete: if isPlatformAdmin();
+      allow create: if safeAdminNotificationCreate();
+      allow update: if false;
     }
 
     match /users/{uid} {
