@@ -2753,6 +2753,7 @@ export async function listGames(clubSlug, teamSlug) {
       opponent: data.opponent ?? '',
       opponentScore: normalizeNullableNumber(data.opponentScore),
       pairings: normalizePairings(data.pairings, data.rosterPlayerIds ?? []),
+      playersNeeded: [2, 4, 6, 8].includes(Number(data.playersNeeded)) ? Number(data.playersNeeded) : 8,
       result:
         data.result ??
         deriveMatchResult(
@@ -2780,6 +2781,7 @@ export async function saveGame({
   matchStatus = 'scheduled',
   opponent,
   opponentScore,
+  playersNeeded = 8,
   teamSlug,
   teamScore,
   timeLabel,
@@ -2808,6 +2810,7 @@ export async function saveGame({
   const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', nextGameId);
   const normalizedTeamScore = normalizeNullableNumber(teamScore);
   const normalizedOpponentScore = normalizeNullableNumber(opponentScore);
+  const normalizedPlayersNeeded = [2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
   const finalStatus =
     matchStatus === 'completed' ||
     (normalizedTeamScore !== null && normalizedOpponentScore !== null)
@@ -2822,6 +2825,7 @@ export async function saveGame({
     matchStatus: finalStatus,
     opponent: trimmedOpponent,
     opponentScore: normalizedOpponentScore,
+    playersNeeded: normalizedPlayersNeeded,
     result,
     teamScore: normalizedTeamScore,
     timeLabel: normalizedDateTbd ? 'Time TBD' : trimmedTimeLabel || 'Time TBD',
@@ -2869,13 +2873,18 @@ export async function saveGamePairings({
   }
 
   const normalizedRosterPlayerIds = normalizePlayerIdList(rosterPlayerIds);
+  const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', gameId);
 
-  if (normalizedRosterPlayerIds.length > 8) {
-    throw new Error('Choose up to eight players for matchup pairings.');
+  const gameSnapshot = await getDoc(gameRef);
+  const playersNeeded = [2, 4, 6, 8].includes(Number(gameSnapshot.data()?.playersNeeded))
+    ? Number(gameSnapshot.data().playersNeeded)
+    : 8;
+
+  if (normalizedRosterPlayerIds.length > playersNeeded) {
+    throw new Error(`Choose up to ${playersNeeded} players for this match roster.`);
   }
 
   const normalizedPairings = normalizePairings(pairings, normalizedRosterPlayerIds);
-  const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', gameId);
 
   await updateDoc(gameRef, {
     pairings: normalizedPairings,

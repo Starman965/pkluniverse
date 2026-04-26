@@ -17,8 +17,6 @@ const primaryRoutes = [
   { label: 'News Feed', to: 'news' },
   { label: 'The Team', to: 'team' },
   { label: 'Team Matches', to: 'schedule' },
-  { label: 'Game Rosters', to: 'game-rosters' },
-  { label: 'Availability', to: 'availability' },
   { label: 'Team Standing', to: 'team-standing' },
   { label: 'My Profile', to: 'profile' },
 ];

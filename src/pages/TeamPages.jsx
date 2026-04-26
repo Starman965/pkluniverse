@@ -89,6 +89,7 @@ function createScheduleAdminDraft(game) {
     matchStatus: game.matchStatus ?? 'scheduled',
     opponent: game.opponent ?? '',
     opponentScore: game.opponentScore ?? '',
+    playersNeeded: game.playersNeeded ?? 8,
     teamScore: game.teamScore ?? '',
     timeLabel: game.dateTbd === true || timeLabel === 'Time TBD' ? '' : timeLabel,
   };
@@ -109,6 +110,7 @@ function createEmptyScheduleAdminForm() {
     matchStatus: 'scheduled',
     opponent: '',
     opponentScore: '',
+    playersNeeded: 8,
     teamScore: '',
     timeLabel: '',
   };
@@ -1549,28 +1551,38 @@ export function RosterPage() {
 
 export function SchedulePage() {
   const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
   const [games, setGames] = useState([]);
   const [players, setPlayers] = useState([]);
+  const [membership, setMembership] = useState(null);
   const [activeTab, setActiveTab] = useState('upcoming');
+  const [expandedRosterIds, setExpandedRosterIds] = useState([]);
+  const [updatingGameId, setUpdatingGameId] = useState('');
   const [error, setError] = useState('');
 
   async function loadScheduleData() {
-    const [gameData, playerData] = await Promise.all([
+    const [gameData, playerData, membershipData] = await Promise.all([
       listGames(clubSlug, teamSlug),
       listPlayers(clubSlug, teamSlug),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
 
     setGames(gameData);
     setPlayers(playerData);
+    setMembership(membershipData);
   }
 
   useEffect(() => {
     loadScheduleData().catch((loadError) => {
       setError(loadError.message ?? 'Unable to load matchups yet.');
     });
-  }, [clubSlug, teamSlug]);
+  }, [clubSlug, teamSlug, user?.uid]);
 
   const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
+  const currentPlayer = useMemo(
+    () => players.find((player) => player.id === membership?.playerId) ?? null,
+    [membership?.playerId, players],
+  );
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const upcomingGames = useMemo(
     () => games.filter((game) => !gameBelongsInPast(game, todayDateKey)),
@@ -1582,6 +1594,33 @@ export function SchedulePage() {
   );
   const visibleGames = activeTab === 'past' ? pastGames : upcomingGames;
 
+  async function updateAvailability(gameId, status) {
+    setUpdatingGameId(gameId);
+    setError('');
+
+    try {
+      await setAvailability({
+        clubSlug,
+        gameId,
+        playerId: membership?.playerId,
+        status,
+        teamSlug,
+        user,
+      });
+      await loadScheduleData();
+    } catch (updateError) {
+      setError(updateError.message ?? 'Unable to update availability.');
+    } finally {
+      setUpdatingGameId('');
+    }
+  }
+
+  function toggleRoster(gameId) {
+    setExpandedRosterIds((current) =>
+      current.includes(gameId) ? current.filter((id) => id !== gameId) : [...current, gameId],
+    );
+  }
+
   return (
     <div className="page-grid schedule-page">
       <section className="card">
@@ -1590,12 +1629,17 @@ export function SchedulePage() {
             <p className="eyebrow">Schedule</p>
             <h1>Team Matches</h1>
             <p className="schedule-page__copy">
-              See upcoming matches at a glance so you always know when and where the team is playing.
+              See match details, set your availability, and review posted rosters from one place.
             </p>
           </div>
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
+        {!membership?.playerId ? (
+          <div className="notice notice--info">
+            Your account is not linked to a player record for this team yet, so availability controls are disabled.
+          </div>
+        ) : null}
 
         {games.length > 0 ? (
           <div className="availability-tabs" aria-label="Schedule views">
@@ -1620,30 +1664,123 @@ export function SchedulePage() {
           <div className="schedule-grid">
             {visibleGames.map((game) => {
               const availabilitySummary = buildAvailabilitySummary(game, activePlayers);
+              const rosterPairings = buildRosterPairings(game, players);
+              const hasRoster = rosterPairings.length > 0;
+              const rosterCount = game.rosterPlayerIds?.length ?? 0;
+              const playersNeeded = game.playersNeeded ?? 8;
+              const expanded = expandedRosterIds.includes(game.id);
+              const currentStatus = membership?.playerId ? getAttendanceStatus(game, membership.playerId) : 'unknown';
+              const statusMeta = getAvailabilityBoardStatusMeta(currentStatus, true);
+              const currentPlayerRostered = membership?.playerId
+                ? (game.rosterPlayerIds ?? []).includes(membership.playerId)
+                : false;
+              const statusLabel = currentPlayerRostered
+                ? 'You are rostered'
+                : hasRoster
+                  ? 'Roster posted'
+                  : 'Roster not posted yet';
 
               return (
                 <article key={game.id} className="schedule-match-card">
-                  <p className="schedule-match-card__date">
-                    {game.isoDate
-                      ? new Intl.DateTimeFormat('en-US', {
-                          weekday: 'long',
-                          month: 'short',
-                          day: 'numeric',
-                        })
-                          .format(new Date(`${game.isoDate}T12:00:00`))
-                          .toUpperCase()
-                      : 'DATE TBD'}
-                  </p>
-                  <h2 className="schedule-match-card__title">
-                    VS. {game.opponent || 'Opponent TBD'}
-                  </h2>
-                  <span>
-                    {game.timeLabel || 'Time TBD'} {game.timeLabel ? '·' : ''} {game.location || 'TBD'}
-                  </span>
-                  <div className="schedule-match-card__stats">
-                    <span>On Roster: {game.rosterPlayerIds.length}</span>
-                    <span>Available: {availabilitySummary.in}</span>
+                  <div className="schedule-match-card__header">
+                    <div>
+                      <p className="schedule-match-card__date">
+                        {game.isoDate
+                          ? new Intl.DateTimeFormat('en-US', {
+                              weekday: 'long',
+                              month: 'short',
+                              day: 'numeric',
+                            })
+                              .format(new Date(`${game.isoDate}T12:00:00`))
+                              .toUpperCase()
+                          : 'DATE TBD'}
+                      </p>
+                      <h2 className="schedule-match-card__title">
+                        VS. {game.opponent || 'Opponent TBD'}
+                      </h2>
+                      <span>
+                        {game.timeLabel || 'Time TBD'} {game.timeLabel ? '·' : ''} {game.location || 'TBD'}
+                      </span>
+                    </div>
+                    <span className="game-roster-board__badge">
+                      {getGameRosterBadge(game, todayDateKey)}
+                    </span>
                   </div>
+
+                  <div className="schedule-match-card__stats">
+                    <span>{statusLabel}</span>
+                    <span>Roster: {rosterCount} / {playersNeeded}</span>
+                    <span>Available: {availabilitySummary.in}</span>
+                    <span>Your status: {statusMeta.label}</span>
+                  </div>
+
+                  <div className="schedule-match-card__actions">
+                    {[
+                      { label: 'Available', value: 'in' },
+                      { label: 'Unavailable', value: 'out' },
+                      { label: 'Clear', value: 'unknown' },
+                    ].map((choice) => (
+                      <button
+                        key={choice.value}
+                        className={`choice-button ${currentStatus === choice.value ? 'choice-button--active' : ''}`}
+                        disabled={!membership?.playerId || updatingGameId === game.id}
+                        onClick={() => updateAvailability(game.id, choice.value)}
+                        type="button"
+                      >
+                        {updatingGameId === game.id && currentStatus === choice.value ? 'Saving...' : choice.label}
+                      </button>
+                    ))}
+                    {hasRoster ? (
+                      <button className="choice-button" onClick={() => toggleRoster(game.id)} type="button">
+                        {expanded ? 'Hide Roster' : 'Show Roster'}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {currentPlayer ? (
+                    <p className="schedule-match-card__helper">
+                      {currentPlayerRostered
+                        ? `${currentPlayer.fullName || 'You'} is on the posted roster for this match.`
+                        : hasRoster
+                          ? `${currentPlayer.fullName || 'You'} is not currently on the posted roster.`
+                          : 'Captains have not posted a roster for this match yet.'}
+                    </p>
+                  ) : null}
+
+                  {expanded && hasRoster ? (
+                    <div className="schedule-match-roster">
+                      {rosterPairings.map((pairing) => (
+                        <section key={pairing.courtLabel} className="game-roster-pair-card">
+                          <div className="game-roster-pair-card__header">
+                            <div className="game-roster-pair-card__title-row">
+                              <strong>{pairing.courtLabel}</strong>
+                              <span>Team DUPR: {formatDupr(pairing.teamDupr)}</span>
+                            </div>
+                            <span className="game-roster-pair-card__count">{pairing.filledSlots}/2</span>
+                          </div>
+
+                          <div className="game-roster-pair-card__players">
+                            {pairing.players.map((player) => (
+                              <article key={player.id} className="game-roster-player-card">
+                                <div className="game-roster-player-card__identity">
+                                  <div className="game-roster-player-card__avatar">
+                                    {buildPlayerInitials(player.fullName || 'Player')}
+                                  </div>
+                                  <div>
+                                    <strong>{player.fullName || 'Unnamed player'}</strong>
+                                    <span>In {pairing.courtLabel}</span>
+                                  </div>
+                                </div>
+                                <span className="game-roster-player-card__dupr">
+                                  DUPR {formatDupr(player.dupr)}
+                                </span>
+                              </article>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  ) : null}
                 </article>
               );
             })}
@@ -1878,6 +2015,21 @@ export function ScheduleScoresPage() {
                       onChange={(nextTimeLabel) => setForm((current) => ({ ...current, timeLabel: nextTimeLabel }))}
                       value={form.timeLabel}
                     />
+                    <label className="field schedule-admin-form__players-needed-field">
+                      <span>Players needed</span>
+                      <select
+                        onChange={(event) =>
+                          setForm((current) => ({ ...current, playersNeeded: Number(event.target.value) }))
+                        }
+                        value={form.playersNeeded}
+                      >
+                        {[2, 4, 6, 8].map((count) => (
+                          <option key={count} value={count}>
+                            {count}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                   <label className="checkbox-field schedule-admin-form__tbd">
                     <input
@@ -1965,6 +2117,7 @@ export function ScheduleScoresPage() {
                       </span>
                       <div className="schedule-match-card__stats">
                         <span>Status: {game.matchStatus === 'completed' ? 'Completed' : 'Scheduled'}</span>
+                        <span>{game.playersNeeded ?? 8} Players</span>
                         <span>
                           {hasScore
                             ? `${teamName || 'Team'} ${game.teamScore ?? '-'} · Opponent ${game.opponentScore ?? '-'}`
@@ -2225,6 +2378,7 @@ export function RosterMgmtPage() {
   }, [clubSlug, teamSlug, user?.uid]);
 
   const activeGame = games.find((game) => game.id === selectedGameId) ?? games[0] ?? null;
+  const playersNeeded = activeGame?.playersNeeded ?? 8;
   const availablePlayers = useMemo(
     () => activePlayers.filter((player) => activeGame?.attendance?.[player.id] === 'in'),
     [activeGame, activePlayers],
@@ -2303,8 +2457,8 @@ export function RosterMgmtPage() {
     updateDraft((draft) => {
       const exists = draft.rosterPlayerIds.includes(playerId);
 
-      if (!exists && draft.rosterPlayerIds.length >= 8) {
-        setError('Choose up to eight players for matchup pairings.');
+      if (!exists && draft.rosterPlayerIds.length >= playersNeeded) {
+        setError(`Choose up to ${playersNeeded} players for this match roster.`);
         return draft;
       }
 
@@ -2387,123 +2541,139 @@ export function RosterMgmtPage() {
   }
 
   return (
-    <div className="page-grid">
-      <section className="card">
-        <p className="eyebrow">Match rosters</p>
-        <h1>Build Rosters</h1>
-        <p>
-          Captains and co-captains choose up to eight roster players for each matchup, then assign
-          them into court slots for the saved game roster.
-        </p>
+    <div className="page-grid roster-builder-page">
+      <section className="card roster-builder-hero">
+        <div className="roster-builder-hero__header">
+          <div>
+            <p className="eyebrow">Match rosters</p>
+            <h1>Build Rosters</h1>
+            <p>
+              Pick a match, choose the needed available players, then assign them into court slots.
+              Saved rosters appear on the player Team Matches page.
+            </p>
+          </div>
+          {activeDraft ? (
+            <span className="settings-admin-member-pill">
+              {activeDraft.rosterPlayerIds.length} / {playersNeeded} selected
+            </span>
+          ) : null}
+        </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
         {message ? <div className="notice notice--success">{message}</div> : null}
 
         {games.length > 0 ? (
-          <div className="choice-row">
-            {games.map((game) => (
-              <button
-                key={game.id}
-                className={`choice-button ${game.id === activeGame?.id ? 'choice-button--active' : ''}`}
-                onClick={() => {
-                  setSelectedGameId(game.id);
-                  setError('');
-                  setMessage('');
-                }}
-                type="button"
-              >
-                {formatMatchupLabel(game)}
-              </button>
-            ))}
+          <div className="roster-builder-match-picker" aria-label="Choose a match">
+            {games.map((game) => {
+              const selectedCount =
+                pairingDrafts[game.id]?.rosterPlayerIds.length ?? game.rosterPlayerIds?.length ?? 0;
+              const availableCount = Object.values(game.attendance ?? {}).filter((status) => status === 'in').length;
+              const matchPlayersNeeded = game.playersNeeded ?? 8;
+
+              return (
+                <button
+                  key={game.id}
+                  className={`roster-builder-match-card ${game.id === activeGame?.id ? 'roster-builder-match-card--active' : ''}`}
+                  onClick={() => {
+                    setSelectedGameId(game.id);
+                    setError('');
+                    setMessage('');
+                  }}
+                  type="button"
+                >
+                  <div className="roster-builder-match-card__main">
+                    <span>{game.id === activeGame?.id ? 'Selected Match' : 'Match'}</span>
+                    <strong>{game.opponent || 'Opponent TBD'}</strong>
+                    <small>
+                      {game.isoDate || game.dateLabel || 'Date TBD'} · {game.location || 'Location TBD'}
+                    </small>
+                  </div>
+                  <div className="roster-builder-match-card__badges">
+                    <span className="roster-builder-match-card__badge">{availableCount} Available</span>
+                    <span className="roster-builder-match-card__badge roster-builder-match-card__badge--selected">
+                      {selectedCount} / {matchPlayersNeeded} Selected
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         ) : (
-          <p>No matchups are available for pairings yet.</p>
+          <p>No matches are available for roster building yet.</p>
         )}
       </section>
 
       {activeGame ? (
         <>
-          <section className="card">
-            <p className="eyebrow">Selected matchup</p>
-            <div className="detail-grid">
-              <div className="detail-card">
-                <span>Opponent</span>
-                <strong>{activeGame.opponent || 'Opponent TBD'}</strong>
-              </div>
-              <div className="detail-card">
-                <span>Date</span>
-                <strong>{activeGame.isoDate || activeGame.dateLabel || 'Date TBD'}</strong>
-              </div>
-              <div className="detail-card">
-                <span>Location</span>
-                <strong>{activeGame.location || 'Location TBD'}</strong>
-              </div>
-              <div className="detail-card">
-                <span>Available responses</span>
-                <strong>
-                  {Object.values(activeGame.attendance ?? {}).filter((status) => status === 'in').length} in
-                </strong>
-              </div>
-            </div>
-          </section>
-
-          <section className="card">
-            <p className="eyebrow">Roster pool</p>
-            {canManage ? (
-              <>
+          <section className="card roster-builder-section">
+            <div className="roster-builder-section__header">
+              <div>
+                <p className="eyebrow">Available Players</p>
+                <h2>Select the roster</h2>
                 <p>
-                  Select up to eight players marked Available for this matchup. Clicking a player adds
-                  them to the pool and auto-fills the next open court slot.
+                  Select the needed players marked Available. Selecting a player auto-fills the next
+                  open court slot, and you can adjust court assignments below.
                 </p>
-                {availablePlayers.length > 0 ? (
-                  <div className="pairing-pool">
-                    {availablePlayers.map((player) => {
-                      const selected = activeDraft?.rosterPlayerIds.includes(player.id);
-                      const attendanceStatus = formatAttendanceStatus(
-                        activeGame.attendance?.[player.id] ?? 'unknown',
-                      );
+              </div>
+              <span className="settings-admin-member-pill">
+                {availablePlayers.length} available
+              </span>
+            </div>
 
-                      return (
-                        <button
-                          key={player.id}
-                          className={`pairing-chip ${selected ? 'pairing-chip--active' : ''}`}
-                          onClick={() => toggleRosterPlayer(player.id)}
-                          type="button"
-                        >
+            {canManage ? (
+              availablePlayers.length > 0 ? (
+                <div className="pairing-pool roster-builder-player-grid">
+                  {availablePlayers.map((player) => {
+                    const selected = activeDraft?.rosterPlayerIds.includes(player.id);
+                    const attendanceStatus = formatAttendanceStatus(
+                      activeGame.attendance?.[player.id] ?? 'unknown',
+                    );
+
+                    return (
+                      <button
+                        key={player.id}
+                        className={`pairing-chip ${selected ? 'pairing-chip--active' : ''}`}
+                        onClick={() => toggleRosterPlayer(player.id)}
+                        type="button"
+                      >
+                        <div className="pairing-chip__header">
                           <strong>{player.fullName || 'Unnamed player'}</strong>
-                          <span>
-                            {attendanceStatus}
-                            {player.skillLevel ? ` · ${player.skillLevel}` : ''}
+                          <span className="pairing-chip__dupr">
+                            DUPR {formatDupr(player.dupr)}
                           </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p>No players are marked Available for this matchup yet.</p>
-                )}
-              </>
+                        </div>
+                        <span>
+                          {attendanceStatus}
+                          {player.skillLevel ? ` · ${player.skillLevel}` : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="notice notice--info">
+                  No players have marked Available for this match yet. Players can update availability
+                  from Team Matches.
+                </div>
+              )
             ) : (
-              <>
-                <p>Selected players for this matchup.</p>
-                {pairingSummary.selectedPlayers.length > 0 ? (
-                  <div className="pairing-pool">
-                    {pairingSummary.selectedPlayers.map((player) => (
-                      <div key={player.id} className="pairing-chip pairing-chip--readonly">
-                        <strong>{player.fullName || 'Unnamed player'}</strong>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p>No roster pool has been selected yet.</p>
-                )}
-              </>
+              <div className="notice notice--info">
+                Captains and co-captains can build rosters. Your current role is{' '}
+                <strong>{membership?.role ?? 'member'}</strong>.
+              </div>
             )}
           </section>
 
-          <section className="card">
-            <p className="eyebrow">Court assignments</p>
-            <div className="pairing-grid">
+          <section className="card roster-builder-section">
+            <div className="roster-builder-section__header">
+              <div>
+                <p className="eyebrow">Assign Courts</p>
+                <h2>Court assignments</h2>
+                <p>Review the auto-filled slots or move players between courts before saving.</p>
+              </div>
+            </div>
+
+            <div className="pairing-grid roster-builder-court-grid">
               {pairingSummary.pairings.map((pairing, pairIndex) => {
                 const slotValues = pairing.playerIds.length > 0 ? [...pairing.playerIds] : ['', ''];
 
@@ -2571,20 +2741,16 @@ export function RosterMgmtPage() {
             </div>
 
             {canManage ? (
-              <div className="pairing-actions">
+              <div className="pairing-actions roster-builder-save">
                 <button className="button" disabled={saving} onClick={handleSavePairings} type="button">
-                  {saving ? 'Saving pairings...' : 'Save pairings'}
+                  {saving ? 'Saving roster...' : 'Save Roster'}
                 </button>
                 <span className="sidebar__empty">
-                  Selected: {activeDraft?.rosterPlayerIds.length ?? 0} / 8 players
+                  Selected: {activeDraft?.rosterPlayerIds.length ?? 0} / {playersNeeded} players. Roster will be
+                  visible to players on Team Matches.
                 </span>
               </div>
-            ) : (
-              <div className="notice notice--info">
-                Captains and co-captains can edit pairings. Your current role is{' '}
-                <strong>{membership?.role ?? 'member'}</strong>.
-              </div>
-            )}
+            ) : null}
           </section>
         </>
       ) : null}
