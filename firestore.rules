@@ -107,11 +107,58 @@ service cloud.firestore {
         && request.resource.data.teamId == teamId;
     }
 
+    function safeSelfPlayerProfileUpdate(playerId, clubId, teamId) {
+      return isTeamMember(clubId, teamId)
+        && memberDoc(clubId, teamId).data.playerId == playerId
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.teamId == resource.data.teamId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'availableDays',
+          'dupr',
+          'firstName',
+          'fullName',
+          'lastName',
+          'notes',
+          'phone',
+          'skillLevel',
+          'updatedAt',
+        ]);
+    }
+
+    function safeSelfPlayerDelete(playerId, clubId, teamId) {
+      return isTeamMember(clubId, teamId)
+        && memberDoc(clubId, teamId).data.playerId == playerId
+        && resource.data.uid == request.auth.uid;
+    }
+
     function safeSelfPlayerLinkWrite(uid, teamId) {
       return isSelf(uid)
         && request.resource.data.uid == uid
         && request.resource.data.teamId == teamId
         && request.resource.data.playerId == uid;
+    }
+
+    function safeSelfRosterRemoval(clubId, teamId) {
+      let playerId = memberDoc(clubId, teamId).data.playerId;
+      return isTeamMember(clubId, teamId)
+        && playerId is string
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'attendance',
+          'pairings',
+          'rosterPlayerIds',
+          'updatedAt',
+        ])
+        && !request.resource.data.attendance.keys().hasAny([playerId])
+        && !request.resource.data.rosterPlayerIds.hasAny([playerId]);
+    }
+
+    function safeManagerMembershipSummaryDelete(uid) {
+      return signedIn()
+        && resource.data.clubSlug is string
+        && resource.data.teamSlug is string
+        && resource.data.uid == uid
+        && isManager(resource.data.clubSlug, resource.data.teamSlug);
     }
 
     function safeSelfAvailabilityUpdate(clubId, teamId) {
@@ -254,7 +301,7 @@ service cloud.firestore {
 
       match /memberships/{membershipId} {
         allow read, create, update: if isSelf(uid);
-        allow delete: if isSelf(uid) || isPlatformAdmin();
+        allow delete: if isSelf(uid) || isPlatformAdmin() || safeManagerMembershipSummaryDelete(uid);
       }
     }
 
@@ -380,26 +427,29 @@ service cloud.firestore {
           allow update: if safeSelfMembershipUpdate(uid)
             || safeManagerMembershipSync(uid, clubId, teamId)
             || safeCaptainRoleUpdate(uid, clubId, teamId);
-          allow delete: if isPlatformAdmin();
+          allow delete: if isSelf(uid) || isManager(clubId, teamId) || isPlatformAdmin();
         }
 
         match /players/{playerId} {
           allow read: if isTeamMember(clubId, teamId) || isAdminContext();
           allow create: if safeSelfPlayerWrite(playerId, teamId);
-          allow update: if isManager(clubId, teamId) || safeSelfPlayerWrite(playerId, teamId);
-          allow delete: if isPlatformAdmin();
+          allow update: if isManager(clubId, teamId) || safeSelfPlayerProfileUpdate(playerId, clubId, teamId);
+          allow delete: if isManager(clubId, teamId) || safeSelfPlayerDelete(playerId, clubId, teamId) || isPlatformAdmin();
         }
 
         match /playerLinks/{uid} {
           allow read: if isSelf(uid) || isManager(clubId, teamId) || isPlatformAdmin();
           allow create, update: if safeSelfPlayerLinkWrite(uid, teamId) || isManager(clubId, teamId);
-          allow delete: if isPlatformAdmin();
+          allow delete: if isSelf(uid) || isManager(clubId, teamId) || isPlatformAdmin();
         }
 
         match /games/{gameId} {
           allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin();
           allow create: if isManager(clubId, teamId) || safeChallengeGameCreate(clubId, teamId);
-          allow update: if isManager(clubId, teamId) || isPlatformAdmin() || safeSelfAvailabilityUpdate(clubId, teamId);
+          allow update: if isManager(clubId, teamId)
+            || isPlatformAdmin()
+            || safeSelfAvailabilityUpdate(clubId, teamId)
+            || safeSelfRosterRemoval(clubId, teamId);
           allow delete: if isManager(clubId, teamId) || isPlatformAdmin();
         }
 

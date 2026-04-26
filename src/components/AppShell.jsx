@@ -16,7 +16,8 @@ import pklUniverseWideLogo from '../../pkl_universe_wide_logo.png';
 const primaryRoutes = [
   { label: 'News', to: 'news' },
   { label: 'The Team', to: 'team' },
-  { label: 'Schedule', to: 'schedule' },
+  { label: 'Profile', to: 'profile' },
+  { label: 'Matches', to: 'schedule' },
   { label: 'Game Rosters', to: 'game-rosters' },
   { label: 'Availability', to: 'availability' },
   { label: 'Team Standing', to: 'team-standing' },
@@ -25,7 +26,7 @@ const primaryRoutes = [
 const adminRoutes = [
   { label: 'Challenges', to: 'challenges' },
   { label: 'Roster Mgmt', to: 'roster-mgmt' },
-  { label: 'Schedule + Scores', to: 'schedule-scores' },
+  { label: 'Matches + Scores', to: 'schedule-scores' },
   { label: 'Player Mgmt', to: 'player-mgmt' },
   { label: 'Newsroom', to: 'newsroom' },
   { label: 'Team Settings', to: 'settings' },
@@ -170,7 +171,12 @@ export default function AppShell() {
   const teamLogo = activeTeam?.logoUrl || defaultTeamLogo;
   const teamTitle = activeTeam?.name ?? 'PKL Universe';
   const captainLabel = captainName ? `Captain: ${captainName}` : 'Captain: TBD';
-  const signedInLabel = canManage ? 'Signed In: Captain' : 'Signed In: Player';
+  const signedInLabel =
+    currentMembership?.role === 'coCaptain'
+      ? 'Signed In: Co-captain'
+      : canManage
+        ? 'Signed In: Captain'
+        : 'Signed In: Player';
 
   useEffect(() => {
     if (!user?.uid || !clubSlug || !teamSlug || !currentMembership) {

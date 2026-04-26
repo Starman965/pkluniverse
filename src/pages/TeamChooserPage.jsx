@@ -84,6 +84,7 @@ export default function TeamChooserPage() {
                 clubLabel: buildClubLabel(team, clubNameBySlug),
                 logoUrl: team?.logoUrl || '',
                 memberCountLabel: buildMemberCountLabel(members),
+                teamName: team?.name || membership.teamName,
               };
             } catch {
               return {

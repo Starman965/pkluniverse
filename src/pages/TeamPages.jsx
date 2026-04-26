@@ -4,6 +4,7 @@ import 'react-easy-crop/react-easy-crop.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
+  PLAYER_AVAILABLE_DAYS,
   PLAYER_SKILL_LEVELS,
   acceptChallenge,
   buildPairingSummary,
@@ -16,6 +17,7 @@ import {
   deleteGame,
   deleteNewsPost,
   deleteTeamAsAdmin,
+  dropTeamMember,
   declineChallenge,
   getMembership,
   getTeam,
@@ -94,11 +96,11 @@ function buildScheduleAdminDrafts(games) {
   }, {});
 }
 
-function createEmptyScheduleAdminForm(primaryLocation = 'Blackhawk Country Club') {
+function createEmptyScheduleAdminForm() {
   return {
     dateTbd: false,
     isoDate: '',
-    location: primaryLocation || 'Blackhawk Country Club',
+    location: '',
     matchStatus: 'scheduled',
     opponent: '',
     opponentScore: '',
@@ -558,9 +560,12 @@ function createEmptyClubForm(club = {}) {
 function createEmptyRosterForm() {
   return {
     active: true,
+    availableDays: [],
     dupr: '',
     firstName: '',
     lastName: '',
+    notes: '',
+    phone: '',
     playerId: '',
     skillLevel: '',
   };
@@ -569,12 +574,144 @@ function createEmptyRosterForm() {
 function createRosterFormFromPlayer(player) {
   return {
     active: player.active !== false,
+    availableDays: Array.isArray(player.availableDays) ? player.availableDays : [],
     dupr: typeof player.dupr === 'number' ? String(player.dupr) : '',
     firstName: player.firstName ?? '',
     lastName: player.lastName ?? '',
+    notes: player.notes ?? '',
+    phone: player.phone ?? '',
     playerId: player.id,
     skillLevel: PLAYER_SKILL_LEVELS.includes(player.skillLevel) ? player.skillLevel : '',
   };
+}
+
+function updateAvailableDays(currentDays = [], dayId, checked) {
+  const nextDays = new Set(currentDays);
+
+  if (checked) {
+    nextDays.add(dayId);
+  } else {
+    nextDays.delete(dayId);
+  }
+
+  return PLAYER_AVAILABLE_DAYS.filter((day) => nextDays.has(day.id)).map((day) => day.id);
+}
+
+function formatPhoneInput(value) {
+  const digits = String(value ?? '').replace(/\D/g, '').slice(0, 10);
+
+  if (digits.length <= 3) {
+    return digits;
+  }
+
+  if (digits.length <= 6) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  }
+
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+const TIME_PICKER_HOURS = Array.from({ length: 12 }, (_, index) => String(index + 1));
+const TIME_PICKER_MINUTES = ['00', '15', '30', '45'];
+const TIME_PICKER_PERIODS = ['AM', 'PM'];
+
+function parseTimeLabel(timeLabel) {
+  const match = String(timeLabel ?? '')
+    .trim()
+    .match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+
+  if (!match) {
+    return {
+      hour: '',
+      minute: '00',
+      period: 'PM',
+    };
+  }
+
+  const hour = Number(match[1]);
+  const minute = TIME_PICKER_MINUTES.includes(match[2]) ? match[2] : '00';
+  const period = match[3].toUpperCase();
+
+  return {
+    hour: hour >= 1 && hour <= 12 ? String(hour) : '',
+    minute,
+    period: TIME_PICKER_PERIODS.includes(period) ? period : 'PM',
+  };
+}
+
+function buildTimeLabel({ hour, minute, period }) {
+  if (!hour) {
+    return '';
+  }
+
+  return `${hour}:${minute || '00'} ${period || 'PM'}`;
+}
+
+function TimePickerField({ disabled = false, onChange, value }) {
+  const timeParts = parseTimeLabel(value);
+
+  function updateTimePart(part, nextValue) {
+    onChange(
+      buildTimeLabel({
+        ...timeParts,
+        [part]: nextValue,
+      }),
+    );
+  }
+
+  return (
+    <div className="field">
+      <span>Start time (Pacific)</span>
+      <div className="time-picker">
+        <select disabled={disabled} onChange={(event) => updateTimePart('hour', event.target.value)} value={timeParts.hour}>
+          <option value="">Hour</option>
+          {TIME_PICKER_HOURS.map((hour) => (
+            <option key={hour} value={hour}>
+              {hour}
+            </option>
+          ))}
+        </select>
+        <select
+          disabled={disabled || !timeParts.hour}
+          onChange={(event) => updateTimePart('minute', event.target.value)}
+          value={timeParts.minute}
+        >
+          {TIME_PICKER_MINUTES.map((minute) => (
+            <option key={minute} value={minute}>
+              {minute}
+            </option>
+          ))}
+        </select>
+        <select
+          disabled={disabled || !timeParts.hour}
+          onChange={(event) => updateTimePart('period', event.target.value)}
+          value={timeParts.period}
+        >
+          {TIME_PICKER_PERIODS.map((period) => (
+            <option key={period} value={period}>
+              {period}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function MatchupLabelField({ onChange, value }) {
+  return (
+    <label className="field">
+      <span>Matchup label</span>
+      <div className="matchup-label-input">
+        <span>VS:</span>
+        <input
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Enter Opponents name or Match Title"
+          value={value}
+        />
+      </div>
+    </label>
+  );
 }
 
 function StandingsSummary({ games }) {
@@ -869,6 +1006,227 @@ export function TeamMembersPage() {
   );
 }
 
+export function ProfilePage() {
+  const { clubSlug, teamSlug } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [membership, setMembership] = useState(null);
+  const [player, setPlayer] = useState(null);
+  const [form, setForm] = useState(createEmptyRosterForm());
+  const [saving, setSaving] = useState(false);
+  const [dropping, setDropping] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  async function loadProfileData() {
+    if (!user?.uid) {
+      setMembership(null);
+      setPlayer(null);
+      setForm(createEmptyRosterForm());
+      return;
+    }
+
+    const [membershipData, playerData] = await Promise.all([
+      getMembership(clubSlug, teamSlug, user.uid, user),
+      listPlayers(clubSlug, teamSlug),
+    ]);
+    const currentPlayer =
+      playerData.find((item) => item.id === membershipData?.playerId) ??
+      playerData.find((item) => item.uid === user.uid) ??
+      null;
+
+    setMembership(membershipData);
+    setPlayer(currentPlayer);
+    setForm(currentPlayer ? createRosterFormFromPlayer(currentPlayer) : createEmptyRosterForm());
+  }
+
+  useEffect(() => {
+    setLoading(true);
+    setError('');
+
+    loadProfileData()
+      .catch((loadError) => {
+        setError(loadError.message ?? 'Unable to load your profile yet.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [clubSlug, teamSlug, user?.uid]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    if (!player) {
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await savePlayer({
+        ...form,
+        active: player.active !== false,
+        clubSlug,
+        playerId: player.id,
+        teamSlug,
+        user,
+      });
+      setMessage('Profile saved.');
+      await loadProfileData();
+    } catch (submitError) {
+      setError(submitError.message ?? 'Unable to save your profile.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDropFromTeam() {
+    if (!player || !membership) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Drop yourself from this team? This removes your roster profile and team membership.',
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDropping(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await dropTeamMember({
+        clubSlug,
+        playerId: player.id,
+        teamSlug,
+        uid: user.uid,
+        user,
+      });
+      navigate('/teams', { replace: true });
+    } catch (dropError) {
+      setError(dropError.message ?? 'Unable to drop you from this team.');
+    } finally {
+      setDropping(false);
+    }
+  }
+
+  return (
+    <div className="page-grid schedule-admin-page">
+      <section className="card">
+        <p className="eyebrow">Profile</p>
+        <h1>Your player profile</h1>
+        <p>Keep your team profile details current for captains and co-captains.</p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
+
+        {!loading && !membership ? (
+          <div className="notice notice--info">You are not currently a member of this team.</div>
+        ) : null}
+
+        {!loading && player ? (
+          <form className="schedule-admin-form" onSubmit={handleSubmit}>
+            <div className="player-admin-form__row">
+              <label className="field">
+                <span>First name</span>
+                <input
+                  onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))}
+                  value={form.firstName}
+                />
+              </label>
+              <label className="field">
+                <span>Last name</span>
+                <input
+                  onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))}
+                  value={form.lastName}
+                />
+              </label>
+            </div>
+            <label className="field player-admin-form__phone-field">
+              <span>Mobile phone</span>
+              <input
+                autoComplete="tel"
+                inputMode="tel"
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
+                }
+                type="tel"
+                value={form.phone}
+              />
+            </label>
+            <div className="player-admin-form__row">
+              <label className="field">
+                <span>DUPR</span>
+                <input
+                  onChange={(event) => setForm((current) => ({ ...current, dupr: event.target.value }))}
+                  placeholder="x.xxx"
+                  value={form.dupr}
+                />
+              </label>
+              <label className="field">
+                <span>Skill level</span>
+                <select
+                  onChange={(event) => setForm((current) => ({ ...current, skillLevel: event.target.value }))}
+                  value={form.skillLevel}
+                >
+                  <option value="">Not set</option>
+                  {PLAYER_SKILL_LEVELS.map((skillLevel) => (
+                    <option key={skillLevel} value={skillLevel}>
+                      {skillLevel}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <fieldset className="field checkbox-fieldset">
+              <legend>Weekly availability</legend>
+              <div className="checkbox-grid">
+                {PLAYER_AVAILABLE_DAYS.map((day) => (
+                  <label key={day.id} className="checkbox-option">
+                    <input
+                      checked={form.availableDays.includes(day.id)}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          availableDays: updateAvailableDays(current.availableDays, day.id, event.target.checked),
+                        }))
+                      }
+                      type="checkbox"
+                    />
+                    <span>{day.label}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <label className="field field--wide">
+              <span>Notes (Read by Captains Only)</span>
+              <textarea
+                onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+                rows={4}
+                value={form.notes}
+              />
+            </label>
+            <div className="player-admin-form__primary-actions">
+              <button className="button" disabled={saving} type="submit">
+                {saving ? 'Saving...' : 'Save Profile'}
+              </button>
+              <button className="button button--danger" disabled={dropping} onClick={handleDropFromTeam} type="button">
+                {dropping ? 'Dropping...' : 'Drop from Team'}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 export function RosterPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
@@ -938,16 +1296,6 @@ export function RosterPage() {
     setMessage('');
   }
 
-  function resetSelectedPlayer() {
-    if (!selectedPlayer) {
-      return;
-    }
-
-    setError('');
-    setMessage('');
-    setEditForm(createRosterFormFromPlayer(selectedPlayer));
-  }
-
   async function handleEditSubmit(event) {
     event.preventDefault();
 
@@ -975,8 +1323,14 @@ export function RosterPage() {
     }
   }
 
-  async function toggleActiveStatus(player) {
+  async function handleDropPlayer(player) {
     if (!player) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Drop ${player.fullName || 'this player'} from the team?`);
+
+    if (!confirmed) {
       return;
     }
 
@@ -985,24 +1339,18 @@ export function RosterPage() {
     setMessage('');
 
     try {
-      await savePlayer({
-        active: !player.active,
+      await dropTeamMember({
         clubSlug,
-        dupr: typeof player.dupr === 'number' ? String(player.dupr) : '',
-        firstName: player.firstName ?? '',
-        lastName: player.lastName ?? '',
         playerId: player.id,
-        skillLevel: PLAYER_SKILL_LEVELS.includes(player.skillLevel) ? player.skillLevel : '',
         teamSlug,
+        uid: player.uid ?? '',
         user,
       });
-      if (selectedPlayerId === player.id) {
-        setEditForm((current) => ({ ...current, active: !player.active }));
-      }
-      setMessage(player.active ? 'Player deactivated.' : 'Player reactivated.');
+      setSelectedPlayerId('');
+      setMessage('Player dropped from the team.');
       await loadRosterData();
     } catch (updateError) {
-      setError(updateError.message ?? 'Unable to update that player right now.');
+      setError(updateError.message ?? 'Unable to drop that player right now.');
     } finally {
       setUpdatingPlayerId('');
     }
@@ -1053,7 +1401,7 @@ export function RosterPage() {
                   <h2>{selectedPlayer?.fullName || 'No player selected'}</h2>
                   <p>
                     {selectedPlayer
-                        ? "Update a player's profile details or remove them from the active list."
+                        ? "Update a player's profile details or drop them from the team."
                         : 'Share the team join code to add the first player.'}
                   </p>
                 </div>
@@ -1068,68 +1416,107 @@ export function RosterPage() {
 
               {selectedPlayer ? (
                 <form className="schedule-admin-form" onSubmit={handleEditSubmit}>
-                  <label className="field">
-                    <span>First name</span>
+                  <div className="player-admin-form__row">
+                    <label className="field">
+                      <span>First name</span>
+                      <input
+                        onChange={(event) =>
+                          setEditForm((current) => ({ ...current, firstName: event.target.value }))
+                        }
+                        value={editForm.firstName}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Last name</span>
+                      <input
+                        onChange={(event) =>
+                          setEditForm((current) => ({ ...current, lastName: event.target.value }))
+                        }
+                        value={editForm.lastName}
+                      />
+                    </label>
+                  </div>
+                  <label className="field player-admin-form__phone-field">
+                    <span>Mobile phone</span>
                     <input
+                      autoComplete="tel"
+                      inputMode="tel"
                       onChange={(event) =>
-                        setEditForm((current) => ({ ...current, firstName: event.target.value }))
+                        setEditForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
                       }
-                      value={editForm.firstName}
+                      type="tel"
+                      value={editForm.phone}
                     />
                   </label>
-                  <label className="field">
-                    <span>Last name</span>
-                    <input
-                      onChange={(event) =>
-                        setEditForm((current) => ({ ...current, lastName: event.target.value }))
-                      }
-                      value={editForm.lastName}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>DUPR</span>
-                    <input
-                      onChange={(event) => setEditForm((current) => ({ ...current, dupr: event.target.value }))}
-                      placeholder="x.xxx"
-                      value={editForm.dupr}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Skill level</span>
-                    <select
-                      onChange={(event) =>
-                        setEditForm((current) => ({ ...current, skillLevel: event.target.value }))
-                      }
-                      value={editForm.skillLevel}
-                    >
-                      <option value="">Not set</option>
-                      {PLAYER_SKILL_LEVELS.map((skillLevel) => (
-                        <option key={skillLevel} value={skillLevel}>
-                          {skillLevel}
-                        </option>
+                  <div className="player-admin-form__row">
+                    <label className="field">
+                      <span>DUPR</span>
+                      <input
+                        onChange={(event) => setEditForm((current) => ({ ...current, dupr: event.target.value }))}
+                        placeholder="x.xxx"
+                        value={editForm.dupr}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Skill level</span>
+                      <select
+                        onChange={(event) =>
+                          setEditForm((current) => ({ ...current, skillLevel: event.target.value }))
+                        }
+                        value={editForm.skillLevel}
+                      >
+                        <option value="">Not set</option>
+                        {PLAYER_SKILL_LEVELS.map((skillLevel) => (
+                          <option key={skillLevel} value={skillLevel}>
+                            {skillLevel}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <fieldset className="field checkbox-fieldset">
+                    <legend>Weekly availability</legend>
+                    <div className="checkbox-grid">
+                      {PLAYER_AVAILABLE_DAYS.map((day) => (
+                        <label key={day.id} className="checkbox-option">
+                          <input
+                            checked={editForm.availableDays.includes(day.id)}
+                            onChange={(event) =>
+                              setEditForm((current) => ({
+                                ...current,
+                                availableDays: updateAvailableDays(
+                                  current.availableDays,
+                                  day.id,
+                                  event.target.checked,
+                                ),
+                              }))
+                            }
+                            type="checkbox"
+                          />
+                          <span>{day.label}</span>
+                        </label>
                       ))}
-                    </select>
+                    </div>
+                  </fieldset>
+                  <label className="field field--wide">
+                    <span>Notes (Read by Captains Only)</span>
+                    <textarea
+                      onChange={(event) => setEditForm((current) => ({ ...current, notes: event.target.value }))}
+                      rows={4}
+                      value={editForm.notes}
+                    />
                   </label>
                   <div className="player-admin-form__primary-actions">
-                    <button className="button button--ghost" onClick={resetSelectedPlayer} type="button">
-                      Reset
-                    </button>
                     <button className="button" disabled={editSaving} type="submit">
                       {editSaving ? 'Saving...' : 'Save'}
                     </button>
-                  </div>
-                  <div className="player-admin-form__secondary-actions">
                     <button
-                      className={`button ${selectedPlayer.active ? 'button--danger' : 'button--ghost'}`}
+                      className="button button--danger"
                       disabled={updatingPlayerId === selectedPlayer.id}
-                      onClick={() => toggleActiveStatus(selectedPlayer)}
+                      onClick={() => handleDropPlayer(selectedPlayer)}
                       type="button"
                     >
-                      {updatingPlayerId === selectedPlayer.id
-                          ? 'Saving...'
-                          : selectedPlayer.active
-                            ? 'Deactivate'
-                            : 'Reactivate'}
+                      {updatingPlayerId === selectedPlayer.id ? 'Dropping...' : 'Drop from Team'}
                     </button>
                   </div>
                 </form>
@@ -1265,22 +1652,22 @@ export function ScheduleScoresPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
   const [games, setGames] = useState([]);
-  const [gameDrafts, setGameDrafts] = useState({});
   const [membership, setMembership] = useState(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [updatingGameId, setUpdatingGameId] = useState('');
-  const [selectedGameId, setSelectedGameId] = useState('');
+  const [editorMode, setEditorMode] = useState('');
+  const [editingGameId, setEditingGameId] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(createEmptyScheduleAdminForm());
   const [teamName, setTeamName] = useState('');
-  const [teamPrimaryLocation, setTeamPrimaryLocation] = useState('Blackhawk Country Club');
 
   const canManage = canManageRole(membership?.role);
   const teamScoreLabel = `${teamName || 'Team'} score`;
-  const todayDateKey = useMemo(() => getTodayDateKey(), []);
+  const isEditorOpen = editorMode === 'add' || editorMode === 'edit';
+  const isEditing = editorMode === 'edit';
+  const editingGame = isEditing ? games.find((game) => game.id === editingGameId) ?? null : null;
 
   async function loadScheduleData() {
     const [gameData, membershipData, teamData] = await Promise.all([
@@ -1288,25 +1675,10 @@ export function ScheduleScoresPage() {
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
       getTeam(clubSlug, teamSlug),
     ]);
-    const nextPrimaryLocation = teamData?.primaryLocation || 'Blackhawk Country Club';
 
     setGames(gameData);
-    setGameDrafts(buildScheduleAdminDrafts(gameData));
     setMembership(membershipData);
     setTeamName(teamData?.name ?? '');
-    setTeamPrimaryLocation(nextPrimaryLocation);
-    setForm((current) =>
-      current.location === 'Blackhawk Country Club'
-        ? createEmptyScheduleAdminForm(nextPrimaryLocation)
-        : current,
-    );
-    setSelectedGameId((current) => {
-      if (current && gameData.some((game) => game.id === current)) {
-        return current;
-      }
-
-      return gameData[findFirstUpcomingGameIndex(gameData, todayDateKey)]?.id ?? '';
-    });
   }
 
   useEffect(() => {
@@ -1320,41 +1692,36 @@ export function ScheduleScoresPage() {
       .finally(() => {
         setLoading(false);
       });
-  }, [clubSlug, teamSlug, todayDateKey, user?.uid]);
+  }, [clubSlug, teamSlug, user?.uid]);
 
-  const selectedGameIndex = Math.max(
-    0,
-    games.findIndex((game) => game.id === selectedGameId),
-  );
-  const activeGame = games[selectedGameIndex] ?? null;
-  const activeDraft = activeGame
-    ? gameDrafts[activeGame.id] ?? createScheduleAdminDraft(activeGame)
-    : null;
-
-  function updateActiveDraft(updater) {
-    if (!activeGame) {
-      return;
-    }
-
-    setGameDrafts((current) => ({
-      ...current,
-      [activeGame.id]: updater(current[activeGame.id] ?? createScheduleAdminDraft(activeGame)),
-    }));
-  }
-
-  function moveSelection(direction) {
-    if (!games.length) {
-      return;
-    }
-
-    const nextIndex = Math.min(Math.max(selectedGameIndex + direction, 0), games.length - 1);
-    setSelectedGameId(games[nextIndex]?.id ?? '');
+  function openAddEditor() {
+    setEditorMode('add');
+    setEditingGameId('');
+    setForm(createEmptyScheduleAdminForm());
     setError('');
     setMessage('');
   }
 
-  async function handleSubmit(event) {
+  function openEditEditor(game) {
+    setEditorMode('edit');
+    setEditingGameId(game.id);
+    setForm(createScheduleAdminDraft(game));
+    setError('');
+    setMessage('');
+  }
+
+  function closeEditor() {
+    setEditorMode('');
+    setEditingGameId('');
+    setForm(createEmptyScheduleAdminForm());
+  }
+
+  async function handleEditorSubmit(event) {
     event.preventDefault();
+
+    if (isEditing && !editingGame) {
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -1364,11 +1731,12 @@ export function ScheduleScoresPage() {
       await saveGame({
         ...form,
         clubSlug,
+        gameId: isEditing ? editingGame.id : undefined,
         teamSlug,
         user,
       });
-      setForm(createEmptyScheduleAdminForm(teamPrimaryLocation));
-      setMessage('Matchup added to the schedule.');
+      setMessage(isEditing ? 'Matchup updated.' : 'Matchup added to the schedule.');
+      closeEditor();
       await loadScheduleData();
     } catch (submitError) {
       setError(submitError.message ?? 'Unable to save that matchup.');
@@ -1377,54 +1745,8 @@ export function ScheduleScoresPage() {
     }
   }
 
-  async function handleGameSave() {
-    if (!activeGame || !activeDraft) {
-      return;
-    }
-
-    setUpdatingGameId(activeGame.id);
-    setError('');
-    setMessage('');
-
-    try {
-      await saveGame({
-        clubSlug,
-        dateTbd: activeDraft.dateTbd,
-        gameId: activeGame.id,
-        isoDate: activeDraft.isoDate,
-        location: activeDraft.location,
-        matchStatus: activeDraft.matchStatus,
-        opponent: activeDraft.opponent,
-        opponentScore: activeDraft.opponentScore,
-        teamScore: activeDraft.teamScore,
-        teamSlug,
-        timeLabel: activeDraft.timeLabel,
-        user,
-      });
-      setMessage('Matchup updated.');
-      await loadScheduleData();
-    } catch (submitError) {
-      setError(submitError.message ?? 'Unable to update that matchup.');
-    } finally {
-      setUpdatingGameId('');
-    }
-  }
-
-  function resetActiveDraft() {
-    if (!activeGame) {
-      return;
-    }
-
-    setGameDrafts((current) => ({
-      ...current,
-      [activeGame.id]: createScheduleAdminDraft(activeGame),
-    }));
-    setError('');
-    setMessage('');
-  }
-
   async function handleDeleteGame() {
-    if (!activeGame) {
+    if (!editingGame) {
       return;
     }
 
@@ -1435,10 +1757,12 @@ export function ScheduleScoresPage() {
     try {
       await deleteGame({
         clubSlug,
-        gameId: activeGame.id,
+        gameId: editingGame.id,
         teamSlug,
       });
       setMessage('Matchup deleted.');
+      setForm(createEmptyScheduleAdminForm());
+      closeEditor();
       await loadScheduleData();
     } catch (deleteError) {
       setError(deleteError.message ?? 'Unable to delete that matchup.');
@@ -1447,10 +1771,29 @@ export function ScheduleScoresPage() {
     }
   }
 
+  function formatMatchDateLabel(game) {
+    if (game.dateTbd) {
+      return 'DATE TBD';
+    }
+
+    if (!game.isoDate) {
+      return 'DATE TBD';
+    }
+
+    return new Intl.DateTimeFormat('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
+      .format(new Date(`${game.isoDate}T12:00:00`))
+      .toUpperCase();
+  }
+
   return (
     <div className="page-grid schedule-admin-page">
       <section className="card">
-        <p className="eyebrow">Schedule + Scores</p>
+        <p className="eyebrow">Matches + Scores</p>
         <h1>Manage matchups</h1>
         <p>
           Captains and co-captains create the schedule here, then record final scores for standings.
@@ -1459,178 +1802,47 @@ export function ScheduleScoresPage() {
         {error ? <div className="notice notice--error">{error}</div> : null}
         {message ? <div className="notice notice--success">{message}</div> : null}
 
-        {!loading && !canManage ? (
+        {loading ? (
+          <p>Loading matchups...</p>
+        ) : !canManage ? (
           <div className="notice notice--info">
             Captains and co-captains manage the schedule. Your current role is{' '}
             <strong>{membership?.role ?? 'member'}</strong>.
           </div>
-        ) : games.length > 0 ? (
+        ) : canManage ? (
           <>
-            <div className="game-rosters-page__pager">
-              <button
-                className="choice-button"
-                disabled={selectedGameIndex <= 0}
-                onClick={() => moveSelection(-1)}
-                type="button"
-              >
-                Previous
-              </button>
-              <span className="game-rosters-page__pager-label">
-                Matchup {selectedGameIndex + 1} of {games.length}
-              </span>
-              <button
-                className="choice-button"
-                disabled={selectedGameIndex >= games.length - 1}
-                onClick={() => moveSelection(1)}
-                type="button"
-              >
-                Next
+            <div className="schedule-admin-toolbar">
+              <div>
+                <h2>Match cards</h2>
+                <p>Review the schedule, then add or edit one match at a time.</p>
+              </div>
+              <button className="button" onClick={openAddEditor} type="button">
+                Add Match
               </button>
             </div>
 
-            <div className="schedule-admin-layout">
-              <section className="schedule-admin-card">
+            {isEditorOpen ? (
+              <section className="schedule-admin-card schedule-admin-card--editor">
                 <div className="schedule-admin-card__header">
                   <div>
-                    <h2>{activeGame?.opponent || 'Matchup'}</h2>
+                    <h2>{isEditing ? `Edit ${editingGame?.opponent || 'match'}` : 'Add Match'}</h2>
                     <p>
-                      {activeGame?.dateTbd
-                        ? 'Date and time TBD'
-                        : `${activeGame?.isoDate || 'Date TBD'} · ${activeGame?.location || 'Location TBD'}`}
+                      {isEditing
+                        ? 'Update match details and scores.'
+                        : 'Create a new match for the live team schedule.'}
                     </p>
                   </div>
-                  {activeDraft?.timeLabel ? (
-                    <span className="game-roster-board__badge">{activeDraft.timeLabel}</span>
+                  {isEditing && form.timeLabel ? (
+                    <span className="game-roster-board__badge">{form.timeLabel}</span>
                   ) : null}
                 </div>
 
-                {activeDraft ? (
-                  <form
-                    className="schedule-admin-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      handleGameSave();
-                    }}
-                  >
-                    <label className="field">
-                      <span>Game date</span>
-                      <input
-                        disabled={activeDraft.dateTbd}
-                        onChange={(event) =>
-                          updateActiveDraft((current) => ({ ...current, isoDate: event.target.value }))
-                        }
-                        type="date"
-                        value={activeDraft.isoDate}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Start time (Pacific)</span>
-                      <input
-                        disabled={activeDraft.dateTbd}
-                        onChange={(event) =>
-                          updateActiveDraft((current) => ({ ...current, timeLabel: event.target.value }))
-                        }
-                        placeholder="12:00 PM"
-                        value={activeDraft.timeLabel}
-                      />
-                    </label>
-                    <label className="checkbox-field schedule-admin-form__tbd">
-                      <input
-                        checked={activeDraft.dateTbd}
-                        onChange={(event) =>
-                          updateActiveDraft((current) => ({
-                            ...current,
-                            dateTbd: event.target.checked,
-                            isoDate: event.target.checked ? '' : current.isoDate,
-                            timeLabel: event.target.checked ? '' : current.timeLabel,
-                          }))
-                        }
-                        type="checkbox"
-                      />
-                      <span>Date and time TBD</span>
-                    </label>
-                    <label className="field">
-                      <span>Location</span>
-                      <input
-                        onChange={(event) =>
-                          updateActiveDraft((current) => ({ ...current, location: event.target.value }))
-                        }
-                        value={activeDraft.location}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Match label</span>
-                      <input
-                        onChange={(event) =>
-                          updateActiveDraft((current) => ({ ...current, opponent: event.target.value }))
-                        }
-                        value={activeDraft.opponent}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Match status</span>
-                      <select
-                        onChange={(event) =>
-                          updateActiveDraft((current) => ({ ...current, matchStatus: event.target.value }))
-                        }
-                        value={activeDraft.matchStatus}
-                      >
-                        <option value="scheduled">Scheduled</option>
-                        <option value="completed">Completed</option>
-                      </select>
-                    </label>
-                    <div className="schedule-admin-form__score-grid">
-                      <label className="field">
-                        <span>{teamScoreLabel}</span>
-                        <input
-                          inputMode="numeric"
-                          onChange={(event) =>
-                            updateActiveDraft((current) => ({ ...current, teamScore: event.target.value }))
-                          }
-                          value={activeDraft.teamScore}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Opponent score</span>
-                        <input
-                          inputMode="numeric"
-                          onChange={(event) =>
-                            updateActiveDraft((current) => ({ ...current, opponentScore: event.target.value }))
-                          }
-                          value={activeDraft.opponentScore}
-                        />
-                      </label>
-                    </div>
-                    <div className="schedule-admin-form__actions">
-                      <button className="button button--ghost" onClick={resetActiveDraft} type="button">
-                        Reset
-                      </button>
-                      <button className="button" disabled={updatingGameId === activeGame.id} type="submit">
-                        {updatingGameId === activeGame.id ? 'Saving...' : 'Save'}
-                      </button>
-                      <button
-                        className="button button--danger"
-                        disabled={deleting}
-                        onClick={handleDeleteGame}
-                        type="button"
-                      >
-                        {deleting ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </div>
-                  </form>
-                ) : null}
-              </section>
-
-              <section className="schedule-admin-card">
-                <div className="schedule-admin-card__header">
-                  <div>
-                    <h2>Create matchup</h2>
-                    <p>Add a new matchup to the live team schedule.</p>
-                  </div>
-                </div>
-
-                <form className="schedule-admin-form" onSubmit={handleSubmit}>
-                  <label className="field">
+                <form className="schedule-admin-form" onSubmit={handleEditorSubmit}>
+                  <MatchupLabelField
+                    onChange={(nextOpponent) => setForm((current) => ({ ...current, opponent: nextOpponent }))}
+                    value={form.opponent}
+                  />
+                  <label className="field schedule-admin-form__date-field">
                     <span>Game date</span>
                     <input
                       disabled={form.dateTbd}
@@ -1639,15 +1851,11 @@ export function ScheduleScoresPage() {
                       value={form.isoDate}
                     />
                   </label>
-                  <label className="field">
-                    <span>Start time (Pacific)</span>
-                    <input
-                      disabled={form.dateTbd}
-                      onChange={(event) => setForm((current) => ({ ...current, timeLabel: event.target.value }))}
-                      placeholder="12:00 PM"
-                      value={form.timeLabel}
-                    />
-                  </label>
+                  <TimePickerField
+                    disabled={form.dateTbd}
+                    onChange={(nextTimeLabel) => setForm((current) => ({ ...current, timeLabel: nextTimeLabel }))}
+                    value={form.timeLabel}
+                  />
                   <label className="checkbox-field schedule-admin-form__tbd">
                     <input
                       checked={form.dateTbd}
@@ -1663,19 +1871,12 @@ export function ScheduleScoresPage() {
                     />
                     <span>Date and time TBD</span>
                   </label>
-                  <label className="field challenge-form__location">
+                  <label className="field">
                     <span>Location</span>
                     <input
                       onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
+                      placeholder="Club, court(s), address, or notes"
                       value={form.location}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Match label</span>
-                    <input
-                      onChange={(event) => setForm((current) => ({ ...current, opponent: event.target.value }))}
-                      placeholder="New matchup"
-                      value={form.opponent}
                     />
                   </label>
                   <label className="field">
@@ -1710,108 +1911,66 @@ export function ScheduleScoresPage() {
                   </div>
                   <div className="schedule-admin-form__actions">
                     <button className="button" disabled={saving} type="submit">
-                      {saving ? 'Creating matchup...' : 'Create matchup'}
+                      {saving ? 'Saving...' : isEditing ? 'Save Match' : 'Create Match'}
                     </button>
+                    <button className="button button--ghost" onClick={closeEditor} type="button">
+                      Cancel
+                    </button>
+                    {isEditing ? (
+                      <button
+                        className="button button--danger"
+                        disabled={deleting}
+                        onClick={handleDeleteGame}
+                        type="button"
+                      >
+                        {deleting ? 'Deleting...' : 'Delete'}
+                      </button>
+                    ) : null}
                   </div>
                 </form>
               </section>
-            </div>
-          </>
-        ) : canManage ? (
-          <section className="schedule-admin-card">
-            <div className="schedule-admin-card__header">
-              <div>
-                <h2>Create matchup</h2>
-                <p>Add a new matchup to the live team schedule.</p>
-              </div>
-            </div>
+            ) : null}
 
-            <form className="schedule-admin-form" onSubmit={handleSubmit}>
-              <label className="field">
-                <span>Game date</span>
-                <input
-                  disabled={form.dateTbd}
-                  onChange={(event) => setForm((current) => ({ ...current, isoDate: event.target.value }))}
-                  type="date"
-                  value={form.isoDate}
-                />
-              </label>
-              <label className="field">
-                <span>Start time (Pacific)</span>
-                <input
-                  disabled={form.dateTbd}
-                  onChange={(event) => setForm((current) => ({ ...current, timeLabel: event.target.value }))}
-                  placeholder="12:00 PM"
-                  value={form.timeLabel}
-                />
-              </label>
-              <label className="checkbox-field schedule-admin-form__tbd">
-                <input
-                  checked={form.dateTbd}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      dateTbd: event.target.checked,
-                      isoDate: event.target.checked ? '' : current.isoDate,
-                      timeLabel: event.target.checked ? '' : current.timeLabel,
-                    }))
-                  }
-                  type="checkbox"
-                />
-                <span>Date and time TBD</span>
-              </label>
-              <label className="field">
-                <span>Location</span>
-                <input
-                  onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
-                  value={form.location}
-                />
-              </label>
-              <label className="field">
-                <span>Match label</span>
-                <input
-                  onChange={(event) => setForm((current) => ({ ...current, opponent: event.target.value }))}
-                  placeholder="New matchup"
-                  value={form.opponent}
-                />
-              </label>
-              <label className="field">
-                <span>Match status</span>
-                <select
-                  onChange={(event) => setForm((current) => ({ ...current, matchStatus: event.target.value }))}
-                  value={form.matchStatus}
-                >
-                  <option value="scheduled">Scheduled</option>
-                  <option value="completed">Completed</option>
-                </select>
-              </label>
-              <div className="schedule-admin-form__score-grid">
-                <label className="field">
-                  <span>{teamScoreLabel}</span>
-                  <input
-                    inputMode="numeric"
-                    onChange={(event) => setForm((current) => ({ ...current, teamScore: event.target.value }))}
-                    value={form.teamScore}
-                  />
-                </label>
-                <label className="field">
-                  <span>Opponent score</span>
-                  <input
-                    inputMode="numeric"
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, opponentScore: event.target.value }))
-                    }
-                    value={form.opponentScore}
-                  />
-                </label>
+            {games.length > 0 ? (
+              <div className="schedule-admin-match-grid">
+                {games.map((game) => {
+                  const hasScore = game.teamScore !== null || game.opponentScore !== null;
+
+                  return (
+                    <article key={game.id} className="schedule-match-card schedule-admin-match-card">
+                      <p className="schedule-match-card__date">{formatMatchDateLabel(game)}</p>
+                      <h2 className="schedule-match-card__title">
+                        VS. {game.opponent || 'Opponent TBD'}
+                      </h2>
+                      <span>
+                        {game.timeLabel || 'Time TBD'} {game.timeLabel ? '·' : ''}{' '}
+                        {game.location || 'Location TBD'}
+                      </span>
+                      <div className="schedule-match-card__stats">
+                        <span>Status: {game.matchStatus === 'completed' ? 'Completed' : 'Scheduled'}</span>
+                        <span>
+                          {hasScore
+                            ? `${teamName || 'Team'} ${game.teamScore ?? '-'} · Opponent ${game.opponentScore ?? '-'}`
+                            : 'Score not entered'}
+                        </span>
+                      </div>
+                      <div className="schedule-admin-match-card__actions">
+                        <button
+                          className="choice-button"
+                          onClick={() => openEditEditor(game)}
+                          type="button"
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
-              <div className="schedule-admin-form__actions">
-                <button className="button" disabled={saving} type="submit">
-                  {saving ? 'Creating matchup...' : 'Create matchup'}
-                </button>
-              </div>
-            </form>
-          </section>
+            ) : (
+              <p>No matchups saved yet. Use Add Match to create the first one.</p>
+            )}
+          </>
         ) : (
           <p>No matchups saved yet.</p>
         )}
@@ -1819,7 +1978,6 @@ export function ScheduleScoresPage() {
     </div>
   );
 }
-
 export function StandingsPage() {
   const { clubSlug, teamSlug } = useParams();
   const [games, setGames] = useState([]);

@@ -34,6 +34,16 @@ export const PLAYER_SKILL_LEVELS = [
   'Professional',
 ];
 
+export const PLAYER_AVAILABLE_DAYS = [
+  { id: 'sun', label: 'Sunday' },
+  { id: 'mon', label: 'Monday' },
+  { id: 'tue', label: 'Tuesday' },
+  { id: 'wed', label: 'Wednesday' },
+  { id: 'thu', label: 'Thursday' },
+  { id: 'fri', label: 'Friday' },
+  { id: 'sat', label: 'Saturday' },
+];
+
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
     throw new Error('Firebase is not configured yet.');
@@ -813,6 +823,9 @@ async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
 
   if (playerSnapshot) {
     payload.active = existingPlayer?.active !== false;
+    payload.availableDays = normalizeAvailableDays(existingPlayer?.availableDays);
+    payload.notes = existingPlayer?.notes ?? '';
+    payload.phone = existingPlayer?.phone ?? '';
     payload.skillLevel = normalizeSkillLevel(existingPlayer?.skillLevel ?? '');
 
     if (!playerSnapshot.exists()) {
@@ -1977,6 +1990,18 @@ function normalizeSkillLevel(value) {
   );
 }
 
+function normalizeAvailableDays(days = []) {
+  const allowedDays = new Set(PLAYER_AVAILABLE_DAYS.map((day) => day.id));
+
+  return Array.from(
+    new Set(
+      (Array.isArray(days) ? days : [])
+        .map((day) => (typeof day === 'string' ? day.trim().toLowerCase() : ''))
+        .filter((day) => allowedDays.has(day)),
+    ),
+  );
+}
+
 function buildFullName(firstName, lastName) {
   return [firstName, lastName].filter(Boolean).join(' ').trim();
 }
@@ -2043,12 +2068,15 @@ export async function listPlayers(clubSlug, teamSlug) {
 
     return {
       active: data.active !== false,
+      availableDays: normalizeAvailableDays(data.availableDays),
       dupr: normalizeNullableNumber(data.dupr),
       email: data.email ?? '',
       firstName,
       fullName: data.fullName ?? buildFullName(firstName, lastName),
       id: entry.id,
       lastName,
+      notes: data.notes ?? '',
+      phone: data.phone ?? '',
       skillLevel: data.skillLevel ?? '',
       uid: data.uid ?? '',
     };
@@ -2061,11 +2089,14 @@ export async function listPlayers(clubSlug, teamSlug) {
 
 export async function savePlayer({
   active = true,
+  availableDays = [],
   clubSlug,
   dupr,
   firstName,
   lastName,
+  notes = '',
   playerId,
+  phone = '',
   skillLevel,
   teamSlug,
 }) {
@@ -2098,10 +2129,13 @@ export async function savePlayer({
 
   const payload = {
     active,
+    availableDays: normalizeAvailableDays(availableDays),
     dupr: normalizeNullableNumber(dupr),
     firstName: trimmedFirstName,
     fullName,
     lastName: trimmedLastName,
+    notes: notes.trim(),
+    phone: phone.trim(),
     skillLevel: normalizedSkillLevel,
     updatedAt: serverTimestamp(),
   };
@@ -2109,6 +2143,86 @@ export async function savePlayer({
   await updateDoc(playerRef, payload);
 
   return playerId;
+}
+
+export async function dropTeamMember({ clubSlug, playerId, teamSlug, uid = '', user = null }) {
+  requireDb();
+
+  if (!playerId && !uid) {
+    throw new Error('Choose a player to drop.');
+  }
+
+  const membersRef = collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'members');
+  const membersSnapshot = await getDocs(membersRef);
+  const members = membersSnapshot.docs.map((entry) => ({
+    ...entry.data(),
+    id: entry.id,
+    ref: entry.ref,
+  }));
+  const targetMember =
+    members.find((member) => member.id === uid || member.uid === uid) ??
+    members.find((member) => playerId && member.playerId === playerId) ??
+    null;
+  const targetUid = uid || targetMember?.uid || '';
+  const targetPlayerId = playerId || targetMember?.playerId || '';
+
+  if (!targetPlayerId) {
+    throw new Error('That player could not be found.');
+  }
+
+  const playerRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'players', targetPlayerId);
+  const playerSnapshot = await getDoc(playerRef);
+
+  if (!playerSnapshot.exists()) {
+    throw new Error('That player could not be found.');
+  }
+
+  const isSelfDrop = Boolean(user?.uid && targetUid && user.uid === targetUid);
+
+  if (targetMember?.role === 'captain') {
+    const otherCaptain = members.some(
+      (member) => member.role === 'captain' && member.uid !== targetUid && member.id !== targetUid,
+    );
+
+    if (!otherCaptain) {
+      throw new Error(
+        isSelfDrop
+          ? 'Assign another captain before dropping yourself from this team.'
+          : 'Assign another captain before dropping this captain from the team.',
+      );
+    }
+  }
+
+  const gamesRef = collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'games');
+  const gamesSnapshot = await getDocs(gamesRef);
+  const batch = writeBatch(db);
+
+  gamesSnapshot.docs.forEach((entry) => {
+    const game = entry.data();
+    const rosterPlayerIds = normalizePlayerIdList(
+      (game.rosterPlayerIds ?? []).filter((entryPlayerId) => entryPlayerId !== targetPlayerId),
+    );
+    const pairings = normalizePairings(game.pairings, rosterPlayerIds);
+    const attendance = { ...(game.attendance ?? {}) };
+
+    delete attendance[targetPlayerId];
+
+    batch.update(entry.ref, {
+      attendance,
+      pairings,
+      rosterPlayerIds,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  if (targetUid) {
+    batch.delete(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'members', targetUid));
+    batch.delete(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'playerLinks', targetUid));
+    batch.delete(doc(db, 'users', targetUid, 'memberships', `${clubSlug}_${teamSlug}`));
+  }
+
+  batch.delete(playerRef);
+  await batch.commit();
 }
 
 export async function deletePlayer({ clubSlug, playerId, teamSlug }) {
