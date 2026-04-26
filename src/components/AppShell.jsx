@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   getMembership,
@@ -14,21 +14,20 @@ import defaultTeamLogo from '../../default_team_logo.png';
 import pklUniverseWideLogo from '../../pkl_universe_wide_logo.png';
 
 const primaryRoutes = [
-  { label: 'News', to: 'news' },
+  { label: 'News Feed', to: 'news' },
   { label: 'The Team', to: 'team' },
-  { label: 'Profile', to: 'profile' },
-  { label: 'Matches', to: 'schedule' },
+  { label: 'Team Matches', to: 'schedule' },
   { label: 'Game Rosters', to: 'game-rosters' },
   { label: 'Availability', to: 'availability' },
   { label: 'Team Standing', to: 'team-standing' },
+  { label: 'My Profile', to: 'profile' },
 ];
 
 const adminRoutes = [
-  { label: 'Challenges', to: 'challenges' },
-  { label: 'Roster Mgmt', to: 'roster-mgmt' },
-  { label: 'Matches + Scores', to: 'schedule-scores' },
-  { label: 'Player Mgmt', to: 'player-mgmt' },
-  { label: 'Newsroom', to: 'newsroom' },
+  { label: 'Find a Match', to: 'challenges' },
+  { label: 'Create a Match', to: 'schedule-scores' },
+  { label: 'Build Rosters', to: 'roster-mgmt' },
+  { label: 'Manage Players', to: 'player-mgmt' },
   { label: 'Team Settings', to: 'settings' },
 ];
 
@@ -44,6 +43,43 @@ function formatClubLabel(clubSlug) {
   return clubSlug.replace(/-/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function buildCaptainLabel(members, players, currentUser) {
+  const playerMap = new Map(players.map((player) => [player.id, player]));
+  const leaderNames = members
+    .filter((member) => member.role === 'captain' || member.role === 'coCaptain')
+    .sort((left, right) => {
+      if (left.role === right.role) {
+        return 0;
+      }
+
+      return left.role === 'captain' ? -1 : 1;
+    })
+    .map((member) => {
+      const player = member.playerId ? playerMap.get(member.playerId) : null;
+
+      if (player?.fullName) {
+        return player.fullName;
+      }
+
+      return member.uid === currentUser?.uid ? currentUser?.displayName || currentUser?.email : '';
+    })
+    .filter(Boolean);
+  const uniqueLeaderNames = Array.from(new Set(leaderNames));
+
+  if (!uniqueLeaderNames.length) {
+    return 'Captain: TBD';
+  }
+
+  if (uniqueLeaderNames.length === 1) {
+    return `Captain: ${uniqueLeaderNames[0]}`;
+  }
+
+  const visibleNames = uniqueLeaderNames.slice(0, 2);
+  const remainingCount = uniqueLeaderNames.length - visibleNames.length;
+
+  return `Captains: ${visibleNames.join(', ')}${remainingCount > 0 ? ` +${remainingCount}` : ''}`;
+}
+
 export default function AppShell() {
   const { signOutUser, user } = useAuth();
   const navigate = useNavigate();
@@ -53,7 +89,7 @@ export default function AppShell() {
   const [activeTeam, setActiveTeam] = useState(null);
   const [activeMembership, setActiveMembership] = useState(null);
   const [isAppAdmin, setIsAppAdmin] = useState(false);
-  const [captainName, setCaptainName] = useState('');
+  const [captainLabel, setCaptainLabel] = useState('Captain: TBD');
   const [teamRefreshKey, setTeamRefreshKey] = useState(0);
 
   const loadMemberships = useCallback(async () => {
@@ -132,7 +168,7 @@ export default function AppShell() {
     if (!clubSlug || !teamSlug) {
       setActiveTeam(null);
       setActiveMembership(null);
-      setCaptainName('');
+      setCaptainLabel('Captain: TBD');
       return;
     }
 
@@ -143,20 +179,16 @@ export default function AppShell() {
       listPlayers(clubSlug, teamSlug),
     ])
       .then(([team, membership, members, players]) => {
-        const playerMap = new Map(players.map((player) => [player.id, player]));
-        const captainRecord = members.find((member) => member.role === 'captain') ?? null;
-        const captainPlayer = captainRecord?.playerId ? playerMap.get(captainRecord.playerId) : null;
-
         setActiveTeam(team);
         setActiveMembership(membership);
-        setCaptainName(captainPlayer?.fullName || '');
+        setCaptainLabel(buildCaptainLabel(members, players, user));
       })
       .catch(() => {
         setActiveTeam(null);
         setActiveMembership(null);
-        setCaptainName('');
+        setCaptainLabel('Captain: TBD');
       });
-  }, [clubSlug, teamRefreshKey, teamSlug, user?.uid]);
+  }, [clubSlug, teamRefreshKey, teamSlug, user]);
 
   const currentMembership = useMemo(
     () =>
@@ -170,7 +202,6 @@ export default function AppShell() {
   const canManage = canManageRole(currentMembership?.role);
   const teamLogo = activeTeam?.logoUrl || defaultTeamLogo;
   const teamTitle = activeTeam?.name ?? 'PKL Universe';
-  const captainLabel = captainName ? `Captain: ${captainName}` : 'Captain: TBD';
   const signedInLabel =
     currentMembership?.role === 'coCaptain'
       ? 'Signed In: Co-captain'
@@ -264,9 +295,9 @@ export default function AppShell() {
           <button className="sidebar__signout" onClick={handleSignOut} type="button">
             Sign out
           </button>
-          <div className="sidebar__app-brand sidebar__footer-brand">
+          <Link className="sidebar__app-brand sidebar__footer-brand" to="/">
             <img alt="PKL Universe" className="sidebar__app-logo" src={pklUniverseWideLogo} />
-          </div>
+          </Link>
         </div>
       </aside>
 

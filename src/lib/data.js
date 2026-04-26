@@ -2919,9 +2919,20 @@ export async function setAvailability({
   });
 }
 
-function createNewsPostId(title) {
-  const slug = slugify(title).slice(0, 24) || 'news';
+function createNewsPostId(title = 'post') {
+  const slug = slugify(title).slice(0, 24) || 'post';
   return `${Date.now()}-${slug}`;
+}
+
+function buildAuthorFromUser(user, fallbackRole = '') {
+  const displayName = user?.displayName || user?.email || 'Teammate';
+
+  return {
+    authorName: displayName,
+    authorPhotoUrl: user?.photoURL ?? '',
+    authorRole: fallbackRole,
+    authorUid: user?.uid ?? '',
+  };
 }
 
 export async function listNewsPosts(clubSlug, teamSlug) {
@@ -2929,22 +2940,59 @@ export async function listNewsPosts(clubSlug, teamSlug) {
 
   const newsRef = collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts');
   const snapshot = await getDocs(newsRef);
-  const posts = snapshot.docs.map((entry) => {
+  const posts = await Promise.all(snapshot.docs.map(async (entry) => {
     const data = entry.data();
+    const [commentsSnapshot, reactionsSnapshot] = await Promise.all([
+      getDocs(collection(entry.ref, 'comments')).catch(() => null),
+      getDocs(collection(entry.ref, 'reactions')).catch(() => null),
+    ]);
+    const comments = (commentsSnapshot?.docs ?? [])
+      .map((commentEntry) => {
+        const comment = commentEntry.data();
+
+        return {
+          authorName: comment.authorName ?? 'Teammate',
+          authorPhotoUrl: comment.authorPhotoUrl ?? '',
+          authorRole: comment.authorRole ?? '',
+          authorUid: comment.authorUid ?? comment.createdBy ?? '',
+          body: (comment.body ?? '').trim(),
+          createdAtMs: normalizeTimestampMs(comment.createdAt),
+          id: commentEntry.id,
+        };
+      })
+      .sort((left, right) => (left.createdAtMs || 0) - (right.createdAtMs || 0));
+    const reactions = (reactionsSnapshot?.docs ?? []).map((reactionEntry) => {
+      const reaction = reactionEntry.data();
+
+      return {
+        createdAtMs: normalizeTimestampMs(reaction.createdAt),
+        id: reactionEntry.id,
+        type: reaction.type ?? 'like',
+        uid: reaction.uid ?? reactionEntry.id,
+      };
+    });
 
     return {
+      authorName: data.authorName ?? data.createdByName ?? data.createdBy ?? 'Teammate',
+      authorPhotoUrl: data.authorPhotoUrl ?? '',
+      authorRole: data.authorRole ?? '',
+      authorUid: data.authorUid ?? data.createdByUid ?? data.createdBy ?? '',
       body: (data.body ?? '').trim(),
+      comments,
+      commentCount: comments.length,
       createdAtMs: normalizeTimestampMs(data.createdAt),
       createdBy: data.createdBy ?? '',
       id: entry.id,
       imagePath: typeof data.imagePath === 'string' ? data.imagePath : '',
       imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : '',
       linkUrl: typeof data.linkUrl === 'string' ? data.linkUrl : '',
+      reactions,
+      reactionCount: reactions.length,
       title: (data.title ?? '').trim() || 'Team update',
       updatedAtMs: normalizeTimestampMs(data.updatedAt),
       updatedBy: data.updatedBy ?? '',
     };
-  });
+  }));
 
   posts.sort((left, right) => (right.updatedAtMs || right.createdAtMs) - (left.updatedAtMs || left.createdAtMs));
 
@@ -2963,15 +3011,21 @@ export async function saveNewsPost({
 }) {
   requireDb();
 
-  const normalizedTitle = title.trim();
-  const normalizedBody = body.trim();
-
-  if (!normalizedTitle) {
-    throw new Error('Enter a title for the news post.');
+  if (!user?.uid) {
+    throw new Error('You must be signed in to post.');
   }
 
-  if (!normalizedBody) {
-    throw new Error('Enter some body text for the news post.');
+  const membership = await getMembership(clubSlug, teamSlug, user.uid, user);
+
+  if (!membership) {
+    throw new Error('You must be a team member to post in this feed.');
+  }
+
+  const normalizedTitle = (title || 'Team post').trim();
+  const normalizedBody = body.trim();
+
+  if (!normalizedBody && !imageFile && !post?.imageUrl) {
+    throw new Error('Write a post or add a photo before sharing.');
   }
 
   const postId = post?.id ?? createNewsPostId(normalizedTitle);
@@ -2988,18 +3042,27 @@ export async function saveNewsPost({
   }
 
   const payload = {
+    ...(post
+      ? {
+          authorName: post.authorName ?? user.displayName ?? user.email ?? 'Teammate',
+          authorPhotoUrl: post.authorPhotoUrl ?? user.photoURL ?? '',
+          authorRole: post.authorRole ?? membership?.role ?? '',
+          authorUid: post.authorUid ?? user.uid,
+        }
+      : buildAuthorFromUser(user, membership?.role ?? '')),
     body: normalizedBody,
-    createdBy: post?.createdBy ?? user?.email ?? user?.uid ?? '',
+    createdBy: post?.createdBy ?? user.uid,
     imagePath: uploadedImage?.imagePath ?? post?.imagePath ?? '',
     imageUrl: uploadedImage?.imageUrl ?? post?.imageUrl ?? '',
-    linkUrl: normalizeUrl(linkUrl),
+    linkUrl: normalizeUrl(linkUrl ?? ''),
     title: normalizedTitle,
     updatedAt: serverTimestamp(),
-    updatedBy: user?.email ?? user?.uid ?? '',
+    updatedBy: user.uid,
   };
 
   if (!post) {
     payload.createdAt = serverTimestamp();
+    payload.createdByUid = user.uid;
   }
 
   await setDoc(postRef, payload, { merge: true });
@@ -3015,8 +3078,78 @@ export async function deleteNewsPost({ clubSlug, post, teamSlug }) {
   requireDb();
 
   const postRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', post.id);
+  const [commentsSnapshot, reactionsSnapshot] = await Promise.all([
+    getDocs(collection(postRef, 'comments')),
+    getDocs(collection(postRef, 'reactions')),
+  ]);
+
+  await deleteRefsInBatches([
+    ...commentsSnapshot.docs.map((entry) => entry.ref),
+    ...reactionsSnapshot.docs.map((entry) => entry.ref),
+  ]);
   await deleteDoc(postRef);
   await deleteStoragePath(post.imagePath);
+}
+
+export async function addNewsComment({ body, clubSlug, postId, teamSlug, user }) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to comment.');
+  }
+
+  const normalizedBody = body.trim();
+
+  if (!normalizedBody) {
+    throw new Error('Write a comment before posting.');
+  }
+
+  const membership = await getMembership(clubSlug, teamSlug, user.uid, user);
+
+  if (!membership) {
+    throw new Error('You must be a team member to comment in this feed.');
+  }
+
+  const commentRef = doc(collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', postId, 'comments'));
+
+  await setDoc(commentRef, {
+    ...buildAuthorFromUser(user, membership?.role ?? ''),
+    body: normalizedBody,
+    createdAt: serverTimestamp(),
+    createdBy: user.uid,
+  });
+
+  return commentRef.id;
+}
+
+export async function deleteNewsComment({ clubSlug, commentId, postId, teamSlug }) {
+  requireDb();
+
+  await deleteDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', postId, 'comments', commentId));
+}
+
+export async function toggleNewsReaction({ clubSlug, post, teamSlug, type = 'like', user }) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to react.');
+  }
+
+  const reactionRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', post.id, 'reactions', user.uid);
+  const existingReaction = post.reactions?.find((reaction) => reaction.uid === user.uid);
+
+  if (existingReaction?.type === type) {
+    await deleteDoc(reactionRef);
+    return false;
+  }
+
+  await setDoc(reactionRef, {
+    createdAt: serverTimestamp(),
+    type,
+    uid: user.uid,
+  });
+
+  return true;
 }
 
 export function buildStandingsSummary(games) {

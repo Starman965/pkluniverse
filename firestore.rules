@@ -461,7 +461,46 @@ service cloud.firestore {
 
         match /newsPosts/{postId} {
           allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin();
-          allow create, update, delete: if isManager(clubId, teamId) || isPlatformAdmin();
+          allow create: if isTeamMember(clubId, teamId)
+            && request.resource.data.authorUid == request.auth.uid
+            && request.resource.data.createdByUid == request.auth.uid;
+          allow update: if isPlatformAdmin()
+            || isManager(clubId, teamId)
+            || (
+              isTeamMember(clubId, teamId)
+              && resource.data.authorUid == request.auth.uid
+              && request.resource.data.authorUid == resource.data.authorUid
+              && request.resource.data.createdByUid == resource.data.createdByUid
+            );
+          allow delete: if isPlatformAdmin()
+            || isManager(clubId, teamId)
+            || (
+              isTeamMember(clubId, teamId)
+              && resource.data.authorUid == request.auth.uid
+            );
+
+          match /comments/{commentId} {
+            allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin();
+            allow create: if isTeamMember(clubId, teamId)
+              && request.resource.data.authorUid == request.auth.uid
+              && request.resource.data.createdBy == request.auth.uid;
+            allow update: if false;
+            allow delete: if isPlatformAdmin()
+              || isManager(clubId, teamId)
+              || (
+                isTeamMember(clubId, teamId)
+                && resource.data.authorUid == request.auth.uid
+              );
+          }
+
+          match /reactions/{uid} {
+            allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin();
+            allow create, update: if isSelf(uid)
+              && isTeamMember(clubId, teamId)
+              && request.resource.data.uid == uid
+              && request.resource.data.type in ['like', 'love', 'thumbsUp', 'thumbsDown', 'laugh', 'cry', 'angry'];
+            allow delete: if isSelf(uid) || isManager(clubId, teamId) || isPlatformAdmin();
+          }
         }
       }
     }

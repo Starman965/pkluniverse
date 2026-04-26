@@ -7,6 +7,7 @@ import {
   PLAYER_AVAILABLE_DAYS,
   PLAYER_SKILL_LEVELS,
   acceptChallenge,
+  addNewsComment,
   assignPlayersToTeamAsAdmin,
   buildPairingSummary,
   buildStandingsSummary,
@@ -16,6 +17,7 @@ import {
   deleteClub,
   deleteChallengeAsAdmin,
   deleteGame,
+  deleteNewsComment,
   deleteNewsPost,
   deleteTeamAsAdmin,
   dropTeamMember,
@@ -44,6 +46,7 @@ import {
   saveNewsPost,
   savePlayer,
   setAvailability,
+  toggleNewsReaction,
   updateTeamMemberRole,
   updateTeamSettings,
 } from '../lib/data';
@@ -922,9 +925,7 @@ export function TeamMembersPage() {
         subtitle:
           linkedMember?.role && linkedMember.role !== 'member'
             ? formatRoleLabel(linkedMember.role)
-            : player.uid
-              ? 'Linked account'
-              : '',
+            : 'Teammate',
         availableCount: countAvailableGames(games, player.id),
       };
     });
@@ -1369,8 +1370,8 @@ export function RosterPage() {
   return (
     <div className="page-grid schedule-admin-page">
       <section className="card">
-        <p className="eyebrow">Player Mgmt</p>
-        <h1>Manage players</h1>
+        <p className="eyebrow">Roster admin</p>
+        <h1>Manage Players</h1>
         <p>
           Captains and co-captains manage player profile details here. New players join the team
           with the team join code.
@@ -1586,8 +1587,8 @@ export function SchedulePage() {
       <section className="card">
         <div className="schedule-page__header">
           <div className="schedule-page__header-copy">
-            <p className="eyebrow">Main page</p>
-            <h1>Schedule</h1>
+            <p className="eyebrow">Schedule</p>
+            <h1>Team Matches</h1>
             <p className="schedule-page__copy">
               See upcoming matches at a glance so you always know when and where the team is playing.
             </p>
@@ -1803,10 +1804,10 @@ export function ScheduleScoresPage() {
   return (
     <div className="page-grid schedule-admin-page">
       <section className="card">
-        <p className="eyebrow">Matches + Scores</p>
-        <h1>Manage matchups</h1>
+        <p className="eyebrow">Match admin</p>
+        <h1>Create a Match</h1>
         <p>
-          Captains and co-captains create the schedule here, then record final scores for standings.
+          Captains and co-captains add scheduled matches here, then record final scores for standings.
         </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -1823,7 +1824,7 @@ export function ScheduleScoresPage() {
           <>
             <div className="schedule-admin-toolbar">
               <div>
-                <h2>Match cards</h2>
+                <h2>Scheduled matches</h2>
                 <p>Review the schedule, then add or edit one match at a time.</p>
               </div>
               <button className="button" onClick={openAddEditor} type="button">
@@ -2388,8 +2389,8 @@ export function RosterMgmtPage() {
   return (
     <div className="page-grid">
       <section className="card">
-        <p className="eyebrow">Roster Mgmt</p>
-        <h1>Matchup pairings</h1>
+        <p className="eyebrow">Match rosters</p>
+        <h1>Build Rosters</h1>
         <p>
           Captains and co-captains choose up to eight roster players for each matchup, then assign
           them into court slots for the saved game roster.
@@ -2928,72 +2929,186 @@ export function AvailabilityPage() {
   );
 }
 
-function NewsFeed({ deletingId = '', newsPosts, onDelete, onEdit, showManageActions = false }) {
+function LinkifiedText({ text }) {
+  const parts = String(text ?? '').split(/(https?:\/\/[^\s]+)/g);
+
+  return parts.map((part, index) => {
+    if (/^https?:\/\//i.test(part)) {
+      return (
+        <a key={`${part}-${index}`} href={part} rel="noreferrer" target="_blank">
+          {part}
+        </a>
+      );
+    }
+
+    return part;
+  });
+}
+
+const NEWS_REACTIONS = [
+  { id: 'like', label: 'Like', symbol: '👍' },
+  { id: 'love', label: 'Love', symbol: '❤️' },
+  { id: 'thumbsUp', label: 'Thumbs up', symbol: '🙌' },
+  { id: 'thumbsDown', label: 'Thumbs down', symbol: '👎' },
+  { id: 'laugh', label: 'Laugh', symbol: '😂' },
+  { id: 'cry', label: 'Cry', symbol: '😢' },
+  { id: 'angry', label: 'Angry', symbol: '😡' },
+];
+
+function getReactionSummary(reactions = []) {
+  return NEWS_REACTIONS.map((reaction) => ({
+    ...reaction,
+    count: reactions.filter((entry) => entry.type === reaction.id).length,
+  })).filter((reaction) => reaction.count > 0);
+}
+
+function NewsFeed({
+  canManage = false,
+  commentDrafts = {},
+  currentUser,
+  deletingCommentId = '',
+  deletingPostId = '',
+  newsPosts,
+  onCommentChange,
+  onCommentSubmit,
+  onDeleteComment,
+  onDeletePost,
+  onReactionToggle,
+  reactingPostId = '',
+}) {
   if (!newsPosts.length) {
-    return <p>No news posts published yet.</p>;
+    return <p>No team posts yet. Share the first photo, update, or team note.</p>;
   }
 
   return (
     <div className="news-feed">
-      {newsPosts.map((post) => (
-        <article key={post.id} className="news-feed-card">
-          <div className="news-feed-card__header">
-            <div>
-              <p className="news-feed-card__meta">{buildNewsPostMeta(post)}</p>
-              <h2 className="news-feed-card__title">{post.title}</h2>
-            </div>
-            <span className="news-feed-card__badge">{post.imageUrl ? 'Photo' : 'Post'}</span>
-          </div>
+      {newsPosts.map((post) => {
+        const currentUserReaction = post.reactions?.find((reaction) => reaction.uid === currentUser?.uid);
+        const currentReactionMeta = NEWS_REACTIONS.find((reaction) => reaction.id === currentUserReaction?.type);
+        const reactionSummary = getReactionSummary(post.reactions);
+        const canDeletePost = canManage || post.authorUid === currentUser?.uid;
 
-          {post.imageUrl ? (
-            <div className="news-feed-card__image-wrap">
-              <img alt={post.title} className="news-feed-card__image" src={post.imageUrl} />
-            </div>
-          ) : null}
-
-          <div className="news-feed-card__body">
-            <p className="news-feed-card__text">{post.body}</p>
-            <p className="news-feed-card__date">{formatNewsPostDate(post)}</p>
-          </div>
-
-          <div className="news-feed-card__actions">
-            {post.imageUrl ? (
-              <button
-                className="news-feed-card__action"
-                onClick={() => downloadNewsImage(post)}
-                type="button"
-              >
-                Download image
-              </button>
-            ) : null}
-            {post.linkUrl ? (
-              <a
-                className="news-feed-card__action"
-                href={post.linkUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                Open link
-              </a>
-            ) : null}
-            {showManageActions ? (
-              <div className="choice-row news-feed-card__manage">
-                <button className="choice-button" onClick={() => onEdit?.(post)} type="button">
-                  Edit
-                </button>
+        return (
+          <article key={post.id} className="news-feed-card">
+            <div className="news-feed-card__header">
+              <div className="news-feed-card__author">
+                <div className="news-feed-card__avatar">
+                  {post.authorPhotoUrl ? (
+                    <img alt="" src={post.authorPhotoUrl} />
+                  ) : (
+                    buildPlayerInitials(post.authorName || 'Teammate')
+                  )}
+                </div>
+                <div>
+                  <strong>{post.authorName || 'Teammate'}</strong>
+                  <span>{formatNewsPostDate(post)}</span>
+                </div>
+              </div>
+              {canDeletePost ? (
                 <button
-                  className="choice-button"
-                  disabled={deletingId === post.id}
-                  onClick={() => onDelete?.(post)}
+                  className="news-feed-card__action"
+                  disabled={deletingPostId === post.id}
+                  onClick={() => onDeletePost?.(post)}
                   type="button"
                 >
-                  {deletingId === post.id ? 'Deleting...' : 'Delete'}
+                  {deletingPostId === post.id ? 'Deleting...' : 'Delete'}
                 </button>
+              ) : null}
+            </div>
+
+            {post.imageUrl ? (
+              <div className="news-feed-card__image-wrap">
+                <img alt="" className="news-feed-card__image" src={post.imageUrl} />
               </div>
             ) : null}
-          </div>
-        </article>
-      ))}
+
+            {post.body ? (
+              <p className="news-feed-card__text">
+                <LinkifiedText text={post.body} />
+              </p>
+            ) : null}
+
+            <div className="news-feed-card__actions">
+              <div className="news-reaction-picker" aria-label="Post reactions">
+                {NEWS_REACTIONS.map((reaction) => (
+                  <button
+                    key={reaction.id}
+                    aria-label={reaction.label}
+                    className={`news-reaction-button ${currentUserReaction?.type === reaction.id ? 'news-reaction-button--active' : ''}`}
+                    disabled={reactingPostId === post.id}
+                    onClick={() => onReactionToggle?.(post, reaction.id)}
+                    title={reaction.label}
+                    type="button"
+                  >
+                    <span>{reaction.symbol}</span>
+                  </button>
+                ))}
+              </div>
+              <span>{post.commentCount} comments</span>
+            </div>
+
+            {reactionSummary.length > 0 ? (
+              <div className="news-reaction-summary">
+                {reactionSummary.map((reaction) => (
+                  <span key={reaction.id}>
+                    {reaction.symbol} {reaction.count}
+                  </span>
+                ))}
+                {currentReactionMeta ? <strong>You reacted {currentReactionMeta.symbol}</strong> : null}
+              </div>
+            ) : null}
+
+            <div className="news-feed-comments">
+              {post.comments?.map((comment) => {
+                const canDeleteComment = canManage || comment.authorUid === currentUser?.uid;
+
+                return (
+                  <div key={comment.id} className="news-feed-comment">
+                    <div>
+                      <strong>{comment.authorName || 'Teammate'}</strong>
+                      <p>
+                        <LinkifiedText text={comment.body} />
+                      </p>
+                    </div>
+                    {canDeleteComment ? (
+                      <button
+                        className="news-feed-card__action"
+                        disabled={deletingCommentId === comment.id}
+                        onClick={() => onDeleteComment?.(post, comment)}
+                        type="button"
+                      >
+                        {deletingCommentId === comment.id ? 'Deleting...' : 'Delete'}
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
+
+              <form
+                className="news-feed-comment-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  onCommentSubmit?.(event, post);
+                }}
+              >
+                <input
+                  onChange={(event) => onCommentChange?.(post.id, event.target.value)}
+                  placeholder="Write a comment..."
+                  value={commentDrafts[post.id] ?? ''}
+                />
+                <button
+                  aria-label="Send comment"
+                  className="news-feed-comment-submit"
+                  disabled={!String(commentDrafts[post.id] ?? '').trim()}
+                  type="submit"
+                >
+                  Send
+                </button>
+              </form>
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -3100,10 +3215,20 @@ function NewsFeedIntro({ eyebrow = 'Team updates', title, copy }) {
 export function NewsPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
+  const imageInputId = `news-image-${clubSlug}-${teamSlug}`;
   const [newsPosts, setNewsPosts] = useState([]);
   const [teamName, setTeamName] = useState('');
   const [membership, setMembership] = useState(null);
+  const [form, setForm] = useState({ body: '', imageFile: null, imagePreviewUrl: '' });
+  const [commentDrafts, setCommentDrafts] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [deletingPostId, setDeletingPostId] = useState('');
+  const [deletingCommentId, setDeletingCommentId] = useState('');
+  const [reactingPostId, setReactingPostId] = useState('');
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const canManage = canManageRole(membership?.role);
 
   async function loadNewsData() {
     const [posts, membershipData, teamData] = await Promise.all([
@@ -3123,17 +3248,199 @@ export function NewsPage() {
     });
   }, [clubSlug, teamSlug, user?.uid]);
 
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await saveNewsPost({
+        body: form.body,
+        clubSlug,
+        imageFile: form.imageFile,
+        linkUrl: '',
+        teamSlug,
+        title: `${user?.displayName || 'Team'} post`,
+        user,
+      });
+      if (form.imagePreviewUrl) {
+        URL.revokeObjectURL(form.imagePreviewUrl);
+      }
+      setForm({ body: '', imageFile: null, imagePreviewUrl: '' });
+      setMessage('Post shared.');
+      await loadNewsData();
+    } catch (submitError) {
+      setError(submitError.message ?? 'Unable to share that post.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeletePost(post) {
+    setDeletingPostId(post.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await deleteNewsPost({ clubSlug, post, teamSlug });
+      setMessage('Post deleted.');
+      await loadNewsData();
+    } catch (deleteError) {
+      setError(deleteError.message ?? 'Unable to delete that post.');
+    } finally {
+      setDeletingPostId('');
+    }
+  }
+
+  async function handleCommentSubmit(event, post) {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+
+    try {
+      await addNewsComment({
+        body: commentDrafts[post.id] ?? '',
+        clubSlug,
+        postId: post.id,
+        teamSlug,
+        user,
+      });
+      setCommentDrafts((current) => ({ ...current, [post.id]: '' }));
+      await loadNewsData();
+    } catch (commentError) {
+      setError(commentError.message ?? 'Unable to post that comment.');
+    }
+  }
+
+  async function handleDeleteComment(post, comment) {
+    setDeletingCommentId(comment.id);
+    setError('');
+    setMessage('');
+
+    try {
+      await deleteNewsComment({
+        clubSlug,
+        commentId: comment.id,
+        postId: post.id,
+        teamSlug,
+      });
+      await loadNewsData();
+    } catch (deleteError) {
+      setError(deleteError.message ?? 'Unable to delete that comment.');
+    } finally {
+      setDeletingCommentId('');
+    }
+  }
+
+  async function handleReactionToggle(post, reactionType = 'like') {
+    setReactingPostId(post.id);
+    setError('');
+
+    try {
+      await toggleNewsReaction({
+        clubSlug,
+        post,
+        teamSlug,
+        type: reactionType,
+        user,
+      });
+      await loadNewsData();
+    } catch (reactionError) {
+      setError(reactionError.message ?? 'Unable to update that reaction.');
+    } finally {
+      setReactingPostId('');
+    }
+  }
+
+  function handleImageSelected(file) {
+    setForm((current) => {
+      if (current.imagePreviewUrl) {
+        URL.revokeObjectURL(current.imagePreviewUrl);
+      }
+
+      return {
+        ...current,
+        imageFile: file,
+        imagePreviewUrl: file ? URL.createObjectURL(file) : '',
+      };
+    });
+  }
+
+  function removeSelectedImage() {
+    setForm((current) => {
+      if (current.imagePreviewUrl) {
+        URL.revokeObjectURL(current.imagePreviewUrl);
+      }
+
+      return {
+        ...current,
+        imageFile: null,
+        imagePreviewUrl: '',
+      };
+    });
+  }
+
   return (
     <div className="page-grid news-page">
       <section className="card">
         <NewsFeedIntro
-          copy={`Catch the latest team updates, announcements, photos, and links from ${teamName || 'the team'}.`}
-          title="News"
+          copy={`Share photos, team happenings, drills, practices, and match moments with ${teamName || 'the team'}.`}
+          title="News Feed"
         />
 
         {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
 
-        <NewsFeed newsPosts={newsPosts} />
+        <form className="news-composer" onSubmit={handleSubmit}>
+          <label className="field">
+            <span>Create a post</span>
+            <textarea
+              onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))}
+              placeholder="Share a photo, practice note, drill idea, match recap, or team update..."
+              rows={4}
+              value={form.body}
+            />
+          </label>
+          <div className="news-composer__footer">
+            <label className="news-composer__file" htmlFor={imageInputId}>
+              Choose Image
+              <input
+                id={imageInputId}
+                accept="image/*"
+                onChange={(event) => handleImageSelected(event.target.files?.[0] ?? null)}
+                type="file"
+                value=""
+              />
+            </label>
+            <button className="button" disabled={saving} type="submit">
+              {saving ? 'Sharing...' : 'Share Post'}
+            </button>
+          </div>
+          {form.imagePreviewUrl ? (
+            <div className="news-composer-preview">
+              <img alt="Selected post preview" src={form.imagePreviewUrl} />
+              <button className="news-feed-card__action" onClick={removeSelectedImage} type="button">
+                Remove image
+              </button>
+            </div>
+          ) : null}
+        </form>
+
+        <NewsFeed
+          canManage={canManage}
+          commentDrafts={commentDrafts}
+          currentUser={user}
+          deletingCommentId={deletingCommentId}
+          deletingPostId={deletingPostId}
+          newsPosts={newsPosts}
+          onCommentChange={(postId, value) => setCommentDrafts((current) => ({ ...current, [postId]: value }))}
+          onCommentSubmit={handleCommentSubmit}
+          onDeleteComment={handleDeleteComment}
+          onDeletePost={handleDeletePost}
+          onReactionToggle={(post, reactionType) => handleReactionToggle(post, reactionType)}
+          reactingPostId={reactingPostId}
+        />
       </section>
     </div>
   );
@@ -3511,7 +3818,7 @@ function getChallengeStatusLabel(challenge) {
     return 'Cancelled';
   }
 
-  return challenge.visibility === 'targeted' ? 'Targeted' : 'Open';
+  return challenge.visibility === 'targeted' ? 'Direct' : 'Open';
 }
 
 export function ChallengesPage() {
@@ -3585,7 +3892,7 @@ export function ChallengesPage() {
     loadChallengeData()
       .catch((loadError) => {
         if (!ignore) {
-          setError(loadError.message ?? 'Unable to load challenges yet.');
+          setError(loadError.message ?? 'Unable to load match requests yet.');
         }
       })
       .finally(() => {
@@ -3620,10 +3927,10 @@ export function ChallengesPage() {
         visibility: form.visibility,
       });
       setForm(createEmptyChallengeForm(team?.primaryLocation ?? ''));
-      setMessage('Challenge posted.');
+      setMessage('Match request posted.');
       await loadChallengeData();
     } catch (submitError) {
-      setError(submitError.message ?? 'Unable to post that challenge.');
+      setError(submitError.message ?? 'Unable to post that match request.');
     } finally {
       setSaving(false);
     }
@@ -3642,10 +3949,10 @@ export function ChallengesPage() {
         teamSlug,
         user,
       });
-      setMessage('Challenge accepted and added to both schedules.');
+      setMessage('Match request accepted and added to both schedules.');
       await loadChallengeData();
     } catch (acceptError) {
-      setError(acceptError.message ?? 'Unable to accept that challenge.');
+      setError(acceptError.message ?? 'Unable to accept that match request.');
     } finally {
       setUpdatingChallengeId('');
     }
@@ -3664,10 +3971,10 @@ export function ChallengesPage() {
         teamSlug,
         user,
       });
-      setMessage('Challenge declined.');
+      setMessage('Match request declined.');
       await loadChallengeData();
     } catch (declineError) {
-      setError(declineError.message ?? 'Unable to decline that challenge.');
+      setError(declineError.message ?? 'Unable to decline that match request.');
     } finally {
       setUpdatingChallengeId('');
     }
@@ -3686,10 +3993,10 @@ export function ChallengesPage() {
         teamSlug,
         user,
       });
-      setMessage('Challenge cancelled.');
+      setMessage('Match request cancelled.');
       await loadChallengeData();
     } catch (cancelError) {
-      setError(cancelError.message ?? 'Unable to cancel that challenge.');
+      setError(cancelError.message ?? 'Unable to cancel that match request.');
     } finally {
       setUpdatingChallengeId('');
     }
@@ -3707,7 +4014,7 @@ export function ChallengesPage() {
 
     return (
       <article key={challenge.id} className="challenge-card">
-        <div className="challenge-card__badge">CH</div>
+        <div className="challenge-card__badge">MR</div>
         <div className="challenge-card__body">
           <div className="challenge-card__header">
             <div className="challenge-card__title">
@@ -3722,7 +4029,7 @@ export function ChallengesPage() {
             <span>Time: {formatChallengeTime(challenge)}</span>
             <span>Location: {challenge.location || 'Location TBD'}</span>
             {challenge.status === 'accepted' && scheduleGameId ? (
-              <span>Schedule matchup created</span>
+              <span>Scheduled match created</span>
             ) : null}
           </div>
           {challenge.notes ? <p className="challenge-card__notes">{challenge.notes}</p> : null}
@@ -3730,7 +4037,7 @@ export function ChallengesPage() {
             <div className="challenge-card__actions">
               {challenge.status === 'accepted' && scheduleGameId ? (
                 <Link className="button button--ghost" to="../schedule">
-                  View schedule
+                  View Team Matches
                 </Link>
               ) : null}
               {actions}
@@ -3763,11 +4070,11 @@ export function ChallengesPage() {
   return (
     <div className="page-grid schedule-admin-page">
       <section className="card">
-        <p className="eyebrow">Challenges</p>
-        <h1>Team challenges</h1>
+        <p className="eyebrow">Match requests</p>
+        <h1>Find a Match</h1>
         <p>
-          Post an open challenge for your club or send one directly to another approved team.
-          Accepted challenges become scheduled matchups for both teams.
+          Post an open match request for your club or send one directly to another approved team.
+          Accepted requests become scheduled matches for both teams.
         </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -3775,11 +4082,11 @@ export function ChallengesPage() {
 
         {loading ? (
           <div className="state-panel">
-            <p>Loading challenges...</p>
+            <p>Loading match requests...</p>
           </div>
         ) : !challengeClubSlug ? (
           <div className="notice notice--info">
-            Challenges are available after this team is approved for a club affiliation.
+            Match requests are available after this team is approved for a club affiliation.
           </div>
         ) : (
           <div className="challenge-page">
@@ -3788,8 +4095,8 @@ export function ChallengesPage() {
                 <div className="schedule-admin-card__header">
                   <div>
                     <p className="eyebrow">Create</p>
-                    <h2>Post a challenge</h2>
-                    <p>Create an open club challenge or target another club team.</p>
+                    <h2>Post a match request</h2>
+                    <p>Create an open club match request or send one directly to another team.</p>
                   </div>
                 </div>
 
@@ -3797,132 +4104,152 @@ export function ChallengesPage() {
                   className={`schedule-admin-form challenge-form challenge-form--${form.visibility}`}
                   onSubmit={handleCreateChallenge}
                 >
-                  <label className="field challenge-form__type">
-                    <span>Challenge type</span>
-                    <select
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          targetTeamKey: event.target.value === 'open' ? '' : current.targetTeamKey,
-                          visibility: event.target.value,
-                        }))
-                      }
-                      value={form.visibility}
-                    >
-                      <option value="open">Open</option>
-                      <option value="targeted">Targeted</option>
-                    </select>
-                  </label>
-                  {form.visibility === 'targeted' ? (
-                    <div className="field challenge-form__target">
-                      <label>
-                        <span>Challenge team</span>
+                  <div className="challenge-form__section">
+                    <div className="challenge-form__section-copy">
+                      <h3>Who do you want to play?</h3>
+                      <p>Post an open match request to the club or send it directly to one team.</p>
+                    </div>
+                    <div className="challenge-form__audience-row">
+                      <label className="field challenge-form__type">
+                        <span>Request type</span>
                         <select
-                          onChange={(event) => setForm((current) => ({ ...current, targetTeamKey: event.target.value }))}
-                          value={form.targetTeamKey}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              targetTeamKey: event.target.value === 'open' ? '' : current.targetTeamKey,
+                              visibility: event.target.value,
+                            }))
+                          }
+                          value={form.visibility}
                         >
-                          <option value="">Choose team</option>
-                          {eligibleTeams.map((eligibleTeam) => (
-                            <option
-                              key={`${eligibleTeam.clubSlug}:${eligibleTeam.teamSlug}`}
-                              value={`${eligibleTeam.clubSlug}:${eligibleTeam.teamSlug}`}
-                            >
-                              {eligibleTeam.name}
-                            </option>
-                          ))}
+                          <option value="open">Open to club</option>
+                          <option value="targeted">Specific team</option>
                         </select>
                       </label>
-                      {eligibleTeams.length === 0 ? (
-                        <span className="field-hint">No other approved teams are available in this club yet.</span>
+                      {form.visibility === 'targeted' ? (
+                        <div className="field challenge-form__target">
+                          <label>
+                            <span>Team to request</span>
+                            <select
+                              onChange={(event) => setForm((current) => ({ ...current, targetTeamKey: event.target.value }))}
+                              value={form.targetTeamKey}
+                            >
+                              <option value="">Choose team</option>
+                              {eligibleTeams.map((eligibleTeam) => (
+                                <option
+                                  key={`${eligibleTeam.clubSlug}:${eligibleTeam.teamSlug}`}
+                                  value={`${eligibleTeam.clubSlug}:${eligibleTeam.teamSlug}`}
+                                >
+                                  {eligibleTeam.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
                       ) : null}
                     </div>
-                  ) : null}
-                  <label className="field challenge-form__date">
-                    <span>Date</span>
-                    <input
-                      disabled={form.dateTbd}
-                      onChange={(event) => setForm((current) => ({ ...current, isoDate: event.target.value }))}
-                      type="date"
-                      value={form.isoDate}
-                    />
-                  </label>
-                  <div className="field challenge-form__time">
-                    <span>Time</span>
-                    <div className="challenge-time-selectors">
-                      <select
-                        disabled={form.dateTbd}
-                        onChange={(event) => setForm((current) => ({ ...current, hour: event.target.value }))}
-                        value={form.hour}
-                      >
-                        <option value="">Hour</option>
-                        {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((hour) => (
-                          <option key={hour} value={hour}>
-                            {hour}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        disabled={form.dateTbd}
-                        onChange={(event) => setForm((current) => ({ ...current, minute: event.target.value }))}
-                        value={form.minute}
-                      >
-                        {['00', '15', '30', '45'].map((minute) => (
-                          <option key={minute} value={minute}>
-                            {minute}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        disabled={form.dateTbd}
-                        onChange={(event) => setForm((current) => ({ ...current, period: event.target.value }))}
-                        value={form.period}
-                      >
-                        <option value="AM">AM</option>
-                        <option value="PM">PM</option>
-                      </select>
-                    </div>
+                    {form.visibility === 'targeted' && eligibleTeams.length === 0 ? (
+                      <div className="notice notice--info challenge-form__hint">
+                        No other approved teams are available in this club yet.
+                      </div>
+                    ) : null}
                   </div>
-                  <label className="checkbox-field challenge-form__tbd">
-                    <input
-                      checked={form.dateTbd}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          dateTbd: event.target.checked,
-                          hour: event.target.checked ? '' : current.hour,
-                          isoDate: event.target.checked ? '' : current.isoDate,
-                          minute: event.target.checked ? '00' : current.minute,
-                          period: event.target.checked ? 'PM' : current.period,
-                        }))
-                      }
-                      type="checkbox"
-                    />
-                    <span>Date and time TBD</span>
-                  </label>
-                  <label className="field">
-                    <span>Location</span>
-                    <input
-                      onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
-                      placeholder="Location TBD"
-                      value={form.location}
-                    />
-                  </label>
+
+                  <div className="challenge-form__section">
+                    <div className="challenge-form__section-copy">
+                      <h3>When and where?</h3>
+                      <p>Add the proposed match details. Use TBD if you want to coordinate later.</p>
+                    </div>
+                    <div className="challenge-form__date-time-row">
+                      <label className="field challenge-form__date">
+                        <span>Date</span>
+                        <input
+                          disabled={form.dateTbd}
+                          onChange={(event) => setForm((current) => ({ ...current, isoDate: event.target.value }))}
+                          type="date"
+                          value={form.isoDate}
+                        />
+                      </label>
+                      <div className="field challenge-form__time">
+                        <span>Time</span>
+                        <div className="challenge-time-selectors">
+                          <select
+                            disabled={form.dateTbd}
+                            onChange={(event) => setForm((current) => ({ ...current, hour: event.target.value }))}
+                            value={form.hour}
+                          >
+                            <option value="">Hour</option>
+                            {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((hour) => (
+                              <option key={hour} value={hour}>
+                                {hour}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            disabled={form.dateTbd}
+                            onChange={(event) => setForm((current) => ({ ...current, minute: event.target.value }))}
+                            value={form.minute}
+                          >
+                            {['00', '15', '30', '45'].map((minute) => (
+                              <option key={minute} value={minute}>
+                                {minute}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            disabled={form.dateTbd}
+                            onChange={(event) => setForm((current) => ({ ...current, period: event.target.value }))}
+                            value={form.period}
+                          >
+                            <option value="AM">AM</option>
+                            <option value="PM">PM</option>
+                          </select>
+                        </div>
+                      </div>
+                      <label className="checkbox-field challenge-form__tbd">
+                        <input
+                          checked={form.dateTbd}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              dateTbd: event.target.checked,
+                              hour: event.target.checked ? '' : current.hour,
+                              isoDate: event.target.checked ? '' : current.isoDate,
+                              minute: event.target.checked ? '00' : current.minute,
+                              period: event.target.checked ? 'PM' : current.period,
+                            }))
+                          }
+                          type="checkbox"
+                        />
+                        <span>Date and time TBD</span>
+                      </label>
+                    </div>
+                    <label className="field challenge-form__location">
+                      <span>Location</span>
+                      <input
+                        onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
+                        placeholder="Club, court(s), address, or TBD"
+                        value={form.location}
+                      />
+                    </label>
+                  </div>
+
                   <label className="field challenge-form__notes">
-                    <span>Notes</span>
+                    <span>Message to other captain</span>
                     <textarea
                       onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-                      placeholder="Optional details for the other captain"
+                      placeholder="Optional details, preferred format, courts, or scheduling notes"
                       value={form.notes}
                     />
                   </label>
                   <button className="button challenge-form__submit" disabled={saving} type="submit">
-                    {saving ? 'Posting challenge...' : 'Post challenge'}
+                    {saving ? 'Posting request...' : 'Post Match Request'}
                   </button>
                 </form>
               </section>
             ) : (
               <div className="notice notice--info">
-                Captains and co-captains can create or respond to challenges.
+                Captains and co-captains can create or respond to match requests.
               </div>
             )}
 
@@ -3930,8 +4257,8 @@ export function ChallengesPage() {
               <div className="schedule-admin-card__header">
                 <div>
                   <p className="eyebrow">Directory</p>
-                  <h2>Open club challenges</h2>
-                  <p>Accept an open challenge from another approved team in this club.</p>
+                  <h2>Open match requests</h2>
+                  <p>Accept an open request from another approved team in this club.</p>
                 </div>
               </div>
               {clubChallenges.length > 0 ? (
@@ -3946,14 +4273,14 @@ export function ChallengesPage() {
                           onClick={() => handleAcceptChallenge(challenge)}
                           type="button"
                         >
-                          {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept challenge'}
+                          {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept Request'}
                         </button>
                       ) : null,
                     ),
                   )}
                 </div>
               ) : (
-                <div className="notice notice--info">No open club challenges are available.</div>
+                <div className="notice notice--info">No open match requests are available.</div>
               )}
             </section>
 
@@ -3961,8 +4288,8 @@ export function ChallengesPage() {
               <div className="schedule-admin-card__header">
                 <div>
                   <p className="eyebrow">Inbox</p>
-                  <h2>Challenges sent to us</h2>
-                  <p>Respond to direct challenges from other captains.</p>
+                  <h2>Match requests sent to us</h2>
+                  <p>Respond to direct requests from other captains.</p>
                 </div>
               </div>
               {incomingChallenges.length > 0 ? (
@@ -3994,7 +4321,7 @@ export function ChallengesPage() {
                   )}
                 </div>
               ) : (
-                <div className="notice notice--info">No direct challenges are waiting for this team.</div>
+                <div className="notice notice--info">No direct match requests are waiting for this team.</div>
               )}
             </section>
 
@@ -4002,8 +4329,8 @@ export function ChallengesPage() {
               <div className="schedule-admin-card__header">
                 <div>
                   <p className="eyebrow">Posted</p>
-                  <h2>Our challenges</h2>
-                  <p>Track challenges this team has posted.</p>
+                  <h2>Our match requests</h2>
+                  <p>Track match requests this team has posted.</p>
                 </div>
               </div>
               {postedChallenges.length > 0 ? (
@@ -4018,14 +4345,14 @@ export function ChallengesPage() {
                           onClick={() => handleCancelChallenge(challenge)}
                           type="button"
                         >
-                          {updatingChallengeId === challenge.id ? 'Cancelling...' : 'Cancel challenge'}
+                          {updatingChallengeId === challenge.id ? 'Cancelling...' : 'Cancel Request'}
                         </button>
                       ) : null,
                     ),
                   )}
                 </div>
               ) : (
-                <div className="notice notice--info">This team has not posted any challenges yet.</div>
+                <div className="notice notice--info">This team has not posted any match requests yet.</div>
               )}
             </section>
 
@@ -4033,8 +4360,8 @@ export function ChallengesPage() {
               <div className="schedule-admin-card__header">
                 <div>
                   <p className="eyebrow">History</p>
-                  <h2>Accepted challenges</h2>
-                  <p>Accepted challenges involving this team are listed here after they become schedule matchups.</p>
+                  <h2>Accepted matches</h2>
+                  <p>Accepted match requests involving this team are listed here after they become scheduled matches.</p>
                 </div>
               </div>
               {acceptedHistoryChallenges.length > 0 ? (
@@ -4042,7 +4369,7 @@ export function ChallengesPage() {
                   {acceptedHistoryChallenges.map((challenge) => renderChallengeCard(challenge))}
                 </div>
               ) : (
-                <div className="notice notice--info">No accepted challenge history yet.</div>
+                <div className="notice notice--info">No accepted match requests yet.</div>
               )}
             </section>
           </div>
@@ -4321,11 +4648,16 @@ export function SettingsPage() {
   return (
     <div className="page-grid schedule-admin-page settings-admin-page">
       <section className="card">
-        <p className="eyebrow">Team Settings</p>
-        <h1>Team Settings</h1>
-        <p>
-          Manage team branding, join code settings, and member roles from one shared admin workspace.
-        </p>
+        <div className="settings-admin-header">
+          <div>
+            <p className="eyebrow">Admin tools</p>
+            <h1>Team Settings</h1>
+            <p>
+              Manage team branding, join code settings, and member roles from one shared admin workspace.
+            </p>
+          </div>
+          <span className="settings-admin-member-pill">{members.length} Members</span>
+        </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
         {message ? <div className="notice notice--success">{message}</div> : null}
@@ -4338,43 +4670,43 @@ export function SettingsPage() {
                 <h2>Send this link to teammates</h2>
                 <p>
                   Players can use the invite link or enter the join code on the Join Team page. New players will appear
-                  in Player Mgmt after they join.
+                  in Manage Players after they join.
                 </p>
               </div>
               <div className="settings-admin-invite-details">
-                <div>
+                <div className="settings-admin-invite-row">
                   <span>Join code</span>
-                  <strong>{team?.joinCode ?? 'Not available yet'}</strong>
+                  <div className="settings-admin-invite-control">
+                    <strong>{team?.joinCode ?? 'Not available yet'}</strong>
+                    {canManage ? (
+                      <button
+                        className="button button--ghost settings-admin-join-action"
+                        disabled={rotating}
+                        onClick={handleRotateJoinCode}
+                        type="button"
+                      >
+                        {rotating ? 'Changing code...' : 'Change Join Code'}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-                <div>
+                <div className="settings-admin-invite-row">
                   <span>Invite link</span>
-                  <code>{inviteLink || 'Not available yet'}</code>
+                  <div className="settings-admin-invite-control settings-admin-invite-control--link">
+                    <code>{inviteLink || 'Not available yet'}</code>
+                    {canManage ? (
+                      <button
+                        className="button settings-admin-join-action"
+                        disabled={!team?.joinCode}
+                        onClick={handleCopyInviteLink}
+                        type="button"
+                      >
+                        Copy Invite Link
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </div>
-              {canManage ? (
-                <div className="settings-admin-join-actions">
-                  <button
-                    className="button settings-admin-join-action"
-                    disabled={!team?.joinCode}
-                    onClick={handleCopyInviteLink}
-                    type="button"
-                  >
-                    Copy Invite Link
-                  </button>
-                  <button
-                    className="button button--ghost settings-admin-join-action"
-                    disabled={rotating}
-                    onClick={handleRotateJoinCode}
-                    type="button"
-                  >
-                    {rotating ? 'Changing code...' : 'Change Join Code'}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-            <div className="detail-card">
-              <span>Members</span>
-              <strong>{members.length}</strong>
             </div>
           </div>
         </div>
