@@ -1942,7 +1942,7 @@ export function ScheduleScoresPage() {
     <div className="page-grid schedule-admin-page">
       <section className="card">
         <p className="eyebrow">Match admin</p>
-        <h1>Create a Match</h1>
+        <h1>Schedule a Match</h1>
         <p>
           Captains and co-captains add scheduled matches here, then record final scores for standings.
         </p>
@@ -1977,7 +1977,7 @@ export function ScheduleScoresPage() {
                     <p>
                       {isEditing
                         ? 'Update match details and scores.'
-                        : 'Create a new match for the live team schedule.'}
+                        : 'Schedule a new match for the live team schedule.'}
                     </p>
                   </div>
                   {isEditing && form.timeLabel ? (
@@ -2080,7 +2080,7 @@ export function ScheduleScoresPage() {
                   </div>
                   <div className="schedule-admin-form__actions">
                     <button className="button" disabled={saving} type="submit">
-                      {saving ? 'Saving...' : isEditing ? 'Save Match' : 'Create Match'}
+                      {saving ? 'Saving...' : isEditing ? 'Save Match' : 'Schedule Match'}
                     </button>
                     <button className="button button--ghost" onClick={closeEditor} type="button">
                       Cancel
