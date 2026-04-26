@@ -101,8 +101,7 @@ export default function ClubDirectoryPage() {
         </Link>
       </div>
       <p className="club-directory__request-note">
-        Want your club added to PKL Universe? Contact Dave on WhatsApp or by phone at{' '}
-        <a href="tel:+19259806777">925-980-6777</a>, or email{' '}
+        Want your club added to PKL Universe? Contact David Lewis on WhatsApp or by email at{' '}
         <a href="mailto:demandgendave@gmail.com">demandgendave@gmail.com</a>.
       </p>
     </div>
