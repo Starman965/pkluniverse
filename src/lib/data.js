@@ -260,6 +260,10 @@ async function syncMembershipSummary({ clubSlug, role, teamName, teamSlug, uid }
 }
 
 async function createAdminNotification({
+  captainEmail = '',
+  captainEmails = '',
+  captainName = '',
+  captainNames = '',
   clubSlug = '',
   message,
   teamName = '',
@@ -275,20 +279,78 @@ async function createAdminNotification({
 
   const notificationRef = doc(collection(db, 'adminNotifications'));
 
-  await setDoc(notificationRef, {
-    clubSlug,
-    createdAt: serverTimestamp(),
-    createdByEmail: user.email ?? '',
-    createdByName: user.displayName ?? '',
-    createdByUid: user.uid,
-    message,
-    metadata,
-    status: 'new',
-    teamName,
-    teamSlug,
-    title,
-    type,
-  });
+  try {
+    await setDoc(notificationRef, {
+      captainEmail,
+      captainEmails,
+      captainName,
+      captainNames,
+      clubSlug,
+      createdAt: serverTimestamp(),
+      createdByEmail: user.email ?? '',
+      createdByName: user.displayName ?? '',
+      createdByUid: user.uid,
+      message,
+      metadata,
+      status: 'new',
+      teamName,
+      teamSlug,
+      title,
+      type,
+    });
+  } catch (error) {
+    console.warn('Unable to create admin notification.', error);
+  }
+}
+
+async function getTeamCaptainNotificationFields(clubSlug, teamSlug) {
+  const membersSnapshot = await getDocs(collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'members'));
+  const captainMembers = membersSnapshot.docs
+    .map((entry) => entry.data())
+    .filter((member) => ['captain', 'coCaptain'].includes(member.role ?? ''));
+
+  if (captainMembers.length === 0) {
+    return {
+      captainEmail: '',
+      captainEmails: '',
+      captainName: '',
+      captainNames: '',
+    };
+  }
+
+  const playerSnapshots = await Promise.all(
+    captainMembers.map((member) => {
+      const playerId = member.playerId || member.uid;
+      return playerId ? getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'players', playerId)) : null;
+    }),
+  );
+
+  const captains = captainMembers
+    .map((member, index) => {
+      const player = playerSnapshots[index]?.exists() ? playerSnapshots[index].data() : null;
+      const email = (player?.email ?? '').trim();
+
+      if (!email) {
+        return null;
+      }
+
+      return {
+        email,
+        name: (player?.fullName || player?.displayName || member.uid || '').trim(),
+      };
+    })
+    .filter(Boolean);
+
+  const uniqueCaptains = Array.from(
+    new Map(captains.map((captain) => [captain.email.toLowerCase(), captain])).values(),
+  );
+
+  return {
+    captainEmail: uniqueCaptains[0]?.email ?? '',
+    captainEmails: uniqueCaptains.map((captain) => captain.email).join(', '),
+    captainName: uniqueCaptains[0]?.name ?? '',
+    captainNames: uniqueCaptains.map((captain) => captain.name).filter(Boolean).join(', '),
+  };
 }
 
 export async function syncUserProfile(user) {
@@ -1410,6 +1472,10 @@ export async function createTeam({ teamName, user }) {
   });
 
   await createAdminNotification({
+    captainEmail: user.email ?? '',
+    captainEmails: user.email ?? '',
+    captainName: user.displayName ?? user.email ?? '',
+    captainNames: user.displayName ?? user.email ?? '',
     clubSlug: club.slug,
     message: `${trimmedName} was created by ${user.displayName || user.email || 'a new captain'}.`,
     teamName: trimmedName,
@@ -1506,7 +1572,10 @@ export async function joinTeamByCode({ code, user }) {
   });
 
   if (!existingMembership) {
+    const captainNotificationFields = await getTeamCaptainNotificationFields(teamClubSlug, teamSlug);
+
     await createAdminNotification({
+      ...captainNotificationFields,
       clubSlug: teamClubSlug,
       message: `${user.displayName || user.email || 'A player'} joined ${team.name || teamSlug}.`,
       teamName: team.name ?? teamSlug,

@@ -63,6 +63,10 @@ service cloud.firestore {
     function safeAdminNotificationCreate() {
       return signedIn()
         && request.resource.data.keys().hasOnly([
+          'captainEmail',
+          'captainEmails',
+          'captainName',
+          'captainNames',
           'clubSlug',
           'createdAt',
           'createdByEmail',
@@ -83,6 +87,10 @@ service cloud.firestore {
           'teamMember.joined',
           'clubAffiliation.requested',
         ]
+        && request.resource.data.captainEmail is string
+        && request.resource.data.captainEmails is string
+        && request.resource.data.captainName is string
+        && request.resource.data.captainNames is string
         && request.resource.data.title is string
         && request.resource.data.message is string
         && request.resource.data.metadata is map;
