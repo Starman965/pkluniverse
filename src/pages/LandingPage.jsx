@@ -15,16 +15,6 @@ import teamHubRosterImage from '../../team_hub_roster.png';
 
 const TEAM_HUB_PREVIEWS = [
   {
-    alt: 'PKL Universe team matches and availability preview',
-    image: teamHubAvailImage,
-    label: 'Team Matches',
-  },
-  {
-    alt: 'PKL Universe match request preview',
-    image: teamHubMatchImage,
-    label: 'Find a Match',
-  },
-  {
     alt: 'PKL Universe team news feed preview',
     image: teamHubNewsImage,
     label: 'News Feed',
@@ -33,6 +23,16 @@ const TEAM_HUB_PREVIEWS = [
     alt: 'PKL Universe roster builder preview',
     image: teamHubRosterImage,
     label: 'Build Rosters',
+  },
+  {
+    alt: 'PKL Universe team matches and availability preview',
+    image: teamHubAvailImage,
+    label: 'Team Matches',
+  },
+  {
+    alt: 'PKL Universe match request preview',
+    image: teamHubMatchImage,
+    label: 'Find a Match',
   },
 ];
 
