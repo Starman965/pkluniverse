@@ -5944,7 +5944,7 @@ export function SettingsPage() {
                 <div className="settings-admin-logo-prompt">
                   <strong>Need help with a team logo?</strong>
                   <p>Copy and paste this into ChatGPT or your favorite AI image generator.</p>
-                  <pre>{`Create a 512 x 512 square team logo for a pickleball team named "${form.teamName || 'Team Name'}". Use a bold sports logo style, clean vector look, strong contrast, transparent or simple dark background, and make it readable as a small app icon. Avoid tiny text and avoid photo-realistic details.`}</pre>
+                  <pre>{`Create a 512 x 512 square PNG team logo for a pickleball team named "${form.teamName || 'Team Name'}". Use a bold sports logo style, clean vector look, strong contrast, a simple dark background behind the logo, and make it readable as a small app icon. Avoid transparent backgrounds, tiny text, and photo-realistic details.`}</pre>
                 </div>
               </div>
             </form>
