@@ -5558,6 +5558,7 @@ export function SettingsPage() {
   const displayedLogoUrl = logoPreviewUrl || team?.logoUrl || defaultTeamLogo;
   const isTeamArchived = team?.status === 'archived';
   const canManageActiveTeam = canManage && !isTeamArchived;
+  const hasUnsavedLogo = Boolean(form.logoFile);
   const inviteLink = team?.joinCode
     ? `${window.location.origin}${window.location.pathname}#/join?code=${encodeURIComponent(team.joinCode)}`
     : '';
@@ -5918,6 +5919,9 @@ export function SettingsPage() {
                     <input accept="image/*" className="settings-admin-form__file-input" onChange={handleLogoSelection} type="file" />
                     Change Logo
                   </label>
+                  {hasUnsavedLogo ? (
+                    <p className="settings-admin-unsaved-logo">New logo selected. Save settings to publish it.</p>
+                  ) : null}
                 </div>
                 <div className="settings-admin-branding-fields">
                   <label className="field">
@@ -5938,7 +5942,7 @@ export function SettingsPage() {
                     />
                   </label>
                   <button className="button settings-admin-save-button" disabled={saving} type="submit">
-                    {saving ? 'Saving settings...' : 'Save Settings'}
+                    {saving ? 'Saving settings...' : hasUnsavedLogo ? 'Save Settings & Publish Logo' : 'Save Settings'}
                   </button>
                 </div>
                 <div className="settings-admin-logo-prompt">

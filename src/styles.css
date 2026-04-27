@@ -4054,6 +4054,14 @@ ul {
   width: fit-content;
 }
 
+.settings-admin-unsaved-logo {
+  max-width: 180px;
+  margin: 0;
+  color: #f8d76b;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
 .settings-admin-logo-prompt {
   display: grid;
   gap: 0.45rem;
