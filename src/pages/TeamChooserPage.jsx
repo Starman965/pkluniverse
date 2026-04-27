@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getTeam, isPlatformAdmin, listClubs, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
-import createTeamImage from '../../create_team.png';
+import createTeamImage from '../../create_a_team.png';
 import defaultTeamLogo from '../../default_team_logo.png';
 
 function buildCaptainLabel(members, players) {
