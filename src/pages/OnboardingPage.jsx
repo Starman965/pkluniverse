@@ -1,10 +1,11 @@
-import { Link, Navigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import createTeamImage from '../../create_team.png';
 import joinTeamImage from '../../join_team.png';
 
 export default function OnboardingPage() {
-  const { user } = useAuth();
+  const { signOutUser, user } = useAuth();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
   const requestedMode = searchParams.get('mode');
@@ -15,6 +16,11 @@ export default function OnboardingPage() {
 
   if (requestedMode === 'join') {
     return <Navigate replace to="/join" />;
+  }
+
+  async function handleLogout() {
+    await signOutUser();
+    navigate('/', { replace: true });
   }
 
   return (
@@ -51,6 +57,9 @@ export default function OnboardingPage() {
           <Link className="button button--ghost" to="/">
             Back to Homepage
           </Link>
+          <button className="button button--ghost" onClick={handleLogout} type="button">
+            Logout
+          </button>
         </div>
       </section>
     </div>
