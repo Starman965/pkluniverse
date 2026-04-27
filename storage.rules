@@ -33,6 +33,14 @@ service firebase.storage {
       allow write: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']) || isPlatformAdmin();
     }
 
+    match /clubs/{clubId}/teams/{teamId}/players/{playerId}/headshots/{fileName} {
+      allow read: if isTeamMember(clubId, teamId);
+      allow write: if (
+        isTeamMember(clubId, teamId)
+        && firestore.get(memberPath(clubId, teamId)).data.playerId == playerId
+      ) || hasTeamRole(clubId, teamId, ['captain', 'coCaptain']) || isPlatformAdmin();
+    }
+
     match /clubs/{clubId}/branding/{fileName} {
       allow read: if true;
       allow write: if isPlatformAdmin();

@@ -15,10 +15,10 @@ import pklUniverseWideLogo from '../../pkl_universe_wide_logo.png';
 
 const primaryRoutes = [
   { label: 'News Feed', to: 'news' },
-  { label: 'The Team', to: 'team' },
-  { label: 'Club Teams', requiresApprovedClub: true, to: 'club-teams' },
+  { label: 'Team Members', to: 'team' },
   { label: 'Team Matches', to: 'schedule' },
   { label: 'Team Standing', to: 'team-standing' },
+  { label: 'Club Teams', requiresApprovedClub: true, to: 'club-teams' },
   { label: 'My Profile', to: 'profile' },
 ];
 

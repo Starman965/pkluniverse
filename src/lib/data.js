@@ -91,6 +91,12 @@ function buildTeamLogoPath({ clubSlug, teamSlug, fileName }) {
   return `clubs/${clubSlug}/teams/${teamSlug}/branding/${Date.now()}-${safeBaseName}${extension}`;
 }
 
+function buildPlayerHeadshotPath({ clubSlug, teamSlug, playerId, fileName }) {
+  const safeBaseName = sanitizeFileBaseName(fileName);
+  const extension = getFileExtension(fileName);
+  return `clubs/${clubSlug}/teams/${teamSlug}/players/${playerId}/headshots/${Date.now()}-${safeBaseName}${extension}`;
+}
+
 function buildClubLogoPath({ clubSlug, fileName }) {
   const safeBaseName = sanitizeFileBaseName(fileName);
   const extension = getFileExtension(fileName);
@@ -135,6 +141,27 @@ async function uploadTeamLogo({ clubSlug, file, teamSlug }) {
   return {
     logoPath,
     logoUrl: await getDownloadURL(logoRef),
+  };
+}
+
+async function uploadPlayerHeadshot({ clubSlug, file, playerId, teamSlug }) {
+  if (!storage) {
+    throw new Error('Firebase Storage is not configured yet.');
+  }
+
+  const headshotPath = buildPlayerHeadshotPath({
+    clubSlug,
+    fileName: file?.name,
+    playerId,
+    teamSlug,
+  });
+  const headshotRef = ref(storage, headshotPath);
+
+  await uploadBytes(headshotRef, file);
+
+  return {
+    headshotPath,
+    headshotUrl: await getDownloadURL(headshotRef),
   };
 }
 
@@ -2729,6 +2756,8 @@ export async function listPlayers(clubSlug, teamSlug) {
       email: data.email ?? '',
       firstName,
       fullName: data.fullName ?? buildFullName(firstName, lastName),
+      headshotPath: data.headshotPath ?? '',
+      headshotUrl: data.headshotUrl ?? '',
       id: entry.id,
       lastName,
       notes: data.notes ?? '',
@@ -2749,6 +2778,7 @@ export async function savePlayer({
   clubSlug,
   dupr,
   firstName,
+  headshotFile = null,
   lastName,
   notes = '',
   playerId,
@@ -2783,6 +2813,16 @@ export async function savePlayer({
     throw new Error('That player could not be found.');
   }
 
+  const currentPlayer = playerSnapshot.data() ?? {};
+  const uploadedHeadshot = headshotFile
+    ? await uploadPlayerHeadshot({
+        clubSlug,
+        file: headshotFile,
+        playerId,
+        teamSlug,
+      })
+    : null;
+
   const payload = {
     active,
     availableDays: normalizeAvailableDays(availableDays),
@@ -2796,7 +2836,20 @@ export async function savePlayer({
     updatedAt: serverTimestamp(),
   };
 
+  if (uploadedHeadshot) {
+    payload.headshotPath = uploadedHeadshot.headshotPath;
+    payload.headshotUrl = uploadedHeadshot.headshotUrl;
+  }
+
   await updateDoc(playerRef, payload);
+
+  if (
+    uploadedHeadshot?.headshotPath &&
+    currentPlayer.headshotPath &&
+    currentPlayer.headshotPath !== uploadedHeadshot.headshotPath
+  ) {
+    await deleteStoragePath(currentPlayer.headshotPath);
+  }
 
   return playerId;
 }

@@ -309,11 +309,11 @@ function readFileAsDataUrl(file) {
         return;
       }
 
-      reject(new Error('That logo file could not be read as an image.'));
+      reject(new Error('That image file could not be read.'));
     };
 
     reader.onerror = () => {
-      reject(new Error('That logo file could not be read as an image.'));
+      reject(new Error('That image file could not be read.'));
     };
 
     reader.readAsDataURL(file);
@@ -324,12 +324,12 @@ function loadImageElement(source) {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('That logo file could not be read as an image.'));
+    image.onerror = () => reject(new Error('That image file could not be read.'));
     image.src = source;
   });
 }
 
-async function createCroppedLogoFile(source, cropPixels, fileName = 'team-logo.png') {
+async function createCroppedSquareImageFile(source, cropPixels, fileName = 'image.png') {
   const image = await loadImageElement(source);
   const canvas = document.createElement('canvas');
   const outputSize = 1024;
@@ -338,7 +338,7 @@ async function createCroppedLogoFile(source, cropPixels, fileName = 'team-logo.p
 
   const context = canvas.getContext('2d');
   if (!context) {
-    throw new Error('We could not prepare that cropped logo.');
+    throw new Error('We could not prepare that cropped image.');
   }
 
   context.drawImage(
@@ -360,7 +360,7 @@ async function createCroppedLogoFile(source, cropPixels, fileName = 'team-logo.p
         return;
       }
 
-      reject(new Error('We could not create that cropped logo.'));
+      reject(new Error('We could not create that cropped image.'));
     }, 'image/png');
   });
 
@@ -415,6 +415,47 @@ function countGamesPlayed(games, playerId) {
 
     return isCompleted && (inRoster || inPairings);
   }).length;
+}
+
+function buildPlayerRecord(games, playerId) {
+  const record = {
+    losses: 0,
+    ties: 0,
+    wins: 0,
+  };
+
+  if (!playerId) {
+    return record;
+  }
+
+  games.forEach((game) => {
+    const isCompleted = game.matchStatus === 'final' || game.matchStatus === 'completed';
+    const wasRostered = (game.rosterPlayerIds ?? []).includes(playerId);
+
+    if (!isCompleted || !wasRostered) {
+      return;
+    }
+
+    if (game.result === 'win') {
+      record.wins += 1;
+    } else if (game.result === 'loss') {
+      record.losses += 1;
+    } else if (game.result === 'tie') {
+      record.ties += 1;
+    }
+  });
+
+  return record;
+}
+
+function formatPlayerWinRate(record) {
+  const gamesPlayed = record.wins + record.losses + record.ties;
+
+  if (!gamesPlayed) {
+    return '0%';
+  }
+
+  return `${Math.round((record.wins / gamesPlayed) * 100)}%`;
 }
 
 function formatDupr(value) {
@@ -565,6 +606,32 @@ function TrashIcon() {
   );
 }
 
+function MemberStatIcon({ type }) {
+  const icons = {
+    dupr: (
+      <path d="M5 18h14v2H5v-2zm1-2 3.2-9 3.1 5 2.4-3.1L18 16H6zm3.6-5.1L8.2 15h6.8l-1-2.1-1.9 2.4-2.5-4.4z" />
+    ),
+    games: (
+      <path d="M7 3h10v3h3v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6h3V3zm2 3h6V5H9v1zm-3 3v10h12V9H6zm2 2h3v3H8v-3zm5 0h3v3h-3v-3z" />
+    ),
+    record: (
+      <path d="M7 4h10v3h3v3.2c0 2.9-2.2 5.2-5.3 5.6A4.1 4.1 0 0 1 13 17.2V20h3v2H8v-2h3v-2.8a4.1 4.1 0 0 1-1.7-1.4C6.2 15.4 4 13.1 4 10.2V7h3V4zm2 2v6.3a3 3 0 1 0 6 0V6H9zm-3 3v1.2c0 1.5.9 2.8 2.3 3.4A5.4 5.4 0 0 1 7 10V9H6zm11 1c0 1.3-.5 2.5-1.3 3.6 1.4-.6 2.3-1.9 2.3-3.4V9h-1v1z" />
+    ),
+    skill: (
+      <path d="m12 3 2.4 5 5.5.8-4 3.9 1 5.5L12 15.6l-4.9 2.6 1-5.5-4-3.9 5.5-.8L12 3z" />
+    ),
+    winRate: (
+      <path d="M12 4a9 9 0 0 1 9 9h-2a7 7 0 1 0-2.1 5l1.4 1.4A9 9 0 1 1 12 4zm.7 9.7-1.4-1.4 4.5-4.5 1.4 1.4-4.5 4.5zm-1.7.8a1.5 1.5 0 1 1 2 1.4 1.5 1.5 0 0 1-2-1.4z" />
+    ),
+  };
+
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      {icons[type]}
+    </svg>
+  );
+}
+
 function createEmptyTeamSettingsForm(teamName = '', primaryLocation = '') {
   return {
     logoFile: null,
@@ -600,6 +667,7 @@ function createEmptyRosterForm() {
     availableDays: [],
     dupr: '',
     firstName: '',
+    headshotFile: null,
     lastName: '',
     notes: '',
     phone: '',
@@ -614,6 +682,7 @@ function createRosterFormFromPlayer(player) {
     availableDays: Array.isArray(player.availableDays) ? player.availableDays : [],
     dupr: typeof player.dupr === 'number' ? String(player.dupr) : '',
     firstName: player.firstName ?? '',
+    headshotFile: null,
     lastName: player.lastName ?? '',
     notes: player.notes ?? '',
     phone: player.phone ?? '',
@@ -751,44 +820,129 @@ function MatchupLabelField({ onChange, value }) {
   );
 }
 
-function StandingsSummary({ games }) {
+function StandingsSummary({ games, team }) {
   const standings = useMemo(() => buildStandingsSummary(games), [games]);
+  const totalDecisions = standings.wins + standings.losses + standings.ties;
+  const pointsFor = standings.opponents.reduce((total, row) => total + row.pointsFor, 0);
+  const pointsAgainst = standings.opponents.reduce((total, row) => total + row.pointsAgainst, 0);
+  const pointDifferential = pointsFor - pointsAgainst;
+  const winPercent = totalDecisions ? Math.round(Number(standings.winPct) * 100) : 0;
+  const resultSegments = [
+    { className: 'standings-record-bar__segment--wins', count: standings.wins, label: 'Wins' },
+    { className: 'standings-record-bar__segment--ties', count: standings.ties, label: 'Ties' },
+    { className: 'standings-record-bar__segment--losses', count: standings.losses, label: 'Losses' },
+  ];
 
   return (
-    <>
+    <div className="standings-summary">
       {standings.completedGames.length > 0 ? (
-        <div className="detail-grid">
-          <div className="detail-card">
-            <span>Overall record</span>
-            <strong>{formatRecord(standings.wins, standings.losses, standings.ties)}</strong>
-          </div>
-          <div className="detail-card">
-            <span>Win %</span>
-            <strong>{standings.winPct}</strong>
-          </div>
-          <div className="detail-card">
-            <span>Completed matchups</span>
-            <strong>{standings.completedGames.length}</strong>
-          </div>
-        </div>
-      ) : (
-        <p>No completed matchups yet. Standings will populate after results are entered.</p>
-      )}
-
-      {standings.opponents.length > 0 ? (
-        <div className="entity-list">
-          {standings.opponents.map((row) => (
-            <div key={row.opponent} className="entity-card entity-card--column">
-              <strong>{row.opponent}</strong>
-              <span>{formatRecord(row.wins, row.losses, row.ties)}</span>
-              <span>
-                PF {row.pointsFor} · PA {row.pointsAgainst}
-              </span>
+        <>
+          <div className="standings-hero">
+            <div className="standings-hero__main">
+              <span className="standings-hero__label">Overall record · W-L-T</span>
+              <strong>{formatRecord(standings.wins, standings.losses, standings.ties)}</strong>
+              <span>{standings.completedGames.length} completed matchup{standings.completedGames.length === 1 ? '' : 's'}</span>
             </div>
-          ))}
+
+            <div className="standings-metric-card standings-metric-card--win">
+              <span>Win rate</span>
+              <strong>{winPercent}%</strong>
+            </div>
+
+            <div className={`standings-metric-card ${pointDifferential >= 0 ? 'standings-metric-card--positive' : 'standings-metric-card--negative'}`}>
+              <span>Point diff</span>
+              <strong>{pointDifferential >= 0 ? `+${pointDifferential}` : pointDifferential}</strong>
+            </div>
+          </div>
+
+          <div className="standings-record-card">
+            <div className="standings-record-card__header">
+              <div>
+                <p className="eyebrow">Result mix</p>
+                <h2>How the season is trending</h2>
+              </div>
+              <span>{pointsFor} PF · {pointsAgainst} PA</span>
+            </div>
+
+            <div className="standings-record-bar" aria-label="Win loss tie result breakdown">
+              {resultSegments.map((segment) => (
+                segment.count > 0 ? (
+                  <span
+                    key={segment.label}
+                    aria-label={`${segment.label}: ${segment.count}`}
+                    className={`standings-record-bar__segment ${segment.className}`}
+                    style={{ width: `${(segment.count / totalDecisions) * 100}%` }}
+                  />
+                ) : null
+              ))}
+            </div>
+
+            <div className="standings-record-card__legend">
+              <span><i className="standings-dot standings-dot--wins" /> {standings.wins} wins</span>
+              <span><i className="standings-dot standings-dot--ties" /> {standings.ties} ties</span>
+              <span><i className="standings-dot standings-dot--losses" /> {standings.losses} losses</span>
+            </div>
+          </div>
+
+          {standings.opponents.length > 0 ? (
+            <div className="standings-opponents">
+              <div className="standings-opponents__header">
+                <p className="eyebrow">Match Results</p>
+                <h2>Head-to-head matchups</h2>
+              </div>
+              <div className="standings-opponents__grid">
+                {standings.opponents.map((row) => {
+                  const rowPointDifferential = row.pointsFor - row.pointsAgainst;
+
+                  return (
+                    <div key={row.opponent} className="standings-opponent-card">
+                      <div className="standings-opponent-card__header">
+                        <strong>{row.opponent}</strong>
+                        <span>{row.matches} matchup{row.matches === 1 ? '' : 's'}</span>
+                      </div>
+                      <div className="standings-scoreboard">
+                        <div className="standings-scoreboard__team">
+                          <img
+                            alt={`${team?.name ?? 'Your team'} logo`}
+                            src={team?.logoUrl || defaultTeamLogo}
+                          />
+                          <span>{team?.name ?? 'Your team'}</span>
+                        </div>
+                        <div className="standings-scoreboard__score">
+                          <span>Score</span>
+                          <strong>{row.pointsFor}-{row.pointsAgainst}</strong>
+                        </div>
+                        <div className="standings-scoreboard__team standings-scoreboard__team--opponent">
+                          <div className="standings-scoreboard__opponent-badge">
+                            {buildPlayerInitials(row.opponent)}
+                          </div>
+                          <span>{row.opponent}</span>
+                        </div>
+                      </div>
+                      <div className="standings-opponent-card__stats">
+                        <span>Record: {formatRecord(row.wins, row.losses, row.ties)} W-L-T</span>
+                        <span className={rowPointDifferential >= 0 ? 'standings-positive' : 'standings-negative'}>
+                          Point diff: {rowPointDifferential >= 0 ? `+${rowPointDifferential}` : rowPointDifferential}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div className="standings-empty-card">
+          <p className="eyebrow">No results yet</p>
+          <h2>The scoreboard starts after your first completed match.</h2>
+          <p>
+            Once captains enter final scores, this page will show record, win rate, point differential, and head-to-head
+            results.
+          </p>
         </div>
-      ) : null}
-    </>
+      )}
+    </div>
   );
 }
 
@@ -1026,8 +1180,7 @@ export function ClubTeamsPage() {
         <p className="eyebrow">Club teams</p>
         <h1>{approvedClubSlug ? `${clubName} teams` : 'Club Teams'}</h1>
         <p className="club-teams-page__copy">
-          See the other teams playing in your club network. These are the teams your roster can follow, compete with,
-          and challenge as your club&apos;s team-vs-team play grows.
+          See the other teams playing in your club network. These are the teams you can challenge.
         </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -1129,6 +1282,7 @@ export function TeamMembersPage() {
     const representedMemberIds = new Set();
     const entries = players.map((player) => {
       const linkedMember = memberByPlayerId.get(player.id) ?? memberByUid.get(player.uid);
+      const record = buildPlayerRecord(games, player.id);
 
       if (linkedMember?.id) {
         representedMemberIds.add(linkedMember.id);
@@ -1139,14 +1293,19 @@ export function TeamMembersPage() {
         active: player.active !== false,
         fullName: player.fullName || 'Unnamed player',
         gamesPlayedCount: countGamesPlayed(games, player.id),
+        dupr: formatDupr(player.dupr),
+        headshotUrl: player.headshotUrl ?? '',
         initials: buildPlayerInitials(player.fullName || 'Unnamed player'),
         isPendingLink: false,
+        record,
         role: linkedMember?.role ?? '',
+        skillLevel: player.skillLevel || 'TBD',
         subtitle:
           linkedMember?.role && linkedMember.role !== 'member'
             ? formatRoleLabel(linkedMember.role)
             : 'Teammate',
         availableCount: countAvailableGames(games, player.id),
+        winRate: formatPlayerWinRate(record),
       };
     });
 
@@ -1160,13 +1319,18 @@ export function TeamMembersPage() {
         active: member.status === 'active',
         fullName: member.uid === user?.uid ? user?.displayName || 'You' : 'Pending roster link',
         gamesPlayedCount: 0,
+        dupr: 'TBD',
+        headshotUrl: '',
         initials: buildPlayerInitials(
           member.uid === user?.uid ? user?.displayName || 'You' : 'Pending roster link',
         ),
         isPendingLink: true,
+        record: { losses: 0, ties: 0, wins: 0 },
         role: member.role,
+        skillLevel: 'TBD',
         subtitle: member.role && member.role !== 'member' ? formatRoleLabel(member.role) : 'Account member only',
         availableCount: 0,
+        winRate: '0%',
       });
     });
 
@@ -1190,7 +1354,7 @@ export function TeamMembersPage() {
             <p className="eyebrow">Current roster</p>
             <h1>{teamTitle}</h1>
             <p className="team-members-card__copy">
-              Meet the {team?.name ?? 'team'} players who make up the team this season.
+              Meet the {team?.name ?? 'team'} players who make up the team.
             </p>
           </div>
           <div className="team-members-card__count">{rosterPlayerCount} Members</div>
@@ -1203,27 +1367,47 @@ export function TeamMembersPage() {
             {teamCards.map((entry) => (
               <article key={entry.id} className="team-member-card">
                 <div className="team-member-card__top">
-                  <div className="team-member-card__avatar">{entry.initials}</div>
-                  <span
-                    className={`status-badge ${entry.active ? 'status-badge--active' : 'status-badge--inactive'}`}
-                  >
-                    {entry.active ? 'ACTIVE' : 'INACTIVE'}
-                  </span>
-                </div>
-
-                <div className="team-member-card__body">
-                  <strong className="team-member-card__name">{entry.fullName}</strong>
-                  {entry.subtitle ? (
-                    <span className="team-member-card__subtitle">
-                      {entry.subtitle}
-                      {entry.isPendingLink ? ' · waiting for roster link' : ''}
-                    </span>
-                  ) : null}
+                  {entry.headshotUrl ? (
+                    <img
+                      alt={`${entry.fullName} headshot`}
+                      className="team-member-card__avatar team-member-card__avatar--photo"
+                      src={entry.headshotUrl}
+                    />
+                  ) : (
+                    <div className="team-member-card__avatar">{entry.initials}</div>
+                  )}
+                  <div className="team-member-card__body">
+                    <strong className="team-member-card__name">{entry.fullName}</strong>
+                    {entry.subtitle ? (
+                      <span className="team-member-card__subtitle">
+                        {entry.subtitle}
+                        {entry.isPendingLink ? ' · waiting for roster link' : ''}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="team-member-card__stats">
-                  <span>Available: {entry.availableCount}</span>
-                  <span>Games Played: {entry.gamesPlayedCount}</span>
+                  <span className="team-member-card__stat team-member-card__stat--record">
+                    <span><MemberStatIcon type="record" /> Record</span>
+                    <strong>{entry.record.wins}-{entry.record.losses}-{entry.record.ties}</strong>
+                  </span>
+                  <span className="team-member-card__stat team-member-card__stat--skill">
+                    <span><MemberStatIcon type="skill" /> Skill</span>
+                    <strong>{entry.skillLevel}</strong>
+                  </span>
+                  <span className="team-member-card__stat team-member-card__stat--dupr">
+                    <span><MemberStatIcon type="dupr" /> DUPR</span>
+                    <strong>{entry.dupr}</strong>
+                  </span>
+                  <span className="team-member-card__stat team-member-card__stat--win-rate">
+                    <span><MemberStatIcon type="winRate" /> Win Rate</span>
+                    <strong>{entry.winRate}</strong>
+                  </span>
+                  <span className="team-member-card__stat team-member-card__stat--games">
+                    <span><MemberStatIcon type="games" /> Games</span>
+                    <strong>{entry.gamesPlayedCount}</strong>
+                  </span>
                 </div>
               </article>
             ))}
@@ -1249,12 +1433,39 @@ export function ProfilePage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [headshotPreviewUrl, setHeadshotPreviewUrl] = useState('');
+  const [headshotCropImageSrc, setHeadshotCropImageSrc] = useState('');
+  const [headshotCropFileName, setHeadshotCropFileName] = useState('player-headshot.png');
+  const [headshotCrop, setHeadshotCrop] = useState({ x: 0, y: 0 });
+  const [headshotZoom, setHeadshotZoom] = useState(1);
+  const [headshotCropPixels, setHeadshotCropPixels] = useState(null);
+  const [creatingHeadshotCrop, setCreatingHeadshotCrop] = useState(false);
+
+  function replaceHeadshotPreview(nextUrl) {
+    setHeadshotPreviewUrl((currentUrl) => {
+      if (currentUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(currentUrl);
+      }
+
+      return nextUrl;
+    });
+  }
+
+  function clearHeadshotCropper() {
+    setHeadshotCropImageSrc('');
+    setHeadshotCropFileName('player-headshot.png');
+    setHeadshotCrop({ x: 0, y: 0 });
+    setHeadshotZoom(1);
+    setHeadshotCropPixels(null);
+    setCreatingHeadshotCrop(false);
+  }
 
   async function loadProfileData() {
     if (!user?.uid) {
       setMembership(null);
       setPlayer(null);
       setForm(createEmptyRosterForm());
+      replaceHeadshotPreview('');
       return;
     }
 
@@ -1270,6 +1481,7 @@ export function ProfilePage() {
     setMembership(membershipData);
     setPlayer(currentPlayer);
     setForm(currentPlayer ? createRosterFormFromPlayer(currentPlayer) : createEmptyRosterForm());
+    replaceHeadshotPreview('');
   }
 
   useEffect(() => {
@@ -1284,6 +1496,67 @@ export function ProfilePage() {
         setLoading(false);
       });
   }, [clubSlug, teamSlug, user?.uid]);
+
+  useEffect(
+    () => () => {
+      if (headshotPreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(headshotPreviewUrl);
+      }
+    },
+    [headshotPreviewUrl],
+  );
+
+  async function handleHeadshotSelection(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setError('Choose an image file for your headshot.');
+      return;
+    }
+
+    try {
+      const imageSrc = await readFileAsDataUrl(file);
+      setHeadshotCropImageSrc(imageSrc);
+      setHeadshotCropFileName(file.name || 'player-headshot.png');
+      setHeadshotCrop({ x: 0, y: 0 });
+      setHeadshotZoom(1);
+      setHeadshotCropPixels(null);
+      setError('');
+    } catch (selectionError) {
+      setError(selectionError.message ?? 'Unable to read that headshot image.');
+    }
+  }
+
+  async function handleApplyHeadshotCrop() {
+    if (!headshotCropImageSrc || !headshotCropPixels) {
+      setError('Adjust the headshot crop before applying it.');
+      return;
+    }
+
+    setCreatingHeadshotCrop(true);
+    setError('');
+
+    try {
+      const croppedFile = await createCroppedSquareImageFile(
+        headshotCropImageSrc,
+        headshotCropPixels,
+        headshotCropFileName,
+      );
+      setForm((current) => ({ ...current, headshotFile: croppedFile }));
+      replaceHeadshotPreview(URL.createObjectURL(croppedFile));
+      clearHeadshotCropper();
+      setMessage('Headshot crop ready. Save profile to publish it.');
+    } catch (cropError) {
+      setError(cropError.message ?? 'Unable to crop that headshot.');
+    } finally {
+      setCreatingHeadshotCrop(false);
+    }
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -1363,6 +1636,28 @@ export function ProfilePage() {
 
         {!loading && player ? (
           <form className="schedule-admin-form" onSubmit={handleSubmit}>
+            <div className="profile-headshot-field">
+              {headshotPreviewUrl || player.headshotUrl ? (
+                <img
+                  alt={`${player.fullName || 'Player'} headshot preview`}
+                  className="profile-headshot-field__preview"
+                  src={headshotPreviewUrl || player.headshotUrl}
+                />
+              ) : (
+                <div className="profile-headshot-field__initials">
+                  {buildPlayerInitials(player.fullName || `${form.firstName} ${form.lastName}`)}
+                </div>
+              )}
+              <div className="profile-headshot-field__copy">
+                <span>Profile photo</span>
+                <p>Add a headshot so your roster card feels more personal. You can zoom and crop before saving.</p>
+                <label className="button button--ghost profile-headshot-field__button">
+                  Choose photo
+                  <input accept="image/*" onChange={handleHeadshotSelection} type="file" />
+                </label>
+              </div>
+            </div>
+
             <div className="player-admin-form__row">
               <label className="field">
                 <span>First name</span>
@@ -1454,6 +1749,66 @@ export function ProfilePage() {
           </form>
         ) : null}
       </section>
+
+      {headshotCropImageSrc ? (
+        <div className="logo-cropper" role="dialog" aria-modal="true" aria-labelledby="headshot-cropper-title">
+          <button
+            aria-label="Close headshot cropper"
+            className="logo-cropper__backdrop"
+            onClick={clearHeadshotCropper}
+            type="button"
+          />
+          <aside className="logo-cropper__panel">
+            <div className="logo-cropper__header">
+              <div>
+                <p className="eyebrow">Crop headshot</p>
+                <h2 id="headshot-cropper-title">Frame your profile photo</h2>
+                <p className="logo-cropper__copy">
+                  Reposition the image and zoom until your face is centered in the square preview.
+                </p>
+              </div>
+              <button className="button button--ghost" onClick={clearHeadshotCropper} type="button">
+                Cancel
+              </button>
+            </div>
+
+            <div className="logo-cropper__workspace">
+              <div className="logo-cropper__canvas">
+                <Cropper
+                  aspect={1}
+                  crop={headshotCrop}
+                  image={headshotCropImageSrc}
+                  onCropChange={setHeadshotCrop}
+                  onCropComplete={(_, croppedAreaPixels) => setHeadshotCropPixels(croppedAreaPixels)}
+                  onZoomChange={setHeadshotZoom}
+                  showGrid={false}
+                  zoom={headshotZoom}
+                />
+              </div>
+              <label className="field logo-cropper__zoom">
+                <span>Zoom</span>
+                <input
+                  max="3"
+                  min="1"
+                  onChange={(event) => setHeadshotZoom(Number(event.target.value))}
+                  step="0.05"
+                  type="range"
+                  value={headshotZoom}
+                />
+              </label>
+            </div>
+
+            <div className="schedule-admin-form__actions">
+              <button className="button" disabled={creatingHeadshotCrop} onClick={handleApplyHeadshotCrop} type="button">
+                {creatingHeadshotCrop ? 'Preparing crop...' : 'Use cropped headshot'}
+              </button>
+              <button className="button button--ghost" onClick={clearHeadshotCropper} type="button">
+                Cancel
+              </button>
+            </div>
+          </aside>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1777,6 +2132,7 @@ export function SchedulePage() {
   const [expandedRosterIds, setExpandedRosterIds] = useState([]);
   const [updatingGameId, setUpdatingGameId] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   async function loadScheduleData() {
     const [gameData, playerData, membershipData] = await Promise.all([
@@ -1791,9 +2147,16 @@ export function SchedulePage() {
   }
 
   useEffect(() => {
-    loadScheduleData().catch((loadError) => {
-      setError(loadError.message ?? 'Unable to load matchups yet.');
-    });
+    setLoading(true);
+    setError('');
+
+    loadScheduleData()
+      .catch((loadError) => {
+        setError(loadError.message ?? 'Unable to load matchups yet.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [clubSlug, teamSlug, user?.uid]);
 
   const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
@@ -1853,7 +2216,7 @@ export function SchedulePage() {
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        {!membership?.playerId ? (
+        {!loading && !membership?.playerId ? (
           <div className="notice notice--info">
             Your account is not linked to a player record for this team yet, so availability controls are disabled.
           </div>
@@ -2369,12 +2732,17 @@ export function ScheduleScoresPage() {
 export function StandingsPage() {
   const { clubSlug, teamSlug } = useParams();
   const [games, setGames] = useState([]);
+  const [team, setTeam] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    listGames(clubSlug, teamSlug)
-      .then((gameData) => {
+    Promise.all([
+      listGames(clubSlug, teamSlug),
+      getTeam(clubSlug, teamSlug),
+    ])
+      .then(([gameData, teamData]) => {
         setGames(gameData);
+        setTeam(teamData);
       })
       .catch((loadError) => {
         setError(loadError.message ?? 'Unable to load standings yet.');
@@ -2382,17 +2750,25 @@ export function StandingsPage() {
   }, [clubSlug, teamSlug]);
 
   return (
-    <div className="page-grid">
-      <section className="card">
-        <p className="eyebrow">Standings</p>
-        <h1>Team results</h1>
-        <p>
-          Standings are derived directly from completed schedule entries, so the schedule and record
-          always stay in sync.
-        </p>
+    <div className="page-grid standings-page">
+      <section className="card standings-page__card">
+        <div className="standings-page__header">
+          <div>
+            <p className="eyebrow">Standings</p>
+            <h1>Team results</h1>
+            <p className="standings-page__copy">
+              Track your team&apos;s record, scoring edge, and head-to-head results as match scores come in.
+            </p>
+          </div>
+          <img
+            alt={`${team?.name ?? 'Team'} logo`}
+            className="standings-page__logo"
+            src={team?.logoUrl || defaultTeamLogo}
+          />
+        </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        <StandingsSummary games={games} />
+        <StandingsSummary games={games} team={team} />
       </section>
     </div>
   );
@@ -2765,7 +3141,7 @@ export function RosterMgmtPage() {
           <div>
             <p className="eyebrow">Match rosters</p>
             <h1>Build Rosters</h1>
-            <p>
+            <p className="roster-builder-hero__copy">
               Pick a match, choose the needed available players, then assign them into court slots.
               Saved rosters appear on the player Team Matches page.
             </p>
@@ -5253,7 +5629,7 @@ export function SettingsPage() {
     setMessage('');
 
     try {
-      const croppedFile = await createCroppedLogoFile(cropImageSrc, cropPixels, cropFileName);
+      const croppedFile = await createCroppedSquareImageFile(cropImageSrc, cropPixels, cropFileName);
       setForm((current) => ({ ...current, logoFile: croppedFile }));
       replaceLogoPreview(URL.createObjectURL(croppedFile));
       clearCropper();
@@ -6150,7 +6526,7 @@ export function ClubAffiliationAdminPage() {
     setMessage('');
 
     try {
-      const croppedFile = await createCroppedLogoFile(clubCropImageSrc, clubCropPixels, clubCropFileName);
+      const croppedFile = await createCroppedSquareImageFile(clubCropImageSrc, clubCropPixels, clubCropFileName);
       const previewUrl = URL.createObjectURL(croppedFile);
 
       if (clubCropTarget === 'create') {

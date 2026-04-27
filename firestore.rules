@@ -146,6 +146,8 @@ service cloud.firestore {
           'dupr',
           'firstName',
           'fullName',
+          'headshotPath',
+          'headshotUrl',
           'lastName',
           'notes',
           'phone',
