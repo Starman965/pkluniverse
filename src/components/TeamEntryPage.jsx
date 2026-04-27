@@ -53,6 +53,8 @@ export default function TeamEntryPage({ mode }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [busyAction, setBusyAction] = useState('');
   const [memberships, setMemberships] = useState([]);
+  const entryValue = mode === 'create' ? teamName.trim() : joinCode.trim();
+  const canSubmit = Boolean(entryValue);
 
   const loadMemberships = useCallback(async () => {
     if (!user?.uid || !isFirebaseConfigured) {
@@ -146,20 +148,26 @@ export default function TeamEntryPage({ mode }) {
   async function handleSubmit(event) {
     event.preventDefault();
 
+    if (!entryValue) {
+      setStatusMessage('');
+      setErrorMessage(mode === 'create' ? 'Enter a team name first.' : 'Enter a join code first.');
+      return;
+    }
+
     if (!isAuthenticated) {
       writeOnboardingIntent(
-        mode === 'create' ? { mode: 'create', teamName } : { joinCode, mode: 'join' },
+        mode === 'create' ? { mode: 'create', teamName: entryValue } : { joinCode: entryValue.toUpperCase(), mode: 'join' },
       );
       await signInWithGoogle();
       return;
     }
 
     if (mode === 'create') {
-      await submitCreateTeam(teamName);
+      await submitCreateTeam(entryValue);
       return;
     }
 
-    await submitJoinTeam(joinCode);
+    await submitJoinTeam(entryValue.toUpperCase());
   }
 
   return (
@@ -190,9 +198,10 @@ export default function TeamEntryPage({ mode }) {
                 onChange={(event) =>
                   mode === 'create'
                     ? setTeamName(event.target.value)
-                    : setJoinCode(event.target.value.toUpperCase())
+                    : setJoinCode(event.target.value.trim().toUpperCase())
                 }
                 placeholder={content.placeholder}
+                required
                 type="text"
                 value={mode === 'create' ? teamName : joinCode}
               />
@@ -206,7 +215,7 @@ export default function TeamEntryPage({ mode }) {
 
             <button
               className={mode === 'create' ? 'button' : 'button button--ghost'}
-              disabled={!isFirebaseConfigured || loading || busyAction === mode}
+              disabled={!isFirebaseConfigured || loading || busyAction === mode || !canSubmit}
               type="submit"
             >
               {loading
