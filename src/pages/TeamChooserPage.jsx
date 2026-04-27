@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getTeam, isPlatformAdmin, listClubs, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
+import createTeamImage from '../../create_team.png';
 import defaultTeamLogo from '../../default_team_logo.png';
 
 function buildCaptainLabel(members, players) {
@@ -129,10 +130,20 @@ export default function TeamChooserPage() {
   return (
     <div className="auth-page">
       <section className="card auth-card team-chooser">
-        <p className="eyebrow">Your teams</p>
-        <div className="team-chooser__intro">
-          <h1>Choose a team</h1>
-          <p>Welcome back. Click on the team below you wish to access.</p>
+        <div className="team-chooser__header">
+          <div className="team-chooser__intro">
+            <p className="eyebrow">Your teams</p>
+            <h1>Choose a team</h1>
+            <p>Welcome back. Click on the team below you wish to access.</p>
+          </div>
+
+          <Link className="team-chooser__create-card" to="/create">
+            <img alt="" aria-hidden="true" src={createTeamImage} />
+            <span>
+              <strong>Create a team</strong>
+              <small>Start another team hub and invite players.</small>
+            </span>
+          </Link>
         </div>
 
         {errorMessage ? <div className="notice notice--error">{errorMessage}</div> : null}
