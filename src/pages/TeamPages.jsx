@@ -1679,11 +1679,14 @@ export function ProfilePage() {
                 </select>
               </label>
             </div>
-            <fieldset className="field checkbox-fieldset">
-              <legend>Weekly availability</legend>
+            <fieldset className="field checkbox-fieldset weekly-availability">
+              <legend>My Best Available Days</legend>
               <div className="checkbox-grid">
                 {PLAYER_AVAILABLE_DAYS.map((day) => (
-                  <label key={day.id} className="checkbox-option">
+                  <label
+                    key={day.id}
+                    className={`checkbox-option ${form.availableDays.includes(day.id) ? 'checkbox-option--selected' : ''}`}
+                  >
                     <input
                       checked={form.availableDays.includes(day.id)}
                       onChange={(event) =>
@@ -2021,11 +2024,14 @@ export function RosterPage() {
                       </select>
                     </label>
                   </div>
-                  <fieldset className="field checkbox-fieldset">
-                    <legend>Weekly availability</legend>
+                  <fieldset className="field checkbox-fieldset weekly-availability">
+                    <legend>My Best Available Days</legend>
                     <div className="checkbox-grid">
                       {PLAYER_AVAILABLE_DAYS.map((day) => (
-                        <label key={day.id} className="checkbox-option">
+                        <label
+                          key={day.id}
+                          className={`checkbox-option ${editForm.availableDays.includes(day.id) ? 'checkbox-option--selected' : ''}`}
+                        >
                           <input
                             checked={editForm.availableDays.includes(day.id)}
                             onChange={(event) =>

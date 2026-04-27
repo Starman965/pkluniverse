@@ -54,7 +54,7 @@ export default function TeamEntryPage({ mode }) {
   const [busyAction, setBusyAction] = useState('');
   const [memberships, setMemberships] = useState([]);
   const entryValue = mode === 'create' ? teamName.trim() : joinCode.trim();
-  const joinCodeIsValid = mode !== 'join' || entryValue.length === 5;
+  const joinCodeIsValid = mode !== 'join' || entryValue.length === 7;
   const canSubmit = Boolean(entryValue) && joinCodeIsValid;
 
   const loadMemberships = useCallback(async () => {
@@ -143,9 +143,9 @@ export default function TeamEntryPage({ mode }) {
       clearOnboardingIntent();
       const nextJoinCode = intent.joinCode.trim().toUpperCase();
 
-      if (nextJoinCode.length !== 5) {
+      if (nextJoinCode.length !== 7) {
         setJoinCode(nextJoinCode);
-        setErrorMessage('Enter the 5-character team code.');
+        setErrorMessage('Enter the 7-character team code.');
         return;
       }
 
@@ -165,7 +165,7 @@ export default function TeamEntryPage({ mode }) {
 
     if (mode === 'join' && !joinCodeIsValid) {
       setStatusMessage('');
-      setErrorMessage('Enter the 5-character team code.');
+      setErrorMessage('Enter the 7-character team code.');
       return;
     }
 
@@ -216,7 +216,7 @@ export default function TeamEntryPage({ mode }) {
                     : setJoinCode(event.target.value.trim().toUpperCase())
                 }
                 placeholder={content.placeholder}
-                maxLength={mode === 'join' ? 5 : undefined}
+                maxLength={mode === 'join' ? 7 : undefined}
                 required
                 type="text"
                 value={mode === 'create' ? teamName : joinCode}
