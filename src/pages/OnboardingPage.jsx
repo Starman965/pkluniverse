@@ -46,6 +46,12 @@ export default function OnboardingPage() {
             </div>
           </Link>
         </div>
+
+        <div className="onboarding-choice-page__footer">
+          <Link className="button button--ghost" to="/">
+            Back to Homepage
+          </Link>
+        </div>
       </section>
     </div>
   );

@@ -130,6 +130,12 @@ textarea {
   max-width: none;
 }
 
+.onboarding-choice-page__footer {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.75rem;
+}
+
 .card,
 .mini-card,
 .state-panel {
