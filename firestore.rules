@@ -152,6 +152,7 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'availableDays',
           'dupr',
+          'duprId',
           'firstName',
           'fullName',
           'headshotPath',

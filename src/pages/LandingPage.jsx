@@ -1,13 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import clubTileImage from '../../club_tile.png';
-import clubDirectoryImage from '../../club_directory.png';
 import createTeamImage from '../../create_team.png';
 import heroShot from '../../hero_shot.png';
 import joinTeamImage from '../../join_team.png';
 import loginNowImage from '../../login_now.png';
 import pklUniverseWideLogo from '../../pkl_universe_wide_logo.png';
-import teamDirectoryImage from '../../team_directory.png';
 import teamHubAvailImage from '../../team_hub_avail.png';
 import teamHubMatchImage from '../../team_hub_match.png';
 import teamHubNewsImage from '../../team_hub_news.png';
@@ -196,25 +194,6 @@ export default function LandingPage() {
               </button>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section className="marketing-section">
-        <div className="marketing-section__header">
-          <div>
-            <p className="eyebrow">Explore</p>
-            <h2>Browse the PKL Universe</h2>
-          </div>
-        </div>
-
-        <div className="directory-link-grid">
-          <Link className="directory-link-card" aria-label="Browse the club directory" to="/club-directory">
-            <img alt="Club Directory" className="directory-link-card__image" src={clubDirectoryImage} />
-          </Link>
-
-          <Link className="directory-link-card" aria-label="Browse the team directory" to="/team-directory">
-            <img alt="Team Directory" className="directory-link-card__image" src={teamDirectoryImage} />
-          </Link>
         </div>
       </section>
 

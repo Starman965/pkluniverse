@@ -666,6 +666,7 @@ function createEmptyRosterForm() {
     active: true,
     availableDays: [],
     dupr: '',
+    duprId: '',
     firstName: '',
     headshotFile: null,
     lastName: '',
@@ -681,6 +682,7 @@ function createRosterFormFromPlayer(player) {
     active: player.active !== false,
     availableDays: Array.isArray(player.availableDays) ? player.availableDays : [],
     dupr: typeof player.dupr === 'number' ? String(player.dupr) : '',
+    duprId: player.duprId ?? '',
     firstName: player.firstName ?? '',
     headshotFile: null,
     lastName: player.lastName ?? '',
@@ -1688,13 +1690,23 @@ export function ProfilePage() {
             </label>
             <div className="player-admin-form__row">
               <label className="field">
-                <span>DUPR</span>
+                <span>DUPR Rating</span>
                 <input
                   onChange={(event) => setForm((current) => ({ ...current, dupr: event.target.value }))}
                   placeholder="x.xxx"
                   value={form.dupr}
                 />
               </label>
+              <label className="field">
+                <span>DUPR ID</span>
+                <input
+                  onChange={(event) => setForm((current) => ({ ...current, duprId: event.target.value }))}
+                  placeholder="i.e. ABCD1Z"
+                  value={form.duprId}
+                />
+              </label>
+            </div>
+            <div className="player-admin-form__row">
               <label className="field">
                 <span>Skill level</span>
                 <select
@@ -2036,13 +2048,23 @@ export function RosterPage() {
                   </label>
                   <div className="player-admin-form__row">
                     <label className="field">
-                      <span>DUPR</span>
+                      <span>DUPR Rating</span>
                       <input
                         onChange={(event) => setEditForm((current) => ({ ...current, dupr: event.target.value }))}
                         placeholder="x.xxx"
                         value={editForm.dupr}
                       />
                     </label>
+                    <label className="field">
+                      <span>DUPR ID</span>
+                      <input
+                        onChange={(event) => setEditForm((current) => ({ ...current, duprId: event.target.value }))}
+                        placeholder="i.e. ABCD1Z"
+                        value={editForm.duprId}
+                      />
+                    </label>
+                  </div>
+                  <div className="player-admin-form__row">
                     <label className="field">
                       <span>Skill level</span>
                       <select
