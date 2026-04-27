@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import AppShell from './components/AppShell';
 import ProtectedRoute from './components/ProtectedRoute';
 import { useAuth } from './context/AuthContext';
-import { readOnboardingIntent } from './lib/onboardingIntent';
+import { clearOnboardingIntent, readOnboardingIntent } from './lib/onboardingIntent';
 import LandingPage from './pages/LandingPage';
 import AuthPage from './pages/AuthPage';
 import ClubDirectoryPage from './pages/ClubDirectoryPage';
@@ -42,7 +42,14 @@ function PendingOnboardingIntentRedirect() {
     }
 
     const intent = readOnboardingIntent();
-    const targetPath = intent?.mode === 'create' ? '/create' : intent?.mode === 'join' ? '/join' : '';
+    const hasCreateIntent = intent?.mode === 'create' && Boolean(intent.teamName?.trim());
+    const hasJoinIntent = intent?.mode === 'join' && (intent.joinCode ?? '').trim().length === 5;
+    const targetPath = hasCreateIntent ? '/create' : hasJoinIntent ? '/join' : '';
+
+    if (intent?.mode && !targetPath) {
+      clearOnboardingIntent();
+      return;
+    }
 
     if (targetPath && location.pathname !== targetPath) {
       navigate(targetPath, { replace: true });

@@ -54,7 +54,8 @@ export default function TeamEntryPage({ mode }) {
   const [busyAction, setBusyAction] = useState('');
   const [memberships, setMemberships] = useState([]);
   const entryValue = mode === 'create' ? teamName.trim() : joinCode.trim();
-  const canSubmit = Boolean(entryValue);
+  const joinCodeIsValid = mode !== 'join' || entryValue.length === 5;
+  const canSubmit = Boolean(entryValue) && joinCodeIsValid;
 
   const loadMemberships = useCallback(async () => {
     if (!user?.uid || !isFirebaseConfigured) {
@@ -139,9 +140,17 @@ export default function TeamEntryPage({ mode }) {
     }
 
     if (mode === 'join' && intent.joinCode) {
-      setJoinCode(intent.joinCode);
       clearOnboardingIntent();
-      submitJoinTeam(intent.joinCode);
+      const nextJoinCode = intent.joinCode.trim().toUpperCase();
+
+      if (nextJoinCode.length !== 5) {
+        setJoinCode(nextJoinCode);
+        setErrorMessage('Enter the 5-character team code.');
+        return;
+      }
+
+      setJoinCode(nextJoinCode);
+      submitJoinTeam(nextJoinCode);
     }
   }, [busyAction, isAuthenticated, loading, mode]);
 
@@ -151,6 +160,12 @@ export default function TeamEntryPage({ mode }) {
     if (!entryValue) {
       setStatusMessage('');
       setErrorMessage(mode === 'create' ? 'Enter a team name first.' : 'Enter a join code first.');
+      return;
+    }
+
+    if (mode === 'join' && !joinCodeIsValid) {
+      setStatusMessage('');
+      setErrorMessage('Enter the 5-character team code.');
       return;
     }
 
@@ -201,6 +216,7 @@ export default function TeamEntryPage({ mode }) {
                     : setJoinCode(event.target.value.trim().toUpperCase())
                 }
                 placeholder={content.placeholder}
+                maxLength={mode === 'join' ? 5 : undefined}
                 required
                 type="text"
                 value={mode === 'create' ? teamName : joinCode}
