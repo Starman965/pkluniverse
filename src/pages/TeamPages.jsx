@@ -2391,12 +2391,23 @@ export function ScheduleScoresPage() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(createEmptyScheduleAdminForm());
   const [teamName, setTeamName] = useState('');
+  const [activeTab, setActiveTab] = useState('upcoming');
 
   const canManage = canManageRole(membership?.role);
   const teamScoreLabel = `${teamName || 'Team'} score`;
   const isEditorOpen = editorMode === 'add' || editorMode === 'edit';
   const isEditing = editorMode === 'edit';
   const editingGame = isEditing ? games.find((game) => game.id === editingGameId) ?? null : null;
+  const todayDateKey = useMemo(() => getTodayDateKey(), []);
+  const upcomingGames = useMemo(
+    () => games.filter((game) => !gameBelongsInPast(game, todayDateKey)),
+    [games, todayDateKey],
+  );
+  const pastGames = useMemo(
+    () => games.filter((game) => gameBelongsInPast(game, todayDateKey)),
+    [games, todayDateKey],
+  );
+  const visibleGames = activeTab === 'past' ? pastGames : upcomingGames;
 
   async function loadScheduleData() {
     const [gameData, membershipData, teamData] = await Promise.all([
@@ -2682,42 +2693,65 @@ export function ScheduleScoresPage() {
             ) : null}
 
             {games.length > 0 ? (
-              <div className="schedule-admin-match-grid">
-                {games.map((game) => {
-                  const hasScore = game.teamScore !== null || game.opponentScore !== null;
+              <>
+                <div className="availability-tabs" aria-label="Schedule admin views">
+                  <button
+                    className={`availability-tabs__button ${activeTab === 'upcoming' ? 'availability-tabs__button--active' : ''}`}
+                    onClick={() => setActiveTab('upcoming')}
+                    type="button"
+                  >
+                    Upcoming ({upcomingGames.length})
+                  </button>
+                  <button
+                    className={`availability-tabs__button ${activeTab === 'past' ? 'availability-tabs__button--active' : ''}`}
+                    onClick={() => setActiveTab('past')}
+                    type="button"
+                  >
+                    Past ({pastGames.length})
+                  </button>
+                </div>
 
-                  return (
-                    <article key={game.id} className="schedule-match-card schedule-admin-match-card">
-                      <p className="schedule-match-card__date">{formatMatchDateLabel(game)}</p>
-                      <h2 className="schedule-match-card__title">
-                        VS. {game.opponent || 'Opponent TBD'}
-                      </h2>
-                      <span>
-                        {game.timeLabel || 'Time TBD'} {game.timeLabel ? '·' : ''}{' '}
-                        {game.location || 'Location TBD'}
-                      </span>
-                      <div className="schedule-match-card__stats">
-                        <span>Status: {game.matchStatus === 'completed' ? 'Completed' : 'Scheduled'}</span>
-                        <span>{game.playersNeeded ?? 8} Players</span>
-                        <span>
-                          {hasScore
-                            ? `${teamName || 'Team'} ${game.teamScore ?? '-'} · Opponent ${game.opponentScore ?? '-'}`
-                            : 'Score not entered'}
-                        </span>
-                      </div>
-                      <div className="schedule-admin-match-card__actions">
-                        <button
-                          className="choice-button"
-                          onClick={() => openEditEditor(game)}
-                          type="button"
-                        >
-                          Edit
-                        </button>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
+                {visibleGames.length > 0 ? (
+                  <div className="schedule-admin-match-grid">
+                    {visibleGames.map((game) => {
+                      const hasScore = game.teamScore !== null || game.opponentScore !== null;
+
+                      return (
+                        <article key={game.id} className="schedule-match-card schedule-admin-match-card">
+                          <p className="schedule-match-card__date">{formatMatchDateLabel(game)}</p>
+                          <h2 className="schedule-match-card__title">
+                            VS. {game.opponent || 'Opponent TBD'}
+                          </h2>
+                          <span>
+                            {game.timeLabel || 'Time TBD'} {game.timeLabel ? '·' : ''}{' '}
+                            {game.location || 'Location TBD'}
+                          </span>
+                          <div className="schedule-match-card__stats">
+                            <span>Status: {game.matchStatus === 'completed' ? 'Completed' : 'Scheduled'}</span>
+                            <span>{game.playersNeeded ?? 8} Players</span>
+                            <span>
+                              {hasScore
+                                ? `${teamName || 'Team'} ${game.teamScore ?? '-'} · Opponent ${game.opponentScore ?? '-'}`
+                                : 'Score not entered'}
+                            </span>
+                          </div>
+                          <div className="schedule-admin-match-card__actions">
+                            <button
+                              className="choice-button"
+                              onClick={() => openEditEditor(game)}
+                              type="button"
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p>{activeTab === 'past' ? 'No past matches yet.' : 'No upcoming matches yet.'}</p>
+                )}
+              </>
             ) : (
               <p>No matchups saved yet. Use Add Match to create the first one.</p>
             )}
@@ -2944,6 +2978,7 @@ export function RosterMgmtPage() {
 
   const canManage = canManageRole(membership?.role);
   const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
+  const todayDateKey = useMemo(() => getTodayDateKey(), []);
 
   async function loadPairingsData() {
     const [gameData, playerData, membershipData] = await Promise.all([
@@ -2951,17 +2986,18 @@ export function RosterMgmtPage() {
       listPlayers(clubSlug, teamSlug),
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
+    const upcomingGameData = gameData.filter((game) => !gameBelongsInPast(game, todayDateKey));
 
-    setGames(gameData);
+    setGames(upcomingGameData);
     setPlayers(playerData);
     setMembership(membershipData);
-    setPairingDrafts(buildPairingDrafts(gameData));
+    setPairingDrafts(buildPairingDrafts(upcomingGameData));
     setSelectedGameId((current) => {
-      if (current && gameData.some((game) => game.id === current)) {
+      if (current && upcomingGameData.some((game) => game.id === current)) {
         return current;
       }
 
-      return gameData[0]?.id ?? '';
+      return upcomingGameData[0]?.id ?? '';
     });
   }
 
@@ -2969,7 +3005,7 @@ export function RosterMgmtPage() {
     loadPairingsData().catch((loadError) => {
       setError(loadError.message ?? 'Unable to load matchup pairings yet.');
     });
-  }, [clubSlug, teamSlug, user?.uid]);
+  }, [clubSlug, teamSlug, todayDateKey, user?.uid]);
 
   const activeGame = games.find((game) => game.id === selectedGameId) ?? games[0] ?? null;
   const playersNeeded = activeGame?.playersNeeded ?? 8;
@@ -3193,7 +3229,7 @@ export function RosterMgmtPage() {
             })}
           </div>
         ) : (
-          <p>No matches are available for roster building yet.</p>
+          <p>No upcoming matches are available for roster building yet.</p>
         )}
       </section>
 
@@ -5900,6 +5936,11 @@ export function SettingsPage() {
                   <button className="button settings-admin-save-button" disabled={saving} type="submit">
                     {saving ? 'Saving settings...' : 'Save Settings'}
                   </button>
+                </div>
+                <div className="settings-admin-logo-prompt">
+                  <strong>Need help with a team logo?</strong>
+                  <p>Copy and paste this into ChatGPT or your favorite AI image generator.</p>
+                  <pre>{`Create a 512 x 512 square team logo for a pickleball team named "${form.teamName || 'Team Name'}". Use a bold sports logo style, clean vector look, strong contrast, transparent or simple dark background, and make it readable as a small app icon. Avoid tiny text and avoid photo-realistic details.`}</pre>
                 </div>
               </div>
             </form>
