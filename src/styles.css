@@ -1736,18 +1736,6 @@ ul {
   justify-content: space-between;
 }
 
-.pairing-chip__dupr {
-  flex: 0 0 auto;
-  padding: 0.26rem 0.48rem;
-  border: 1px solid rgba(126, 161, 255, 0.2);
-  border-radius: 999px;
-  background: rgba(126, 161, 255, 0.1);
-  color: #d8e7ff !important;
-  font-size: 0.72rem !important;
-  font-weight: 900;
-  letter-spacing: 0.03em;
-}
-
 .pairing-chip span {
   color: #9fb6d8;
   font-size: 0.9rem;
@@ -3540,16 +3528,6 @@ ul {
   font-weight: 800;
 }
 
-.game-roster-player-card__dupr {
-  justify-self: start;
-  padding: 0.35rem 0.55rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #dfe7f4;
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
 .schedule-match-card {
   display: grid;
   gap: 0.85rem;
@@ -4394,15 +4372,6 @@ ul {
 
 .team-member-card__stat--skill > span {
   color: #bacaff;
-}
-
-.team-member-card__stat--dupr {
-  background: rgba(45, 212, 191, 0.1);
-  border-color: rgba(45, 212, 191, 0.18);
-}
-
-.team-member-card__stat--dupr > span {
-  color: #9ff4e8;
 }
 
 .team-member-card__stat--win-rate {

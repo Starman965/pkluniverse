@@ -2821,8 +2821,6 @@ export async function listPlayers(clubSlug, teamSlug) {
     return {
       active: data.active !== false,
       availableDays: normalizeAvailableDays(data.availableDays),
-      dupr: normalizeNullableNumber(data.dupr),
-      duprId: data.duprId ?? '',
       email: data.email ?? '',
       firstName,
       fullName: data.fullName ?? buildFullName(firstName, lastName),
@@ -2846,8 +2844,6 @@ export async function savePlayer({
   active = true,
   availableDays = [],
   clubSlug,
-  dupr,
-  duprId = '',
   firstName,
   headshotFile = null,
   lastName,
@@ -2897,8 +2893,6 @@ export async function savePlayer({
   const payload = {
     active,
     availableDays: normalizeAvailableDays(availableDays),
-    dupr: normalizeNullableNumber(dupr),
-    duprId: duprId.trim(),
     firstName: trimmedFirstName,
     fullName,
     lastName: trimmedLastName,

@@ -458,10 +458,6 @@ function formatPlayerWinRate(record) {
   return `${Math.round((record.wins / gamesPlayed) * 100)}%`;
 }
 
-function formatDupr(value) {
-  return typeof value === 'number' ? value.toFixed(3) : 'TBD';
-}
-
 function getTodayDateKey() {
   const today = new Date();
   const year = today.getFullYear();
@@ -501,18 +497,10 @@ function getGameRosterBadge(game, todayDateKey) {
 function buildRosterPairings(game, players) {
   return buildPairingSummary(game, players).pairings
     .filter((pairing) => pairing.players.length > 0)
-    .map((pairing) => {
-      const teamDupr = pairing.players.reduce(
-        (total, player) => (typeof player.dupr === 'number' ? total + player.dupr : total),
-        0,
-      );
-
-      return {
-        ...pairing,
-        filledSlots: pairing.players.length,
-        teamDupr,
-      };
-    });
+    .map((pairing) => ({
+      ...pairing,
+      filledSlots: pairing.players.length,
+    }));
 }
 
 function formatNewsPostDate(post) {
@@ -608,9 +596,6 @@ function TrashIcon() {
 
 function MemberStatIcon({ type }) {
   const icons = {
-    dupr: (
-      <path d="M5 18h14v2H5v-2zm1-2 3.2-9 3.1 5 2.4-3.1L18 16H6zm3.6-5.1L8.2 15h6.8l-1-2.1-1.9 2.4-2.5-4.4z" />
-    ),
     games: (
       <path d="M7 3h10v3h3v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6h3V3zm2 3h6V5H9v1zm-3 3v10h12V9H6zm2 2h3v3H8v-3zm5 0h3v3h-3v-3z" />
     ),
@@ -665,8 +650,6 @@ function createEmptyRosterForm() {
   return {
     active: true,
     availableDays: [],
-    dupr: '',
-    duprId: '',
     firstName: '',
     headshotFile: null,
     lastName: '',
@@ -681,8 +664,6 @@ function createRosterFormFromPlayer(player) {
   return {
     active: player.active !== false,
     availableDays: Array.isArray(player.availableDays) ? player.availableDays : [],
-    dupr: typeof player.dupr === 'number' ? String(player.dupr) : '',
-    duprId: player.duprId ?? '',
     firstName: player.firstName ?? '',
     headshotFile: null,
     lastName: player.lastName ?? '',
@@ -1295,7 +1276,6 @@ export function TeamMembersPage() {
         active: player.active !== false,
         fullName: player.fullName || 'Unnamed player',
         gamesPlayedCount: countGamesPlayed(games, player.id),
-        dupr: formatDupr(player.dupr),
         headshotUrl: player.headshotUrl ?? '',
         initials: buildPlayerInitials(player.fullName || 'Unnamed player'),
         isPendingLink: false,
@@ -1321,7 +1301,6 @@ export function TeamMembersPage() {
         active: member.status === 'active',
         fullName: member.uid === user?.uid ? user?.displayName || 'You' : 'Pending roster link',
         gamesPlayedCount: 0,
-        dupr: 'TBD',
         headshotUrl: '',
         initials: buildPlayerInitials(
           member.uid === user?.uid ? user?.displayName || 'You' : 'Pending roster link',
@@ -1397,10 +1376,6 @@ export function TeamMembersPage() {
                   <span className="team-member-card__stat team-member-card__stat--skill">
                     <span><MemberStatIcon type="skill" /> Skill</span>
                     <strong>{entry.skillLevel}</strong>
-                  </span>
-                  <span className="team-member-card__stat team-member-card__stat--dupr">
-                    <span><MemberStatIcon type="dupr" /> DUPR</span>
-                    <strong>{entry.dupr}</strong>
                   </span>
                   <span className="team-member-card__stat team-member-card__stat--win-rate">
                     <span><MemberStatIcon type="winRate" /> Win Rate</span>
@@ -1688,24 +1663,6 @@ export function ProfilePage() {
                 value={form.phone}
               />
             </label>
-            <div className="player-admin-form__row">
-              <label className="field">
-                <span>DUPR Rating</span>
-                <input
-                  onChange={(event) => setForm((current) => ({ ...current, dupr: event.target.value }))}
-                  placeholder="x.xxx"
-                  value={form.dupr}
-                />
-              </label>
-              <label className="field">
-                <span>DUPR ID</span>
-                <input
-                  onChange={(event) => setForm((current) => ({ ...current, duprId: event.target.value }))}
-                  placeholder="i.e. ABCD1Z"
-                  value={form.duprId}
-                />
-              </label>
-            </div>
             <div className="player-admin-form__row">
               <label className="field">
                 <span>Skill level</span>
@@ -2048,24 +2005,6 @@ export function RosterPage() {
                   </label>
                   <div className="player-admin-form__row">
                     <label className="field">
-                      <span>DUPR Rating</span>
-                      <input
-                        onChange={(event) => setEditForm((current) => ({ ...current, dupr: event.target.value }))}
-                        placeholder="x.xxx"
-                        value={editForm.dupr}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>DUPR ID</span>
-                      <input
-                        onChange={(event) => setEditForm((current) => ({ ...current, duprId: event.target.value }))}
-                        placeholder="i.e. ABCD1Z"
-                        value={editForm.duprId}
-                      />
-                    </label>
-                  </div>
-                  <div className="player-admin-form__row">
-                    <label className="field">
                       <span>Skill level</span>
                       <select
                         onChange={(event) =>
@@ -2357,7 +2296,7 @@ export function SchedulePage() {
                           <div className="game-roster-pair-card__header">
                             <div className="game-roster-pair-card__title-row">
                               <strong>{pairing.courtLabel}</strong>
-                              <span>Team DUPR: {formatDupr(pairing.teamDupr)}</span>
+                              <span>{pairing.filledSlots} players assigned</span>
                             </div>
                             <span className="game-roster-pair-card__count">{pairing.filledSlots}/2</span>
                           </div>
@@ -2374,9 +2313,6 @@ export function SchedulePage() {
                                     <span>In {pairing.courtLabel}</span>
                                   </div>
                                 </div>
-                                <span className="game-roster-player-card__dupr">
-                                  DUPR {formatDupr(player.dupr)}
-                                </span>
                               </article>
                             ))}
                           </div>
@@ -2884,7 +2820,7 @@ export function GameRostersPage() {
             <p className="eyebrow">Team view</p>
             <h1>Game Rosters</h1>
             <p className="game-rosters-page__copy">
-              See the saved pairings for each matchup and compare the DUPR weight of every team.
+              See the saved pairings for each matchup and review who is assigned to each court.
             </p>
           </div>
         </div>
@@ -2948,7 +2884,7 @@ export function GameRostersPage() {
                     <div className="game-roster-pair-card__header">
                       <div className="game-roster-pair-card__title-row">
                         <strong>{pairing.courtLabel}</strong>
-                        <span>Team DUPR: {formatDupr(pairing.teamDupr)}</span>
+                        <span>{pairing.filledSlots} players assigned</span>
                       </div>
                       <span className="game-roster-pair-card__count">{pairing.filledSlots}/2</span>
                     </div>
@@ -2965,9 +2901,6 @@ export function GameRostersPage() {
                               <span>In {pairing.courtLabel}</span>
                             </div>
                           </div>
-                          <span className="game-roster-player-card__dupr">
-                            DUPR {formatDupr(player.dupr)}
-                          </span>
                         </article>
                       ))}
                     </div>
@@ -3290,9 +3223,6 @@ export function RosterMgmtPage() {
                       >
                         <div className="pairing-chip__header">
                           <strong>{player.fullName || 'Unnamed player'}</strong>
-                          <span className="pairing-chip__dupr">
-                            DUPR {formatDupr(player.dupr)}
-                          </span>
                         </div>
                         <span>
                           {attendanceStatus}
