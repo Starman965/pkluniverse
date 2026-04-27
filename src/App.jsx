@@ -16,6 +16,7 @@ import {
   AvailabilityPage,
   ChallengesPage,
   ClubAffiliationAdminPage,
+  ClubTeamsPage,
   GameRostersPage,
   HelpFeedbackPage,
   NewsPage,
@@ -104,6 +105,7 @@ export default function App() {
         >
           <Route element={<Navigate replace to="news" />} index />
           <Route element={<TeamMembersPage />} path="team" />
+          <Route element={<ClubTeamsPage />} path="club-teams" />
           <Route element={<ProfilePage />} path="profile" />
           <Route element={<RosterPage />} path="roster" />
           <Route element={<RosterPage />} path="player-mgmt" />

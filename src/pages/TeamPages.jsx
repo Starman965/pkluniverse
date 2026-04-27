@@ -937,6 +937,144 @@ export function HelpFeedbackPage() {
   );
 }
 
+function formatClubTeamsClubName(clubSlug) {
+  if (!clubSlug) {
+    return 'your club';
+  }
+
+  return clubSlug.replace(/-/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function buildClubTeamCaptainNames(members, players) {
+  const playerMap = new Map(players.map((player) => [player.id, player]));
+
+  return members
+    .filter((member) => member.role === 'captain' || member.role === 'coCaptain')
+    .map((member) => playerMap.get(member.playerId)?.fullName || member.uid)
+    .filter(Boolean);
+}
+
+export function ClubTeamsPage() {
+  const { clubSlug, teamSlug } = useParams();
+  const [currentTeam, setCurrentTeam] = useState(null);
+  const [clubTeams, setClubTeams] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadClubTeams() {
+      const teamData = await getTeam(clubSlug, teamSlug);
+      const approvedClubSlug = teamData?.approvedClubSlug ?? '';
+
+      if (!teamData || teamData.affiliationStatus !== 'approved' || !approvedClubSlug || approvedClubSlug === 'independent') {
+        setCurrentTeam(teamData);
+        setClubTeams([]);
+        return;
+      }
+
+      const approvedTeams = await listApprovedClubTeams(approvedClubSlug);
+      const enrichedTeams = await Promise.all(
+        approvedTeams.map(async (clubTeam) => {
+          const [members, players] = await Promise.all([
+            listTeamMembers(clubTeam.clubSlug, clubTeam.teamSlug).catch(() => []),
+            listPlayers(clubTeam.clubSlug, clubTeam.teamSlug).catch(() => []),
+          ]);
+
+          return {
+            ...clubTeam,
+            captainNames: buildClubTeamCaptainNames(members, players),
+            memberCount: members.length,
+          };
+        }),
+      );
+
+      if (!ignore) {
+        setCurrentTeam(teamData);
+        setClubTeams(enrichedTeams);
+      }
+    }
+
+    setLoading(true);
+    setError('');
+    loadClubTeams()
+      .catch((loadError) => {
+        if (!ignore) {
+          setCurrentTeam(null);
+          setClubTeams([]);
+          setError(loadError.message ?? 'Unable to load club teams yet.');
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [clubSlug, teamSlug]);
+
+  const approvedClubSlug = currentTeam?.approvedClubSlug ?? '';
+  const clubName = formatClubTeamsClubName(approvedClubSlug);
+
+  return (
+    <div className="page-grid club-teams-page">
+      <section className="card">
+        <p className="eyebrow">Club teams</p>
+        <h1>{approvedClubSlug ? `${clubName} teams` : 'Club Teams'}</h1>
+        <p className="club-teams-page__copy">
+          See the other teams playing in your club network. These are the teams your roster can follow, compete with,
+          and challenge as your club&apos;s team-vs-team play grows.
+        </p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+
+        {loading ? (
+          <div className="state-panel">
+            <p>Loading club teams...</p>
+          </div>
+        ) : currentTeam?.affiliationStatus !== 'approved' || !approvedClubSlug || approvedClubSlug === 'independent' ? (
+          <div className="notice notice--info">
+            This team is not connected to a club yet. Once it is approved for a club, the other club teams will appear here.
+          </div>
+        ) : clubTeams.length > 0 ? (
+          <div className="membership-list club-teams-page__list">
+            {clubTeams.map((clubTeam) => {
+              const isCurrentTeam = clubTeam.clubSlug === clubSlug && clubTeam.teamSlug === teamSlug;
+
+              return (
+                <article
+                  key={`${clubTeam.clubSlug}-${clubTeam.teamSlug}`}
+                  className={`membership-card ${isCurrentTeam ? 'membership-card--active' : ''}`}
+                >
+                  <img
+                    alt={`${clubTeam.name} logo`}
+                    className="membership-card__logo"
+                    src={clubTeam.logoUrl || defaultTeamLogo}
+                  />
+                  <div className="membership-card__content">
+                    <strong>{clubTeam.name}{isCurrentTeam ? ' (your team)' : ''}</strong>
+                    <span>
+                      Captain: {clubTeam.captainNames?.length ? clubTeam.captainNames.join(', ') : 'TBD'}
+                    </span>
+                    <span>Members: {clubTeam.memberCount ?? 0}</span>
+                    <span>Location: {clubTeam.primaryLocation || 'Not set'}</span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <p>No other approved teams are connected to this club yet.</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export function TeamMembersPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();

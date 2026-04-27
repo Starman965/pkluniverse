@@ -279,6 +279,44 @@ textarea {
   color: #c9d7ea;
 }
 
+.marketing-info-card {
+  display: grid;
+  gap: 1.1rem;
+  grid-template-columns: minmax(240px, 0.78fr) minmax(0, 1fr);
+  align-items: center;
+  max-width: 1040px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(240, 193, 75, 0.12), transparent 36%),
+    rgba(9, 17, 30, 0.78);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24);
+  padding: 1.25rem;
+}
+
+.marketing-info-card__image {
+  display: block;
+  width: 100%;
+  border-radius: 18px;
+  border: 1px solid rgba(126, 161, 255, 0.16);
+  object-fit: cover;
+}
+
+.marketing-info-card__content {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.marketing-info-card h2,
+.marketing-info-card p {
+  margin: 0;
+}
+
+.marketing-info-card p {
+  max-width: 72ch;
+  color: #c9d7ea;
+}
+
 .marketing-action-grid {
   display: grid;
   gap: 1rem;
@@ -326,6 +364,150 @@ textarea {
 
 .marketing-action-card__body span {
   color: #9fb6d8;
+}
+
+.team-hub-preview-card {
+  display: grid;
+  width: min(100%, 900px);
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  border-radius: 24px;
+  background: rgba(9, 17, 30, 0.78);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24);
+  color: inherit;
+  overflow: hidden;
+}
+
+.team-hub-preview-card__image-button {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: zoom-in;
+  padding: 0;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.team-hub-preview-card__image-button:hover,
+.team-hub-preview-card__image-button:focus-visible {
+  transform: translateY(-2px);
+  outline: none;
+}
+
+.team-hub-preview-card__image {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: cover;
+  object-position: top center;
+}
+
+.team-hub-preview-card__copy {
+  color: #c9d7ea;
+  font-weight: 800;
+}
+
+.team-hub-preview-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1.1rem 1.05rem;
+}
+
+.team-hub-preview-card__controls {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.team-hub-preview-card__controls button {
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #d7e2f0;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 0.42rem 0.68rem;
+}
+
+.team-hub-preview-card__controls button:hover,
+.team-hub-preview-card__controls button:focus-visible {
+  border-color: rgba(255, 209, 102, 0.32);
+  background: rgba(255, 209, 102, 0.12);
+  color: #f0c14b;
+  outline: none;
+}
+
+.team-hub-preview-card__dots {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.team-hub-preview-card__dots button {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  padding: 0;
+}
+
+.team-hub-preview-card__dots .team-hub-preview-card__dot--active {
+  background: #f0c14b;
+  border-color: rgba(255, 209, 102, 0.48);
+}
+
+.marketing-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+}
+
+.marketing-lightbox__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(3, 8, 15, 0.82);
+  cursor: pointer;
+}
+
+.marketing-lightbox__panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.75rem;
+  width: min(100%, 1100px);
+  max-height: 92vh;
+  border: 1px solid rgba(126, 161, 255, 0.22);
+  border-radius: 24px;
+  background: #08111d;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.46);
+  overflow: auto;
+  padding: 0.85rem;
+}
+
+.marketing-lightbox__toolbar,
+.marketing-lightbox__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.marketing-lightbox__toolbar strong {
+  color: #f0c14b;
+}
+
+.marketing-lightbox__panel img {
+  display: block;
+  width: 100%;
+  border-radius: 18px;
 }
 
 .directory-link-grid {
@@ -979,6 +1161,11 @@ ul {
   outline: none;
 }
 
+.membership-card--active {
+  border-color: rgba(255, 209, 102, 0.34);
+  background: rgba(255, 209, 102, 0.08);
+}
+
 .membership-card__logo {
   width: 96px;
   height: 96px;
@@ -999,6 +1186,19 @@ ul {
 .detail-card span {
   color: #9fb6d8;
   font-size: 0.9rem;
+}
+
+.club-teams-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.club-teams-page__copy {
+  max-width: 68ch;
+  color: #c9d7ea;
+}
+
+.club-teams-page__list {
+  margin-top: 1rem;
 }
 
 .entity-list {
@@ -4038,6 +4238,10 @@ code {
 
   .hero__top-nav {
     justify-content: start;
+  }
+
+  .marketing-info-card {
+    grid-template-columns: 1fr;
   }
 
   .site-footer {

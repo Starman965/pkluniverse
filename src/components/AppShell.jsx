@@ -16,6 +16,7 @@ import pklUniverseWideLogo from '../../pkl_universe_wide_logo.png';
 const primaryRoutes = [
   { label: 'News Feed', to: 'news' },
   { label: 'The Team', to: 'team' },
+  { label: 'Club Teams', requiresApprovedClub: true, to: 'club-teams' },
   { label: 'Team Matches', to: 'schedule' },
   { label: 'Team Standing', to: 'team-standing' },
   { label: 'My Profile', to: 'profile' },
@@ -206,6 +207,11 @@ export default function AppShell() {
   const canManage = canManageRole(currentMembership?.role);
   const teamLogo = activeTeam?.logoUrl || defaultTeamLogo;
   const teamTitle = activeTeam?.name ?? 'PKL Universe';
+  const isApprovedClubTeam =
+    activeTeam?.affiliationStatus === 'approved' &&
+    activeTeam?.approvedClubSlug &&
+    activeTeam.approvedClubSlug !== 'independent';
+  const visiblePrimaryRoutes = primaryRoutes.filter((route) => !route.requiresApprovedClub || isApprovedClubTeam);
   const signedInLabel =
     currentMembership?.role === 'coCaptain'
       ? 'Signed In: Co-captain'
@@ -248,7 +254,7 @@ export default function AppShell() {
         <nav className="sidebar__nav">
           <div className="sidebar__nav-group">
             <p className="sidebar__nav-heading">Player</p>
-            {primaryRoutes.map((route) => (
+            {visiblePrimaryRoutes.map((route) => (
               <NavLink
                 key={route.label}
                 className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`}

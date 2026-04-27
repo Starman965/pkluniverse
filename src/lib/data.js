@@ -1977,11 +1977,16 @@ export async function listApprovedClubTeams(clubSlug) {
           logoUrl: data.logoUrl ?? '',
           name: data.name ?? entry.id,
           primaryLocation: data.primaryLocation ?? '',
+          status: data.status ?? 'active',
             teamSlug,
         };
       })
-      .filter((team) => team.affiliationStatus === 'approved' && team.approvedClubSlug === clubSlug)
-      .map(({ affiliationStatus, approvedClubSlug, ...team }) => team);
+      .filter((team) =>
+        team.affiliationStatus === 'approved' &&
+        team.approvedClubSlug === clubSlug &&
+        team.status === 'active'
+      )
+      .map(({ affiliationStatus, approvedClubSlug, status, ...team }) => team);
   }
 
   let teams = [];
