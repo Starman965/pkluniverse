@@ -1,39 +1,13 @@
-import { useEffect, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { listMemberships } from '../lib/data';
+import createTeamImage from '../../create_team.png';
+import joinTeamImage from '../../join_team.png';
 
 export default function OnboardingPage() {
-  const { isFirebaseConfigured, user } = useAuth();
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
-  const [memberships, setMemberships] = useState([]);
 
   const requestedMode = searchParams.get('mode');
-
-  useEffect(() => {
-    if (!user?.uid || !isFirebaseConfigured) {
-      setMemberships([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    listMemberships(user.uid)
-      .then((items) => {
-        if (!cancelled) {
-          setMemberships(items);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setMemberships([]);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isFirebaseConfigured, user?.uid]);
 
   if (requestedMode === 'create') {
     return <Navigate replace to="/create" />;
@@ -44,50 +18,34 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="page-grid">
-      <section className="card">
-        <p className="eyebrow">Choose your path</p>
-        <h1>How would you like to get started?</h1>
-        <p className="marketing-section__copy">
-          Create a new team if you are the captain, or join a team if someone already sent you a code.
+    <div className="auth-page page-grid onboarding-choice-page">
+      <section className="card onboarding-choice-card">
+        <p className="eyebrow">Signed in</p>
+        <h1>Welcome to PKL Universe</h1>
+        <p className="marketing-section__copy onboarding-choice-page__copy">
+          {user?.displayName || user?.email
+            ? `Signed in as ${user.displayName || user.email}, but you're not associated with a team. `
+            : "You're signed in, but you're not associated with a team. "}
+          You can now create a team or join a roster by asking your captain for the team&apos;s invite code.
         </p>
 
-        <div className="stack">
-          <Link className="button" to="/create">
-            Create a Team
+        <div className="marketing-action-grid">
+          <Link className="marketing-action-card" to="/create">
+            <img alt="Create a team" className="marketing-action-card__image" src={createTeamImage} />
+            <div className="marketing-action-card__body">
+              <strong>Create a Team</strong>
+              <span>Pick a name and create a team hub for your teammates in one click.</span>
+            </div>
           </Link>
-          <Link className="button button--ghost" to="/join">
-            Join a Team
-          </Link>
-          <Link className="button button--ghost" to="/auth">
-            Log In
-          </Link>
-          <Link className="button button--ghost" rel="noreferrer" target="_blank" to="/admin">
-            App Admin
+
+          <Link className="marketing-action-card" to="/join">
+            <img alt="Join a team" className="marketing-action-card__image" src={joinTeamImage} />
+            <div className="marketing-action-card__body">
+              <strong>Join a Team</strong>
+              <span>Ask your team captain for the invite code to get added to your team hub.</span>
+            </div>
           </Link>
         </div>
-      </section>
-
-      <section className="card">
-        <p className="eyebrow">{memberships.length > 0 ? 'Already on a team' : 'Quick help'}</p>
-        {memberships.length > 0 ? (
-          <div className="stack">
-            <h2>Open one of your teams</h2>
-            <p>You already have access to PKL Universe, so you can jump straight back in.</p>
-            <Link className="button button--ghost" to="/teams">
-              Open team chooser
-            </Link>
-          </div>
-        ) : (
-          <div className="stack">
-            <h2>Not sure which one to pick?</h2>
-            <ul className="feature-list">
-              <li>Create a Team if you are setting up the team and inviting players.</li>
-              <li>Join a Team if a captain already gave you a code.</li>
-              <li>Log In if you have used PKL Universe before.</li>
-            </ul>
-          </div>
-        )}
       </section>
     </div>
   );

@@ -5599,7 +5599,11 @@ export function SettingsPage() {
     setMembership(membershipData);
     setForm(createEmptyTeamSettingsForm(teamData?.name ?? '', teamData?.primaryLocation ?? ''));
     setRequestedClubSlug(
-      teamData?.requestedClubSlug || teamData?.approvedClubSlug || clubData[0]?.slug || '',
+      teamData?.affiliationStatus === 'pending'
+        ? teamData?.requestedClubSlug || ''
+        : teamData?.affiliationStatus === 'approved'
+          ? teamData?.approvedClubSlug || ''
+          : '',
     );
     replaceLogoPreview('');
 
@@ -5960,11 +5964,20 @@ export function SettingsPage() {
           <div className="schedule-admin-card__header">
             <div>
               <p className="eyebrow">Club affiliation</p>
-              <h2>{team?.affiliationStatus === 'approved' ? 'Connected to club' : 'Join a club network'}</h2>
+              <h2>{team?.affiliationStatus === 'approved' ? 'Connected to your club' : 'Affiliate Your Team to a Club'}</h2>
               <p>
                 {team?.affiliationStatus === 'approved'
-                  ? 'This team is already approved and listed with its club.'
-                  : 'Request approval so this team can appear with other teams in a club.'}
+                  ? 'This team is listed with its club and can be found by other club teams.'
+                  : (
+                    <>
+                      If your team is a member of a club within the PKL Universe, select the club and click &quot;Request Club
+                      Affiliation.&quot; If your club is not listed, send an email to{' '}
+                      <a href="mailto:demandgendave@gmail.com?subject=Add%20my%20club%20to%20PKL%20Universe">
+                        demandgendave@gmail.com
+                      </a>{' '}
+                      to have your club added.
+                    </>
+                  )}
               </p>
             </div>
           </div>
@@ -5984,27 +5997,14 @@ export function SettingsPage() {
             </div>
           ) : canManageActiveTeam ? (
             <div className="schedule-admin-form settings-admin-form">
-              <div className="settings-club-status">
-                <span className="status-badge">
-                  {team?.affiliationStatus === 'pending'
-                    ? 'Pending'
-                    : team?.affiliationStatus === 'rejected'
-                      ? 'Rejected'
-                      : 'Independent'}
-                </span>
-                <p>
-                  {team?.requestedClubSlug
-                    ? `Request sent to ${team.requestedClubSlug}.`
-                    : 'Pick a club and send a request when this team is ready.'}
-                </p>
-              </div>
               <label className="field">
-                <span>Club</span>
+                <span>Choose your club</span>
                 <select
                   disabled={team?.affiliationStatus === 'pending'}
                   onChange={(event) => setRequestedClubSlug(event.target.value)}
                   value={requestedClubSlug}
                 >
+                  <option value="">Select your club</option>
                   {!clubOptions.length ? <option value="">No clubs available yet</option> : null}
                   {clubOptions.map((club) => (
                     <option key={club.slug} value={club.slug}>
@@ -6024,11 +6024,11 @@ export function SettingsPage() {
                 onClick={handleRequestClubAffiliation}
                 type="button"
               >
-                {requestingAffiliation ? 'Submitting request...' : 'Request affiliation'}
+                {requestingAffiliation ? 'Sending request...' : 'Request Club Affiliation'}
               </button>
               {team?.affiliationStatus === 'pending' ? (
                 <div className="notice notice--info">
-                  Request sent. An app admin or club admin needs to approve it.
+                  Request sent. A PKL Universe admin or club admin will review it.
                 </div>
               ) : null}
             </div>
