@@ -43,7 +43,7 @@ function PendingOnboardingIntentRedirect() {
 
     const intent = readOnboardingIntent();
     const hasCreateIntent = intent?.mode === 'create' && Boolean(intent.teamName?.trim());
-    const hasJoinIntent = intent?.mode === 'join' && (intent.joinCode ?? '').trim().length === 5;
+    const hasJoinIntent = intent?.mode === 'join' && (intent.joinCode ?? '').trim().length === 7;
     const targetPath = hasCreateIntent ? '/create' : hasJoinIntent ? '/join' : '';
 
     if (intent?.mode && !targetPath) {

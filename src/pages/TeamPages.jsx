@@ -1220,6 +1220,7 @@ export function TeamMembersPage() {
   const [games, setGames] = useState([]);
   const [membership, setMembership] = useState(null);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
     let ignore = false;
@@ -1326,6 +1327,40 @@ export function TeamMembersPage() {
 
   const rosterPlayerCount = teamCards.filter((entry) => !entry.isPendingLink).length;
   const teamTitle = team?.name ? `The ${team.name} Team` : 'The Team';
+  const inviteLink = team?.joinCode
+    ? `${window.location.origin}${window.location.pathname}#/join?code=${encodeURIComponent(team.joinCode)}`
+    : '';
+
+  async function handleCopyInviteLink() {
+    if (!inviteLink) {
+      setError('No invite link is available yet.');
+      setMessage('');
+      return;
+    }
+
+    setError('');
+    setMessage('');
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(inviteLink);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = inviteLink;
+        textArea.setAttribute('readonly', '');
+        textArea.style.position = 'absolute';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+
+      setMessage('Invite link copied.');
+    } catch (copyError) {
+      setError(copyError.message ?? 'Unable to copy the invite link.');
+    }
+  }
 
   return (
     <div className="page-grid team-members-page">
@@ -1342,6 +1377,7 @@ export function TeamMembersPage() {
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
 
         {teamCards.length > 0 ? (
           <div className="team-members-grid">
@@ -1392,6 +1428,28 @@ export function TeamMembersPage() {
         ) : (
           <p>No players are on the team yet.</p>
         )}
+
+        <div className="team-members-invite-strip">
+          <p>Add other players by sharing the team join code, or the entire link.</p>
+          <div className="team-members-invite-strip__details">
+            <div className="team-members-invite-strip__item">
+              <span>Join code</span>
+              <strong>{team?.joinCode ?? 'Not available yet'}</strong>
+            </div>
+            <div className="team-members-invite-strip__item team-members-invite-strip__item--link">
+              <span>Invite link</span>
+              <code>{inviteLink || 'Not available yet'}</code>
+            </div>
+            <button
+              className="button team-members-invite-strip__button"
+              disabled={!inviteLink}
+              onClick={handleCopyInviteLink}
+              type="button"
+            >
+              Copy Invite Link
+            </button>
+          </div>
+        </div>
       </section>
 
     </div>
