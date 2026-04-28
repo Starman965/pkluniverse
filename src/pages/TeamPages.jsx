@@ -53,6 +53,7 @@ import {
   updateTeamMemberRole,
   updateTeamSettings,
 } from '../lib/data';
+import blackhawkPickleballCourts from '../../blackhawk_pickleball_courts.png';
 import defaultTeamLogo from '../../default_team_logo.png';
 
 function canManageRole(role) {
@@ -1094,6 +1095,7 @@ function buildClubTeamCaptainNames(members, players) {
 export function ClubTeamsPage() {
   const { clubSlug, teamSlug } = useParams();
   const [currentTeam, setCurrentTeam] = useState(null);
+  const [approvedClub, setApprovedClub] = useState(null);
   const [clubTeams, setClubTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -1107,11 +1109,15 @@ export function ClubTeamsPage() {
 
       if (!teamData || teamData.affiliationStatus !== 'approved' || !approvedClubSlug || approvedClubSlug === 'independent') {
         setCurrentTeam(teamData);
+        setApprovedClub(null);
         setClubTeams([]);
         return;
       }
 
-      const approvedTeams = await listApprovedClubTeams(approvedClubSlug);
+      const [approvedTeams, clubs] = await Promise.all([
+        listApprovedClubTeams(approvedClubSlug),
+        listClubs().catch(() => []),
+      ]);
       const enrichedTeams = await Promise.all(
         approvedTeams.map(async (clubTeam) => {
           const [members, players] = await Promise.all([
@@ -1129,6 +1135,7 @@ export function ClubTeamsPage() {
 
       if (!ignore) {
         setCurrentTeam(teamData);
+        setApprovedClub(clubs.find((club) => club.slug === approvedClubSlug) ?? null);
         setClubTeams(enrichedTeams);
       }
     }
@@ -1139,6 +1146,7 @@ export function ClubTeamsPage() {
       .catch((loadError) => {
         if (!ignore) {
           setCurrentTeam(null);
+          setApprovedClub(null);
           setClubTeams([]);
           setError(loadError.message ?? 'Unable to load club teams yet.');
         }
@@ -1155,16 +1163,32 @@ export function ClubTeamsPage() {
   }, [clubSlug, teamSlug]);
 
   const approvedClubSlug = currentTeam?.approvedClubSlug ?? '';
-  const clubName = formatClubTeamsClubName(approvedClubSlug);
+  const clubName = approvedClub?.name ?? formatClubTeamsClubName(approvedClubSlug);
+  const clubLogo = approvedClub?.logoUrl || currentTeam?.logoUrl || defaultTeamLogo;
+  const canShowClubInformation = currentTeam?.affiliationStatus === 'approved' && approvedClubSlug && approvedClubSlug !== 'independent';
 
   return (
     <div className="page-grid club-teams-page">
       <section className="card">
-        <p className="eyebrow">Club teams</p>
-        <h1>{approvedClubSlug ? `${clubName} teams` : 'Club Teams'}</h1>
-        <p className="club-teams-page__copy">
-          See the other teams playing in your club network. These are the teams you can challenge.
-        </p>
+        <div className="club-teams-page__header">
+          <div className="club-teams-page__intro">
+            <p className="eyebrow">Club teams</p>
+            <h1>{approvedClubSlug ? `${clubName} teams` : 'Club Teams'}</h1>
+            <p className="club-teams-page__copy">
+              See the other teams playing in your club network. These are the teams you can challenge.
+            </p>
+          </div>
+
+          {canShowClubInformation ? (
+            <Link className="club-teams-page__info-card" to="../club-central">
+              <img alt={`${clubName} logo`} src={clubLogo} />
+              <span>
+                <strong>Club Information</strong>
+                <small>Pickleball Club News and Information</small>
+              </span>
+            </Link>
+          ) : null}
+        </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
 
@@ -1205,6 +1229,166 @@ export function ClubTeamsPage() {
           </div>
         ) : (
           <p>No other approved teams are connected to this club yet.</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+export function ClubCentralPage() {
+  const { clubSlug, teamSlug } = useParams();
+  const [team, setTeam] = useState(null);
+  const [club, setClub] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadClubCentral() {
+      const teamData = await getTeam(clubSlug, teamSlug);
+      const approvedClubSlug =
+        teamData?.affiliationStatus === 'approved' && teamData?.approvedClubSlug !== 'independent'
+          ? teamData.approvedClubSlug
+          : '';
+      const clubs = approvedClubSlug ? await listClubs().catch(() => []) : [];
+
+      if (!ignore) {
+        setTeam(teamData);
+        setClub(clubs.find((clubItem) => clubItem.slug === approvedClubSlug) ?? null);
+      }
+    }
+
+    setLoading(true);
+    setError('');
+    loadClubCentral()
+      .catch((loadError) => {
+        if (!ignore) {
+          setTeam(null);
+          setClub(null);
+          setError(loadError.message ?? 'Unable to load club information yet.');
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [clubSlug, teamSlug]);
+
+  const approvedClubSlug = team?.approvedClubSlug ?? '';
+  const clubName = club?.name ?? formatClubTeamsClubName(approvedClubSlug);
+  const clubLogo = club?.logoUrl || team?.logoUrl || defaultTeamLogo;
+  const hasApprovedClub = team?.affiliationStatus === 'approved' && approvedClubSlug && approvedClubSlug !== 'independent';
+  const cityStateZip = [club?.city, club?.state, club?.zip].filter(Boolean).join(', ');
+  const hasClubDetails = Boolean(club?.address || cityStateZip || club?.numberOfCourts);
+
+  return (
+    <div className="page-grid club-central-page">
+      <section className="card club-central-page__card">
+        <div className="club-central-page__hero">
+          <img alt={`${clubName} logo`} className="club-central-page__logo" src={clubLogo} />
+          <div>
+            <p className="eyebrow">Club Central</p>
+            <h1>{hasApprovedClub ? clubName : 'Club Information'}</h1>
+            <p>Pickleball Club News and Information</p>
+          </div>
+        </div>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+
+        {loading ? (
+          <div className="state-panel">
+            <p>Loading club information...</p>
+          </div>
+        ) : hasApprovedClub ? (
+          <div className="club-central-page__content">
+            <div className="club-central-page__details-card">
+              <div>
+                <p className="eyebrow">Club Details</p>
+                <h2>{clubName}</h2>
+              </div>
+
+              {hasClubDetails ? (
+                <div className="club-central-page__details-grid">
+                  {club?.address ? (
+                    <div>
+                      <span>Address</span>
+                      <strong>{club.address}</strong>
+                    </div>
+                  ) : null}
+
+                  {cityStateZip ? (
+                    <div>
+                      <span>Location</span>
+                      <strong>{cityStateZip}</strong>
+                    </div>
+                  ) : null}
+
+                  {club?.numberOfCourts ? (
+                    <div>
+                      <span>Courts</span>
+                      <strong>{club.numberOfCourts}</strong>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <p>Club profile details can be managed from App Admin.</p>
+              )}
+            </div>
+
+            <div className="club-central-page__intro-card">
+              <h2>Pickleball</h2>
+              <p>
+                The Professional Tennis Staff at Blackhawk is dedicated to providing a Pickleball program that gives
+                players of all levels a positive and constructive experience that will increase their love of pickleball
+                for a lifetime. Our goal is for the players to improve their game and their fitness, while making it fun
+                and social for everyone.
+              </p>
+            </div>
+
+            <div className="club-central-page__image-card">
+              <img alt="Blackhawk Sports Complex Pickleball court map" src={blackhawkPickleballCourts} />
+            </div>
+
+            <div className="club-central-page__section">
+              <h3>Current Pickleball Offerings:</h3>
+
+              <article className="club-central-page__offering">
+                <h4>Introduction to Pickleball</h4>
+                <p>What: Beginners</p>
+                <p>Where: Sports Complex</p>
+                <p>When: Check newsletter for latest courses</p>
+                <p>Cost: $100 for 4 sessions ($25 per session)</p>
+              </article>
+
+              <article className="club-central-page__offering">
+                <h4>Drop-In</h4>
+                <p>What: All levels are welcome</p>
+                <p>Where: Sports Complex</p>
+                <p>When: Mondays 5:00-7:00 pm, Wednesdays 9:00-11:00 am, and Sundays 9:00-11:00 am</p>
+              </article>
+            </div>
+
+            <div className="club-central-page__callout">
+              <p>
+                Additional Information: No prior experience necessary. Equipment will be provided for those who are new
+                to the game.
+              </p>
+              <p>
+                Registration: Registration is open to all golf, tennis, and sports complex adult members. For more info
+                contact Bryn Powell at bpowell@blackhawkcc.org.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="notice notice--info">
+            This team is not connected to an approved club yet.
+          </div>
         )}
       </section>
     </div>

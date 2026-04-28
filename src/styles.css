@@ -1351,15 +1351,229 @@ ul {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.club-teams-page__header {
+  display: flex;
+  gap: 1.25rem;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.club-teams-page__intro h1,
+.club-teams-page__intro p {
+  margin: 0;
+}
+
 .club-teams-page__copy {
   color: #c9d7ea;
   white-space: nowrap;
+}
+
+.club-teams-page__info-card {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: center;
+  width: min(100%, 330px);
+  padding: 0.65rem;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(240, 193, 75, 0.12), transparent 42%),
+    rgba(255, 255, 255, 0.045);
+  color: #dce9fb;
+  text-decoration: none;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.club-teams-page__info-card:hover,
+.club-teams-page__info-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(240, 193, 75, 0.32);
+  background:
+    radial-gradient(circle at top left, rgba(240, 193, 75, 0.18), transparent 42%),
+    rgba(255, 255, 255, 0.07);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
+  outline: none;
+}
+
+.club-teams-page__info-card img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  padding: 0.35rem;
+  border-radius: 14px;
+  background: rgba(3, 8, 20, 0.46);
+}
+
+.club-teams-page__info-card span {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.club-teams-page__info-card strong {
+  color: #ffffff;
+}
+
+.club-teams-page__info-card small {
+  color: #9fb6d8;
+  line-height: 1.35;
 }
 
 .club-teams-page__list {
   grid-template-columns: repeat(auto-fit, minmax(300px, 360px));
   justify-content: start;
   margin-top: 1rem;
+}
+
+.club-central-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.club-central-page__card {
+  max-width: 920px;
+}
+
+.club-central-page__hero {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.club-central-page__hero h1,
+.club-central-page__hero p {
+  margin: 0;
+}
+
+.club-central-page__hero p:not(.eyebrow) {
+  color: #c9d7ea;
+}
+
+.club-central-page__logo {
+  width: 96px;
+  height: 96px;
+  border-radius: 18px;
+  background:
+    linear-gradient(145deg, rgba(8, 17, 29, 0.96) 0%, rgba(12, 24, 40, 0.96) 100%);
+  box-shadow: inset 0 0 0 1px rgba(126, 161, 255, 0.2);
+  object-fit: contain;
+  padding: 0.45rem;
+}
+
+.club-central-page__content {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 0.75rem;
+}
+
+.club-central-page__details-card,
+.club-central-page__intro-card,
+.club-central-page__image-card,
+.club-central-page__section,
+.club-central-page__callout {
+  display: grid;
+  gap: 0.9rem;
+  border-radius: 18px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  padding: clamp(1rem, 2vw, 1.4rem);
+}
+
+.club-central-page__details-card h2,
+.club-central-page__details-card p {
+  margin: 0;
+}
+
+.club-central-page__details-card h2 {
+  color: #ffffff;
+}
+
+.club-central-page__details-card > p {
+  color: #c9d7ea;
+}
+
+.club-central-page__details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.8rem;
+}
+
+.club-central-page__details-grid div {
+  display: grid;
+  gap: 0.2rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  padding: 0.85rem;
+}
+
+.club-central-page__details-grid span {
+  color: #9fb6d8;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.club-central-page__details-grid strong {
+  color: #ffffff;
+}
+
+.club-central-page__image-card {
+  overflow: hidden;
+  padding: 0.75rem;
+}
+
+.club-central-page__image-card img {
+  width: 100%;
+  border-radius: 12px;
+  display: block;
+}
+
+.club-central-page__intro-card h2,
+.club-central-page__section h3,
+.club-central-page__offering h4,
+.club-central-page__intro-card p,
+.club-central-page__offering p,
+.club-central-page__callout p {
+  margin: 0;
+}
+
+.club-central-page__intro-card h2 {
+  color: #ffffff;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.club-central-page__intro-card p,
+.club-central-page__offering p {
+  color: #dce9fb;
+  line-height: 1.65;
+}
+
+.club-central-page__section h3 {
+  color: #ffffff;
+  font-size: clamp(1.2rem, 2vw, 1.6rem);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.club-central-page__offering {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.club-central-page__offering h4,
+.club-central-page__callout {
+  color: #f0c14b;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.club-central-page__callout {
+  line-height: 1.7;
 }
 
 .standings-page {
@@ -4567,6 +4781,10 @@ ul {
 }
 
 @media (max-width: 1120px) {
+  .club-teams-page__header {
+    flex-direction: column;
+  }
+
   .club-teams-page__copy,
   .standings-page__copy,
   .roster-builder-hero__copy,
