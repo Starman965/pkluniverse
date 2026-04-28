@@ -18,7 +18,7 @@ const primaryRoutes = [
   { label: 'Team Members', to: 'team' },
   { label: 'Team Matches', to: 'schedule' },
   { label: 'Team Standing', to: 'team-standing' },
-  { label: 'Club Hub', requiresApprovedClub: true, to: 'club-central' },
+  { label: 'Club Hub', requiresApprovedClub: true, to: 'club-teams' },
   { label: 'My Profile', to: 'profile' },
 ];
 
