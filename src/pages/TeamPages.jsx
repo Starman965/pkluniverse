@@ -1094,7 +1094,10 @@ function buildClubTeamCaptainNames(members, players) {
 
 export function ClubTeamsPage() {
   const { clubSlug, teamSlug } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const [currentTeam, setCurrentTeam] = useState(null);
+  const [membership, setMembership] = useState(null);
   const [approvedClub, setApprovedClub] = useState(null);
   const [clubTeams, setClubTeams] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1104,11 +1107,15 @@ export function ClubTeamsPage() {
     let ignore = false;
 
     async function loadClubTeams() {
-      const teamData = await getTeam(clubSlug, teamSlug);
+      const [teamData, membershipData] = await Promise.all([
+        getTeam(clubSlug, teamSlug),
+        user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
+      ]);
       const approvedClubSlug = teamData?.approvedClubSlug ?? '';
 
       if (!teamData || teamData.affiliationStatus !== 'approved' || !approvedClubSlug || approvedClubSlug === 'independent') {
         setCurrentTeam(teamData);
+        setMembership(membershipData);
         setApprovedClub(null);
         setClubTeams([]);
         return;
@@ -1135,6 +1142,7 @@ export function ClubTeamsPage() {
 
       if (!ignore) {
         setCurrentTeam(teamData);
+        setMembership(membershipData);
         setApprovedClub(clubs.find((club) => club.slug === approvedClubSlug) ?? null);
         setClubTeams(enrichedTeams);
       }
@@ -1146,6 +1154,7 @@ export function ClubTeamsPage() {
       .catch((loadError) => {
         if (!ignore) {
           setCurrentTeam(null);
+          setMembership(null);
           setApprovedClub(null);
           setClubTeams([]);
           setError(loadError.message ?? 'Unable to load club teams yet.');
@@ -1160,12 +1169,28 @@ export function ClubTeamsPage() {
     return () => {
       ignore = true;
     };
-  }, [clubSlug, teamSlug]);
+  }, [clubSlug, teamSlug, user]);
 
   const approvedClubSlug = currentTeam?.approvedClubSlug ?? '';
   const clubName = approvedClub?.name ?? formatClubTeamsClubName(approvedClubSlug);
   const clubLogo = approvedClub?.logoUrl || currentTeam?.logoUrl || defaultTeamLogo;
   const canShowClubInformation = currentTeam?.affiliationStatus === 'approved' && approvedClubSlug && approvedClubSlug !== 'independent';
+  const canChallengeClubTeams = canManageRole(membership?.role);
+
+  function handleChallengeTeam(clubTeam) {
+    const confirmed = window.confirm(`Challenge ${clubTeam.name}?`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    navigate('../challenges', {
+      state: {
+        challengeTargetTeamKey: `${clubTeam.clubSlug}:${clubTeam.teamSlug}`,
+        challengeTargetTeamName: clubTeam.name,
+      },
+    });
+  }
 
   return (
     <div className="page-grid club-teams-page">
@@ -1204,11 +1229,25 @@ export function ClubTeamsPage() {
           <div className="membership-list club-teams-page__list">
             {clubTeams.map((clubTeam) => {
               const isCurrentTeam = clubTeam.clubSlug === clubSlug && clubTeam.teamSlug === teamSlug;
+              const canChallengeTeam = canChallengeClubTeams && !isCurrentTeam;
 
               return (
                 <article
                   key={`${clubTeam.clubSlug}-${clubTeam.teamSlug}`}
-                  className={`membership-card ${isCurrentTeam ? 'membership-card--active' : ''}`}
+                  className={`membership-card ${isCurrentTeam ? 'membership-card--active' : ''} ${canChallengeTeam ? 'membership-card--actionable' : ''}`}
+                  onClick={canChallengeTeam ? () => handleChallengeTeam(clubTeam) : undefined}
+                  onKeyDown={
+                    canChallengeTeam
+                      ? (event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            handleChallengeTeam(clubTeam);
+                          }
+                        }
+                      : undefined
+                  }
+                  role={canChallengeTeam ? 'button' : undefined}
+                  tabIndex={canChallengeTeam ? 0 : undefined}
                 >
                   <img
                     alt={`${clubTeam.name} logo`}
@@ -1222,6 +1261,7 @@ export function ClubTeamsPage() {
                     </span>
                     <span>Members: {clubTeam.memberCount ?? 0}</span>
                     <span>Location: {clubTeam.primaryLocation || 'Not set'}</span>
+                    {canChallengeTeam ? <span className="membership-card__action">Click to challenge this team</span> : null}
                   </div>
                 </article>
               );
@@ -5113,6 +5153,7 @@ function getChallengeStatusLabel(challenge) {
 
 export function ChallengesPage() {
   const { clubSlug, teamSlug } = useParams();
+  const location = useLocation();
   const { user } = useAuth();
   const [team, setTeam] = useState(null);
   const [membership, setMembership] = useState(null);
@@ -5127,8 +5168,11 @@ export function ChallengesPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [postedChallengeTab, setPostedChallengeTab] = useState('proposed');
+  const [appliedChallengeTargetKey, setAppliedChallengeTargetKey] = useState('');
 
   const canManage = canManageRole(membership?.role);
+  const challengeTargetTeamKey = location.state?.challengeTargetTeamKey ?? '';
+  const challengeTargetTeamName = location.state?.challengeTargetTeamName ?? '';
   const challengeClubSlug =
     team?.affiliationStatus === 'approved' && team?.approvedClubSlug ? team.approvedClubSlug : '';
   const challengeSubmitDisabled = saving || (form.visibility === 'targeted' && !form.targetTeamKey);
@@ -5198,6 +5242,37 @@ export function ChallengesPage() {
       ignore = true;
     };
   }, [clubSlug, teamSlug, user?.uid]);
+
+  useEffect(() => {
+    if (!challengeTargetTeamKey || appliedChallengeTargetKey === challengeTargetTeamKey || loading || !canManage) {
+      return;
+    }
+
+    const matchingTargetTeam = eligibleTeams.find(
+      (eligibleTeam) => `${eligibleTeam.clubSlug}:${eligibleTeam.teamSlug}` === challengeTargetTeamKey,
+    );
+
+    if (!matchingTargetTeam) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      targetTeamKey: challengeTargetTeamKey,
+      visibility: 'targeted',
+    }));
+    setEditingChallengeId('');
+    setError('');
+    setMessage(`Challenge form started for ${challengeTargetTeamName || matchingTargetTeam.name}.`);
+    setAppliedChallengeTargetKey(challengeTargetTeamKey);
+  }, [
+    appliedChallengeTargetKey,
+    canManage,
+    challengeTargetTeamKey,
+    challengeTargetTeamName,
+    eligibleTeams,
+    loading,
+  ]);
 
   async function handleCreateChallenge(event) {
     event.preventDefault();

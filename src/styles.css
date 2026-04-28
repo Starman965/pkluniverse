@@ -1325,6 +1325,10 @@ ul {
   background: rgba(255, 209, 102, 0.08);
 }
 
+.membership-card--actionable {
+  cursor: pointer;
+}
+
 .membership-card__logo {
   width: 96px;
   height: 96px;
@@ -1345,6 +1349,11 @@ ul {
 .detail-card span {
   color: #9fb6d8;
   font-size: 0.9rem;
+}
+
+.membership-card__action {
+  color: #f0c14b;
+  font-weight: 700;
 }
 
 .club-teams-page {
