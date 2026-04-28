@@ -86,6 +86,10 @@ service cloud.firestore {
           'team.created',
           'teamMember.joined',
           'clubAffiliation.requested',
+          'challenge.created',
+          'challenge.cancelled',
+          'challenge.accepted',
+          'challenge.matchRemoved',
         ]
         && request.resource.data.captainEmail is string
         && request.resource.data.captainEmails is string
@@ -265,6 +269,24 @@ service cloud.firestore {
         ]);
     }
 
+    function safeAcceptedChallengeMatchCancel() {
+      return resource.data.status == 'accepted'
+        && request.resource.data.status == 'cancelled'
+        && (
+          isManager(resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
+          || isManager(resource.data.acceptedByTeamClubSlug, resource.data.acceptedByTeamSlug)
+        )
+        && request.resource.data.homeGameId == ''
+        && request.resource.data.awayGameId == ''
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'awayGameId',
+          'cancelledAt',
+          'homeGameId',
+          'status',
+          'updatedAt',
+        ]);
+    }
+
     function safeChallengeEdit(clubId) {
       return resource.data.status == 'open'
         && request.resource.data.status == 'open'
@@ -377,6 +399,28 @@ service cloud.firestore {
         );
     }
 
+    function challengeGameHasResult() {
+      return resource.data.matchStatus == 'completed'
+        || (resource.data.keys().hasAny(['teamScore']) && resource.data.teamScore is number)
+        || (resource.data.keys().hasAny(['opponentScore']) && resource.data.opponentScore is number);
+    }
+
+    function safeManagerGameDelete(clubId, teamId) {
+      return isManager(clubId, teamId)
+        && (
+          resource.data.source != 'challenge'
+          || !challengeGameHasResult()
+        );
+    }
+
+    function safeLinkedChallengeGameDelete() {
+      return resource.data.source == 'challenge'
+        && !challengeGameHasResult()
+        && resource.data.linkedTeamClubSlug is string
+        && resource.data.linkedTeamSlug is string
+        && isManager(resource.data.linkedTeamClubSlug, resource.data.linkedTeamSlug);
+    }
+
     match /adminNotifications/{notificationId} {
       allow read, delete: if isPlatformAdmin();
       allow create: if safeAdminNotificationCreate();
@@ -450,7 +494,8 @@ service cloud.firestore {
         allow update: if safeChallengeAccept(clubId)
           || safeChallengeEdit(clubId)
           || safeChallengeDecline()
-          || safeChallengeCancel();
+          || safeChallengeCancel()
+          || safeAcceptedChallengeMatchCancel();
         allow delete: if isPlatformAdmin();
       }
 
@@ -563,7 +608,7 @@ service cloud.firestore {
             || isPlatformAdmin()
             || safeSelfAvailabilityUpdate(clubId, teamId)
             || safeSelfRosterRemoval(clubId, teamId);
-          allow delete: if isManager(clubId, teamId) || isPlatformAdmin();
+          allow delete: if isPlatformAdmin() || safeManagerGameDelete(clubId, teamId) || safeLinkedChallengeGameDelete();
         }
 
         match /newsPosts/{postId} {

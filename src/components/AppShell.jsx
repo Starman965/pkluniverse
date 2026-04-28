@@ -23,8 +23,8 @@ const primaryRoutes = [
 ];
 
 const adminRoutes = [
-  { label: 'Find a Match', to: 'challenges' },
-  { label: 'Schedule a Match', to: 'schedule-scores' },
+  { label: 'Club Challenges', to: 'challenges' },
+  { label: 'Manage Matches', to: 'schedule-scores' },
   { label: 'Build Rosters', to: 'roster-mgmt' },
   { label: 'Manage Players', to: 'player-mgmt' },
   { label: 'Team Settings', to: 'settings' },

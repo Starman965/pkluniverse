@@ -28,9 +28,9 @@ const TEAM_HUB_PREVIEWS = [
     label: 'Team Matches',
   },
   {
-    alt: 'PKL Universe match request preview',
+    alt: 'PKL Universe club challenge preview',
     image: teamHubMatchImage,
-    label: 'Find a Match',
+    label: 'Club Challenges',
   },
 ];
 

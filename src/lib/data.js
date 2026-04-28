@@ -2260,7 +2260,7 @@ export async function createChallenge({
   const challengeClubSlug = sourceTeam.approvedClubSlug ?? '';
 
   if ((sourceTeam.status ?? 'active') !== 'active') {
-    throw new Error('Archived teams cannot post new match requests.');
+    throw new Error('Archived teams cannot send new challenges.');
   }
 
   if (sourceTeam.affiliationStatus !== 'approved' || !challengeClubSlug || challengeClubSlug === INDEPENDENT_CLUB.slug) {
@@ -2330,6 +2330,42 @@ export async function createChallenge({
     visibility: normalizedVisibility,
   });
 
+  if (normalizedVisibility === 'targeted' && target) {
+    const captainNotificationFields = await getTeamCaptainNotificationFields(target.clubSlug, target.teamSlug);
+    const challengeDateLabel = normalizedDateTbd ? 'Date TBD' : trimmedIsoDate;
+    const challengeTimeLabel = normalizedDateTbd ? 'Time TBD' : trimmedTimeLabel || 'Time TBD';
+    const challengeLocation = trimmedLocation || sourceTeam.primaryLocation || 'Location TBD';
+
+    await createAdminNotification({
+      ...captainNotificationFields,
+      clubSlug: target.clubSlug,
+      message: `${sourceTeam.name ?? teamSlug} challenged ${target.name ?? target.teamSlug} to a match.`,
+      teamName: target.name ?? target.teamSlug,
+      teamSlug: target.teamSlug,
+      title: 'New team challenge',
+      type: 'challenge.created',
+      user,
+      metadata: {
+        challengeClubSlug,
+        challengeId,
+        challengePath: `/c/${target.clubSlug}/t/${target.teamSlug}/challenges`,
+        challengedTeamClubSlug: target.clubSlug,
+        challengedTeamName: target.name ?? target.teamSlug,
+        challengedTeamSlug: target.teamSlug,
+        challengerTeamClubSlug: clubSlug,
+        challengerTeamName: sourceTeam.name ?? teamSlug,
+        challengerTeamSlug: teamSlug,
+        dateLabel: challengeDateLabel,
+        dateTbd: normalizedDateTbd,
+        isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
+        location: challengeLocation,
+        notes: trimmedNotes,
+        playersNeeded: normalizedPlayersNeeded,
+        timeLabel: challengeTimeLabel,
+      },
+    });
+  }
+
   return challengeId;
 }
 
@@ -2373,7 +2409,7 @@ export async function updateChallenge({
   const sourceTeam = sourceTeamSnapshot.exists() ? sourceTeamSnapshot.data() : null;
 
   if (!sourceTeam || (sourceTeam.status ?? 'active') !== 'active') {
-    throw new Error('Archived teams cannot edit match requests.');
+    throw new Error('Archived teams cannot edit challenges.');
   }
 
   const normalizedVisibility = visibility === 'targeted' ? 'targeted' : 'open';
@@ -2615,6 +2651,42 @@ export async function acceptChallenge({ challengeId, challengeClubSlug, clubSlug
   );
 
   await batch.commit();
+
+  const captainNotificationFields = await getTeamCaptainNotificationFields(createdByTeam.clubSlug, createdByTeam.teamSlug);
+
+  await createAdminNotification({
+    ...captainNotificationFields,
+    clubSlug: createdByTeam.clubSlug,
+    message: `${acceptedByTeam.name || acceptedByTeam.teamSlug} accepted the challenge from ${createdByTeam.name || createdByTeam.teamSlug}.`,
+    teamName: createdByTeam.name || createdByTeam.teamSlug,
+    teamSlug: createdByTeam.teamSlug,
+    title: 'Team challenge accepted',
+    type: 'challenge.accepted',
+    user,
+    metadata: {
+      acceptedByTeamClubSlug: acceptedByTeam.clubSlug,
+      acceptedByTeamName: acceptedByTeam.name || acceptedByTeam.teamSlug,
+      acceptedByTeamSlug: acceptedByTeam.teamSlug,
+      challengeClubSlug,
+      challengeId,
+      challengePath: `/c/${createdByTeam.clubSlug}/t/${createdByTeam.teamSlug}/challenges`,
+      challengedTeamClubSlug: acceptedByTeam.clubSlug,
+      challengedTeamName: acceptedByTeam.name || acceptedByTeam.teamSlug,
+      challengedTeamSlug: acceptedByTeam.teamSlug,
+      challengerTeamClubSlug: createdByTeam.clubSlug,
+      challengerTeamName: createdByTeam.name || createdByTeam.teamSlug,
+      challengerTeamSlug: createdByTeam.teamSlug,
+      dateLabel: challenge.dateTbd ? 'Date TBD' : challenge.isoDate || 'Date TBD',
+      dateTbd: challenge.dateTbd,
+      homeGameId,
+      awayGameId,
+      isoDate: challenge.dateTbd ? '' : challenge.isoDate,
+      location: challenge.location || 'Location TBD',
+      notes: challenge.notes || '',
+      playersNeeded: challenge.playersNeeded ?? 8,
+      timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
+    },
+  });
 }
 
 export async function declineChallenge({ challengeId, challengeClubSlug, clubSlug, teamSlug, user }) {
@@ -2674,6 +2746,42 @@ export async function cancelChallenge({ challengeId, challengeClubSlug, clubSlug
     status: 'cancelled',
     updatedAt: serverTimestamp(),
   });
+
+  if (challenge.visibility === 'targeted' && challenge.targetTeamClubSlug && challenge.targetTeamSlug) {
+    const captainNotificationFields = await getTeamCaptainNotificationFields(
+      challenge.targetTeamClubSlug,
+      challenge.targetTeamSlug,
+    );
+
+    await createAdminNotification({
+      ...captainNotificationFields,
+      clubSlug: challenge.targetTeamClubSlug,
+      message: `${challenge.createdByTeamName || challenge.createdByTeamSlug} cancelled their challenge to ${challenge.targetTeamName || challenge.targetTeamSlug}.`,
+      teamName: challenge.targetTeamName || challenge.targetTeamSlug,
+      teamSlug: challenge.targetTeamSlug,
+      title: 'Team challenge cancelled',
+      type: 'challenge.cancelled',
+      user,
+      metadata: {
+        challengeClubSlug,
+        challengeId,
+        challengePath: `/c/${challenge.targetTeamClubSlug}/t/${challenge.targetTeamSlug}/challenges`,
+        challengedTeamClubSlug: challenge.targetTeamClubSlug,
+        challengedTeamName: challenge.targetTeamName || challenge.targetTeamSlug,
+        challengedTeamSlug: challenge.targetTeamSlug,
+        challengerTeamClubSlug: challenge.createdByTeamClubSlug,
+        challengerTeamName: challenge.createdByTeamName || challenge.createdByTeamSlug,
+        challengerTeamSlug: challenge.createdByTeamSlug,
+        dateLabel: challenge.dateTbd ? 'Date TBD' : challenge.isoDate || 'Date TBD',
+        dateTbd: challenge.dateTbd,
+        isoDate: challenge.dateTbd ? '' : challenge.isoDate,
+        location: challenge.location || 'Location TBD',
+        notes: challenge.notes || '',
+        playersNeeded: challenge.playersNeeded ?? 8,
+        timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
+      },
+    });
+  }
 }
 
 export async function rotateTeamJoinCode({ clubSlug, teamSlug }) {
@@ -3132,6 +3240,13 @@ export async function listGames(clubSlug, teamSlug) {
       rosterPlayerIds: normalizePlayerIdList(data.rosterPlayerIds),
       teamScore: normalizeNullableNumber(data.teamScore),
       timeLabel: normalizeTimeLabel(data.timeLabel),
+      challengeClubSlug: data.challengeClubSlug ?? '',
+      challengeId: data.challengeId ?? '',
+      linkedGameId: data.linkedGameId ?? '',
+      linkedTeamClubSlug: data.linkedTeamClubSlug ?? '',
+      linkedTeamName: data.linkedTeamName ?? '',
+      linkedTeamSlug: data.linkedTeamSlug ?? '',
+      source: data.source ?? 'manual',
     };
   });
 
@@ -3217,14 +3332,116 @@ export async function saveGame({
   return nextGameId;
 }
 
-export async function deleteGame({ clubSlug, gameId, teamSlug }) {
+function gameHasScore(game) {
+  return game.matchStatus === 'completed' || game.teamScore !== null || game.opponentScore !== null;
+}
+
+export async function deleteGame({ clubSlug, gameId, teamSlug, user }) {
   requireDb();
 
   if (!gameId) {
     throw new Error('Choose a matchup to delete.');
   }
 
-  await deleteDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', gameId));
+  await requireTeamManager({ clubSlug, teamSlug, user });
+
+  const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', gameId);
+  const gameSnapshot = await getDoc(gameRef);
+
+  if (!gameSnapshot.exists()) {
+    return;
+  }
+
+  const game = {
+    id: gameSnapshot.id,
+    ...gameSnapshot.data(),
+    opponentScore: normalizeNullableNumber(gameSnapshot.data().opponentScore),
+    teamScore: normalizeNullableNumber(gameSnapshot.data().teamScore),
+  };
+
+  if (game.source !== 'challenge') {
+    await deleteDoc(gameRef);
+    return;
+  }
+
+  if (gameHasScore(game)) {
+    throw new Error('Completed challenge matches cannot be deleted. Contact the app admin if this result needs correction.');
+  }
+
+  if (!game.challengeClubSlug || !game.challengeId || !game.linkedGameId || !game.linkedTeamClubSlug || !game.linkedTeamSlug) {
+    throw new Error('This challenge match is missing linked schedule details. Contact the app admin before deleting it.');
+  }
+
+  const linkedGameRef = doc(db, 'clubs', game.linkedTeamClubSlug, 'teams', game.linkedTeamSlug, 'games', game.linkedGameId);
+  const challengeRef = doc(db, 'clubs', game.challengeClubSlug, 'challenges', game.challengeId);
+  const [linkedGameSnapshot, challengeSnapshot] = await Promise.all([
+    getDoc(linkedGameRef),
+    getDoc(challengeRef),
+  ]);
+  const linkedGameData = linkedGameSnapshot.exists() ? linkedGameSnapshot.data() : null;
+
+  if (
+    linkedGameData &&
+    gameHasScore({
+      matchStatus: linkedGameData.matchStatus ?? 'scheduled',
+      opponentScore: normalizeNullableNumber(linkedGameData.opponentScore),
+      teamScore: normalizeNullableNumber(linkedGameData.teamScore),
+    })
+  ) {
+    throw new Error('Completed challenge matches cannot be deleted. Contact the app admin if this result needs correction.');
+  }
+
+  const batch = writeBatch(db);
+  batch.delete(gameRef);
+
+  if (linkedGameSnapshot.exists()) {
+    batch.delete(linkedGameRef);
+  }
+
+  if (challengeSnapshot.exists()) {
+    batch.update(challengeRef, {
+      cancelledAt: serverTimestamp(),
+      homeGameId: '',
+      awayGameId: '',
+      status: 'cancelled',
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  await batch.commit();
+
+  const captainNotificationFields = await getTeamCaptainNotificationFields(game.linkedTeamClubSlug, game.linkedTeamSlug);
+  const teamSnapshot = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug));
+  const teamName = teamSnapshot.exists() ? teamSnapshot.data().name ?? teamSlug : teamSlug;
+
+  await createAdminNotification({
+    ...captainNotificationFields,
+    clubSlug: game.linkedTeamClubSlug,
+    message: `${teamName} removed the accepted challenge match against ${game.linkedTeamName || game.linkedTeamSlug}.`,
+    teamName: game.linkedTeamName || game.linkedTeamSlug,
+    teamSlug: game.linkedTeamSlug,
+    title: 'Challenge match removed',
+    type: 'challenge.matchRemoved',
+    user,
+    metadata: {
+      challengeClubSlug: game.challengeClubSlug,
+      challengeId: game.challengeId,
+      challengePath: `/c/${game.linkedTeamClubSlug}/t/${game.linkedTeamSlug}/challenges`,
+      removedByTeamClubSlug: clubSlug,
+      removedByTeamName: teamName,
+      removedByTeamSlug: teamSlug,
+      affectedTeamClubSlug: game.linkedTeamClubSlug,
+      affectedTeamName: game.linkedTeamName || game.linkedTeamSlug,
+      affectedTeamSlug: game.linkedTeamSlug,
+      gameId,
+      linkedGameId: game.linkedGameId,
+      isoDate: game.dateTbd ? '' : game.isoDate ?? '',
+      location: game.location ?? 'Location TBD',
+      opponent: game.opponent ?? '',
+      playersNeeded: game.playersNeeded ?? 8,
+      timeLabel: game.dateTbd ? 'Time TBD' : game.timeLabel || 'Time TBD',
+    },
+  });
 }
 
 export async function saveGamePairings({

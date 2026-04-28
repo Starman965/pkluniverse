@@ -130,7 +130,7 @@ function createEmptyChallengeForm(primaryLocation = '') {
     period: 'PM',
     playersNeeded: 8,
     targetTeamKey: '',
-    visibility: 'open',
+    visibility: 'targeted',
   };
 }
 
@@ -1040,7 +1040,7 @@ export function HelpFeedbackPage() {
           </div>
           <ul className="help-list">
             <li>Team setup, roster, or player invite questions</li>
-            <li>Match requests, scheduling, scores, or availability issues</li>
+            <li>Club challenges, scheduling, scores, or availability issues</li>
             <li>Club affiliation questions</li>
             <li>Ideas that would make captain work easier</li>
           </ul>
@@ -2512,6 +2512,24 @@ export function ScheduleScoresPage() {
       return;
     }
 
+    const isChallengeMatch = editingGame.source === 'challenge';
+    const hasChallengeResult =
+      editingGame.matchStatus === 'completed' || editingGame.teamScore !== null || editingGame.opponentScore !== null;
+
+    if (isChallengeMatch && hasChallengeResult) {
+      setError('Completed challenge matches cannot be deleted. Contact the app admin if this result needs correction.');
+      return;
+    }
+
+    if (
+      isChallengeMatch &&
+      !window.confirm(
+        "This accepted challenge match will be removed from both teams' schedules, including availability and roster assignments. Continue?",
+      )
+    ) {
+      return;
+    }
+
     setDeleting(true);
     setError('');
     setMessage('');
@@ -2521,8 +2539,9 @@ export function ScheduleScoresPage() {
         clubSlug,
         gameId: editingGame.id,
         teamSlug,
+        user,
       });
-      setMessage('Matchup deleted.');
+      setMessage(isChallengeMatch ? 'Challenge match removed from both team schedules.' : 'Matchup deleted.');
       setForm(createEmptyScheduleAdminForm());
       closeEditor();
       await loadScheduleData();
@@ -2556,9 +2575,9 @@ export function ScheduleScoresPage() {
     <div className="page-grid schedule-admin-page">
       <section className="card">
         <p className="eyebrow">Match admin</p>
-        <h1>Schedule a Match</h1>
+        <h1>Manage Matches</h1>
         <p>
-          Captains and co-captains add scheduled matches here, then record final scores for standings.
+          Manage your team schedule, including manual matches and accepted club challenges.
         </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -2575,8 +2594,8 @@ export function ScheduleScoresPage() {
           <>
             <div className="schedule-admin-toolbar">
               <div>
-                <h2>Scheduled matches</h2>
-                <p>Review the schedule, then add or edit one match at a time.</p>
+                <h2>Team schedule</h2>
+                <p>Review, score, edit, or remove matches from your team's schedule.</p>
               </div>
               <button className="button" onClick={openAddEditor} type="button">
                 Add Match
@@ -2587,11 +2606,11 @@ export function ScheduleScoresPage() {
               <section className="schedule-admin-card schedule-admin-card--editor">
                 <div className="schedule-admin-card__header">
                   <div>
-                    <h2>{isEditing ? `Edit ${editingGame?.opponent || 'match'}` : 'Add Match'}</h2>
+                    <h2>{isEditing ? `Edit ${editingGame?.opponent || 'match'}` : 'Enter Match'}</h2>
                     <p>
                       {isEditing
                         ? 'Update match details and scores.'
-                        : 'Schedule a new match for the live team schedule.'}
+                        : 'Add a league, outside, or already-arranged match to the live team schedule.'}
                     </p>
                   </div>
                   {isEditing && form.timeLabel ? (
@@ -2694,7 +2713,7 @@ export function ScheduleScoresPage() {
                   </div>
                   <div className="schedule-admin-form__actions">
                     <button className="button" disabled={saving} type="submit">
-                      {saving ? 'Saving...' : isEditing ? 'Save Match' : 'Schedule Match'}
+                      {saving ? 'Saving...' : isEditing ? 'Save Match' : 'Enter Match'}
                     </button>
                     <button className="button button--ghost" onClick={closeEditor} type="button">
                       Cancel
@@ -2775,7 +2794,7 @@ export function ScheduleScoresPage() {
                 )}
               </>
             ) : (
-              <p>No matchups saved yet. Use Add Match to create the first one.</p>
+              <p>No matches yet. Use Add Match to add league play or an outside matchup.</p>
             )}
           </>
         ) : (
@@ -4923,10 +4942,12 @@ export function ChallengesPage() {
   const [updatingChallengeId, setUpdatingChallengeId] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [postedChallengeTab, setPostedChallengeTab] = useState('proposed');
 
   const canManage = canManageRole(membership?.role);
   const challengeClubSlug =
     team?.affiliationStatus === 'approved' && team?.approvedClubSlug ? team.approvedClubSlug : '';
+  const challengeSubmitDisabled = saving || (form.visibility === 'targeted' && !form.targetTeamKey);
   const selectedTargetTeam = eligibleTeams.find(
     (eligibleTeam) => `${eligibleTeam.clubSlug}:${eligibleTeam.teamSlug}` === form.targetTeamKey,
   );
@@ -4980,7 +5001,7 @@ export function ChallengesPage() {
     loadChallengeData()
       .catch((loadError) => {
         if (!ignore) {
-          setError(loadError.message ?? 'Unable to load match requests yet.');
+          setError(loadError.message ?? 'Unable to load club challenges yet.');
         }
       })
       .finally(() => {
@@ -5028,10 +5049,10 @@ export function ChallengesPage() {
 
       setForm(createEmptyChallengeForm(team?.primaryLocation ?? ''));
       setEditingChallengeId('');
-      setMessage(editingChallengeId ? 'Match request updated.' : 'Match request posted.');
+      setMessage(editingChallengeId ? 'Challenge updated.' : 'Challenge sent.');
       await loadChallengeData();
     } catch (submitError) {
-      setError(submitError.message ?? 'Unable to save that match request.');
+      setError(submitError.message ?? 'Unable to save that challenge.');
     } finally {
       setSaving(false);
     }
@@ -5063,10 +5084,10 @@ export function ChallengesPage() {
         teamSlug,
         user,
       });
-      setMessage('Match request accepted and added to both schedules.');
+      setMessage('Challenge accepted and added to both schedules.');
       await loadChallengeData();
     } catch (acceptError) {
-      setError(acceptError.message ?? 'Unable to accept that match request.');
+      setError(acceptError.message ?? 'Unable to accept that challenge.');
     } finally {
       setUpdatingChallengeId('');
     }
@@ -5085,10 +5106,10 @@ export function ChallengesPage() {
         teamSlug,
         user,
       });
-      setMessage('Match request declined.');
+      setMessage('Challenge declined.');
       await loadChallengeData();
     } catch (declineError) {
-      setError(declineError.message ?? 'Unable to decline that match request.');
+      setError(declineError.message ?? 'Unable to decline that challenge.');
     } finally {
       setUpdatingChallengeId('');
     }
@@ -5107,10 +5128,10 @@ export function ChallengesPage() {
         teamSlug,
         user,
       });
-      setMessage('Match request cancelled.');
+      setMessage('Challenge cancelled.');
       await loadChallengeData();
     } catch (cancelError) {
-      setError(cancelError.message ?? 'Unable to cancel that match request.');
+      setError(cancelError.message ?? 'Unable to cancel that challenge.');
     } finally {
       setUpdatingChallengeId('');
     }
@@ -5128,7 +5149,7 @@ export function ChallengesPage() {
 
     return (
       <article key={challenge.id} className="challenge-card">
-        <div className="challenge-card__badge">MR</div>
+        <div className="challenge-card__badge">CC</div>
         <div className="challenge-card__body">
           <div className="challenge-card__header">
             <div className="challenge-card__title">
@@ -5173,23 +5194,25 @@ export function ChallengesPage() {
   const postedChallenges = teamChallenges.filter(
     (challenge) => challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug,
   );
-  const acceptedHistoryChallenges = teamChallenges.filter(
-    (challenge) =>
-      challenge.status === 'accepted' &&
-      !(
-        challenge.createdByTeamClubSlug === clubSlug &&
-        challenge.createdByTeamSlug === teamSlug
-      ),
+  const proposedPostedChallenges = postedChallenges.filter((challenge) => challenge.status === 'open');
+  const acceptedPostedChallenges = postedChallenges.filter((challenge) => challenge.status === 'accepted');
+  const closedPostedChallenges = postedChallenges.filter((challenge) =>
+    ['cancelled', 'declined'].includes(challenge.status),
   );
-
+  const visiblePostedChallenges =
+    postedChallengeTab === 'accepted'
+      ? acceptedPostedChallenges
+      : postedChallengeTab === 'closed'
+        ? closedPostedChallenges
+        : proposedPostedChallenges;
   return (
     <div className="page-grid schedule-admin-page">
       <section className="card">
-        <p className="eyebrow">Match requests</p>
-        <h1>Find a Match</h1>
+        <p className="eyebrow">PKL Universe matches</p>
+        <h1>Club Challenges</h1>
         <p>
-          Post an open match request for your club or send one directly to another approved team.
-          Accepted requests become scheduled matches for both teams.
+          Challenge another approved team in your club network. Accepted challenges become scheduled matches for both
+          teams.
         </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -5197,11 +5220,11 @@ export function ChallengesPage() {
 
         {loading ? (
           <div className="state-panel">
-            <p>Loading match requests...</p>
+            <p>Loading club challenges...</p>
           </div>
         ) : !challengeClubSlug ? (
           <div className="notice notice--info">
-            Match requests are available after this team is approved for a club affiliation.
+            Club challenges are available after this team is approved for a club affiliation.
           </div>
         ) : (
           <div className="challenge-page">
@@ -5210,11 +5233,11 @@ export function ChallengesPage() {
                 <div className="schedule-admin-card__header">
                   <div>
                     <p className="eyebrow">{editingChallengeId ? 'Edit' : 'Create'}</p>
-                    <h2>{editingChallengeId ? 'Edit match request' : 'Post a match request'}</h2>
+                    <h2>{editingChallengeId ? 'Edit challenge' : 'Send a challenge'}</h2>
                     <p>
                       {editingChallengeId
-                        ? 'Update this request before another team accepts it.'
-                        : 'Create an open club match request or send one directly to another team.'}
+                        ? 'Update this challenge before another team accepts it.'
+                        : 'Send a challenge directly to another team in your club network.'}
                     </p>
                   </div>
                 </div>
@@ -5226,11 +5249,11 @@ export function ChallengesPage() {
                   <div className="challenge-form__section">
                     <div className="challenge-form__section-copy">
                       <h3>Who do you want to play?</h3>
-                      <p>Post an open match request to the club or send it directly to one team.</p>
+                      <p>Choose a specific team first. Open club challenges are available for broader matching.</p>
                     </div>
                     <div className="challenge-form__audience-row">
                       <label className="field challenge-form__type">
-                        <span>Request type</span>
+                        <span>Challenge type</span>
                         <select
                           onChange={(event) =>
                             setForm((current) => ({
@@ -5241,14 +5264,14 @@ export function ChallengesPage() {
                           }
                           value={form.visibility}
                         >
+                          <option value="targeted">Specific team challenge</option>
                           <option value="open">Open to club</option>
-                          <option value="targeted">Specific team</option>
                         </select>
                       </label>
                       {form.visibility === 'targeted' ? (
                         <div className="field challenge-form__target">
                           <label>
-                            <span>Team to request</span>
+                            <span>Team to challenge</span>
                             <select
                               onChange={(event) => setForm((current) => ({ ...current, targetTeamKey: event.target.value }))}
                               value={form.targetTeamKey}
@@ -5277,7 +5300,7 @@ export function ChallengesPage() {
                   <div className="challenge-form__section">
                     <div className="challenge-form__section-copy">
                       <h3>When and where?</h3>
-                      <p>Add the proposed match details. Use TBD if you want to coordinate later.</p>
+                      <p>Add proposed match details. Use TBD if captains still need to coordinate.</p>
                     </div>
                     <div className="challenge-form__date-time-row">
                       <label className="field challenge-form__date">
@@ -5387,61 +5410,30 @@ export function ChallengesPage() {
                         Cancel Edit
                       </button>
                     ) : null}
-                    <button className="button challenge-form__submit" disabled={saving} type="submit">
+                    <button className="button challenge-form__submit" disabled={challengeSubmitDisabled} type="submit">
                       {saving
                         ? editingChallengeId
                           ? 'Saving request...'
-                          : 'Posting request...'
+                          : 'Sending challenge...'
                         : editingChallengeId
-                          ? 'Save Match Request'
-                          : 'Post Match Request'}
+                          ? 'Save Challenge'
+                          : 'Send Challenge'}
                     </button>
                   </div>
                 </form>
               </section>
             ) : (
               <div className="notice notice--info">
-                Captains and co-captains can create or respond to match requests.
+                Captains and co-captains can create or respond to club challenges.
               </div>
             )}
 
             <section className="schedule-admin-card">
               <div className="schedule-admin-card__header">
                 <div>
-                  <p className="eyebrow">Directory</p>
-                  <h2>Open match requests</h2>
-                  <p>Accept an open request from another approved team in this club.</p>
-                </div>
-              </div>
-              {clubChallenges.length > 0 ? (
-                <div className="challenge-grid">
-                  {clubChallenges.map((challenge) =>
-                    renderChallengeCard(
-                      challenge,
-                      canManage ? (
-                        <button
-                          className="button"
-                          disabled={updatingChallengeId === challenge.id}
-                          onClick={() => handleAcceptChallenge(challenge)}
-                          type="button"
-                        >
-                          {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept Request'}
-                        </button>
-                      ) : null,
-                    ),
-                  )}
-                </div>
-              ) : (
-                <div className="notice notice--info">No open match requests are available.</div>
-              )}
-            </section>
-
-            <section className="schedule-admin-card">
-              <div className="schedule-admin-card__header">
-                <div>
                   <p className="eyebrow">Inbox</p>
-                  <h2>Match requests sent to us</h2>
-                  <p>Respond to direct requests from other captains.</p>
+                  <h2>Challenges received</h2>
+                  <p>Respond to direct challenges from other captains.</p>
                 </div>
               </div>
               {incomingChallenges.length > 0 ? (
@@ -5473,65 +5465,115 @@ export function ChallengesPage() {
                   )}
                 </div>
               ) : (
-                <div className="notice notice--info">No direct match requests are waiting for this team.</div>
+                <div className="notice notice--info">No direct challenges are waiting for this team.</div>
               )}
             </section>
 
             <section className="schedule-admin-card">
               <div className="schedule-admin-card__header">
                 <div>
-                  <p className="eyebrow">Posted</p>
-                  <h2>Our match requests</h2>
-                  <p>Track match requests this team has posted.</p>
+                  <p className="eyebrow">Sent</p>
+                  <h2>Challenges sent</h2>
+                  <p>Track direct challenges sent to other captains.</p>
                 </div>
               </div>
               {postedChallenges.length > 0 ? (
+                <>
+                  <div className="availability-tabs" aria-label="Our challenge views">
+                    <button
+                      className={`availability-tabs__button ${postedChallengeTab === 'proposed' ? 'availability-tabs__button--active' : ''}`}
+                      onClick={() => setPostedChallengeTab('proposed')}
+                      type="button"
+                    >
+                      Proposed ({proposedPostedChallenges.length})
+                    </button>
+                    <button
+                      className={`availability-tabs__button ${postedChallengeTab === 'accepted' ? 'availability-tabs__button--active' : ''}`}
+                      onClick={() => setPostedChallengeTab('accepted')}
+                      type="button"
+                    >
+                      Accepted ({acceptedPostedChallenges.length})
+                    </button>
+                    <button
+                      className={`availability-tabs__button ${postedChallengeTab === 'closed' ? 'availability-tabs__button--active' : ''}`}
+                      onClick={() => setPostedChallengeTab('closed')}
+                      type="button"
+                    >
+                      Cancelled / Declined ({closedPostedChallenges.length})
+                    </button>
+                  </div>
+
+                  {visiblePostedChallenges.length > 0 ? (
+                    <div className="challenge-grid">
+                      {visiblePostedChallenges.map((challenge) =>
+                        renderChallengeCard(
+                          challenge,
+                          canManage && challenge.status === 'open' ? (
+                            <>
+                              <button
+                                className="button"
+                                disabled={updatingChallengeId === challenge.id}
+                                onClick={() => handleEditChallenge(challenge)}
+                                type="button"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="button button--ghost"
+                                disabled={updatingChallengeId === challenge.id}
+                                onClick={() => handleCancelChallenge(challenge)}
+                                type="button"
+                              >
+                                {updatingChallengeId === challenge.id ? 'Cancelling...' : 'Cancel Challenge'}
+                              </button>
+                            </>
+                          ) : null,
+                        ),
+                      )}
+                    </div>
+                  ) : (
+                    <div className="notice notice--info">
+                      {postedChallengeTab === 'accepted'
+                        ? 'No sent challenges have been accepted yet.'
+                        : postedChallengeTab === 'closed'
+                          ? 'No sent challenges have been cancelled or declined.'
+                          : 'No proposed challenges are waiting to be accepted.'}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="notice notice--info">This team has not sent any challenges yet.</div>
+              )}
+            </section>
+
+            <section className="schedule-admin-card">
+              <div className="schedule-admin-card__header">
+                <div>
+                  <p className="eyebrow">Directory</p>
+                  <h2>Open club challenges</h2>
+                  <p>Browse open club-wide challenges that your team can accept.</p>
+                </div>
+              </div>
+              {clubChallenges.length > 0 ? (
                 <div className="challenge-grid">
-                  {postedChallenges.map((challenge) =>
+                  {clubChallenges.map((challenge) =>
                     renderChallengeCard(
                       challenge,
-                      canManage && challenge.status === 'open' ? (
-                        <>
-                          <button
-                            className="button"
-                            disabled={updatingChallengeId === challenge.id}
-                            onClick={() => handleEditChallenge(challenge)}
-                            type="button"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="button button--ghost"
-                            disabled={updatingChallengeId === challenge.id}
-                            onClick={() => handleCancelChallenge(challenge)}
-                            type="button"
-                          >
-                            {updatingChallengeId === challenge.id ? 'Cancelling...' : 'Cancel Request'}
-                          </button>
-                        </>
+                      canManage ? (
+                        <button
+                          className="button"
+                          disabled={updatingChallengeId === challenge.id}
+                          onClick={() => handleAcceptChallenge(challenge)}
+                          type="button"
+                        >
+                          {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept Challenge'}
+                        </button>
                       ) : null,
                     ),
                   )}
                 </div>
               ) : (
-                <div className="notice notice--info">This team has not posted any match requests yet.</div>
-              )}
-            </section>
-
-            <section className="schedule-admin-card">
-              <div className="schedule-admin-card__header">
-                <div>
-                  <p className="eyebrow">History</p>
-                  <h2>Accepted matches</h2>
-                  <p>Accepted match requests involving this team are listed here after they become scheduled matches.</p>
-                </div>
-              </div>
-              {acceptedHistoryChallenges.length > 0 ? (
-                <div className="challenge-grid">
-                  {acceptedHistoryChallenges.map((challenge) => renderChallengeCard(challenge))}
-                </div>
-              ) : (
-                <div className="notice notice--info">No accepted match requests yet.</div>
+                <div className="notice notice--info">No open club challenges exist right now.</div>
               )}
             </section>
           </div>
