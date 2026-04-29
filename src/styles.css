@@ -2051,7 +2051,11 @@ ul {
 
 .standings-table__row {
   display: grid;
-  grid-template-columns: 64px minmax(180px, 1fr) repeat(8, minmax(52px, 0.45fr));
+  grid-template-columns:
+    54px 54px minmax(240px, 1.8fr)
+    repeat(4, minmax(36px, 0.26fr))
+    repeat(3, minmax(46px, 0.34fr))
+    minmax(52px, 0.36fr);
   gap: 0.55rem;
   align-items: center;
   padding: 0.7rem 0.85rem;
@@ -2089,10 +2093,31 @@ ul {
   font-weight: 950;
 }
 
+.standings-table__marker {
+  min-height: 1.8rem;
+}
+
+.standings-table__marker small {
+  display: inline-grid;
+  place-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  background: rgba(240, 193, 75, 0.14);
+  color: #f0c14b;
+  font-size: 0.56rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1.05;
+  max-width: 2.6rem;
+  padding: 0.18rem 0.32rem;
+  text-align: center;
+  text-transform: uppercase;
+}
+
 .standings-table__team {
   display: grid;
-  grid-template-columns: 42px minmax(0, max-content) minmax(0, 1fr);
-  gap: 0.55rem;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 0.45rem;
   align-items: center;
   min-width: 0;
 }
@@ -2113,18 +2138,6 @@ ul {
   color: #ffffff;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.standings-table__team small {
-  width: fit-content;
-  border-radius: 999px;
-  background: rgba(240, 193, 75, 0.14);
-  color: #f0c14b;
-  font-size: 0.68rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  padding: 0.18rem 0.4rem;
-  text-transform: uppercase;
 }
 
 .standings-opponents {
@@ -5807,10 +5820,6 @@ code {
   .standings-table__team {
     grid-column: 1 / -1;
     grid-template-columns: 42px minmax(0, 1fr);
-  }
-
-  .standings-table__team small {
-    grid-column: 2;
   }
 
   .standings-table__row > span:not(.standings-table__team)::before {

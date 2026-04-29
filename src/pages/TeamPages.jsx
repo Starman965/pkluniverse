@@ -960,6 +960,7 @@ function ClubStandingsBoard({ loading, rows }) {
             <div className="standings-table" role="table" aria-label={`${division.label} standings`}>
               <div className="standings-table__row standings-table__row--head" role="row">
                 <span role="columnheader">Rank</span>
+                <span aria-label="Current team marker" role="columnheader" />
                 <span role="columnheader">Team</span>
                 <span role="columnheader">GP</span>
                 <span role="columnheader">W</span>
@@ -978,6 +979,9 @@ function ClubStandingsBoard({ loading, rows }) {
                   role="row"
                 >
                   <span className="standings-table__rank" data-label="Rank" role="cell">#{index + 1}</span>
+                  <span className="standings-table__marker" data-label="Marker" role="cell">
+                    {row.isCurrentTeam ? <small>Your team</small> : null}
+                  </span>
                   <span className="standings-table__team" data-label="Team" role="cell">
                     <img
                       alt=""
@@ -987,7 +991,6 @@ function ClubStandingsBoard({ loading, rows }) {
                       src={row.logoUrl || defaultTeamLogo}
                     />
                     <strong>{row.name}</strong>
-                    {row.isCurrentTeam ? <small>Your team</small> : null}
                   </span>
                   <span data-label="GP" role="cell">{row.gamesPlayed}</span>
                   <span data-label="W" role="cell">{row.wins}</span>
