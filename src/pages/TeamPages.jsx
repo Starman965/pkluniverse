@@ -6855,6 +6855,7 @@ export function ClubAffiliationAdminPage() {
   const [clubZoom, setClubZoom] = useState(1);
   const [clubCropPixels, setClubCropPixels] = useState(null);
   const [creatingClubCrop, setCreatingClubCrop] = useState(false);
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
 
   async function loadAdminData() {
     if (authLoading) {
@@ -6915,6 +6916,26 @@ export function ClubAffiliationAdminPage() {
   useEffect(() => {
     loadAdminData();
   }, [authLoading, user?.uid]);
+
+  useEffect(() => {
+    if (!adminMenuOpen) {
+      return undefined;
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        setAdminMenuOpen(false);
+      }
+    }
+
+    document.body.classList.add('hub-nav-open');
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.classList.remove('hub-nav-open');
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [adminMenuOpen]);
 
   const clubSummaries = useMemo(
     () =>
@@ -7416,6 +7437,7 @@ export function ClubAffiliationAdminPage() {
   }
 
   async function handleSignOut() {
+    setAdminMenuOpen(false);
     await signOutUser();
     navigate('/', { replace: true });
   }
@@ -7452,8 +7474,42 @@ export function ClubAffiliationAdminPage() {
   }
 
   return (
-    <div className="auth-page admin-page">
-      <aside className="admin-sidebar card">
+    <div className="auth-page admin-page standalone-mobile-page">
+      <button
+        aria-label="Close admin menu"
+        className="hub-nav-overlay"
+        hidden={!adminMenuOpen}
+        onClick={() => setAdminMenuOpen(false)}
+        type="button"
+      />
+
+      <header className="hub-topbar standalone-mobile-topbar">
+        <button
+          aria-controls="app-admin-sidebar"
+          aria-expanded={adminMenuOpen}
+          aria-label="Open admin menu"
+          className="hub-nav-toggle"
+          onClick={() => setAdminMenuOpen((current) => !current)}
+          type="button"
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+        <div className="hub-topbar__team">
+          <img alt="" aria-hidden="true" className="hub-topbar__logo" src={defaultTeamLogo} />
+          <div>
+            <p className="hub-topbar__eyebrow">PKL Universe</p>
+            <strong>App Admin</strong>
+          </div>
+        </div>
+      </header>
+
+      <aside
+        id="app-admin-sidebar"
+        className={`admin-sidebar card ${adminMenuOpen ? 'admin-sidebar--open' : ''}`}
+        aria-label="App admin navigation"
+      >
         <p className="eyebrow">PKL Universe</p>
         <h2>App Admin</h2>
         <p className="admin-sidebar__copy">
@@ -7463,28 +7519,40 @@ export function ClubAffiliationAdminPage() {
           <div className="sidebar__nav-group">
             <button
               className={`nav-link admin-nav-button ${adminSection === 'teams' ? 'nav-link--active' : ''}`}
-              onClick={() => setAdminSection('teams')}
+              onClick={() => {
+                setAdminSection('teams');
+                setAdminMenuOpen(false);
+              }}
               type="button"
             >
               Teams
             </button>
             <button
               className={`nav-link admin-nav-button ${adminSection === 'clubs' ? 'nav-link--active' : ''}`}
-              onClick={() => setAdminSection('clubs')}
+              onClick={() => {
+                setAdminSection('clubs');
+                setAdminMenuOpen(false);
+              }}
               type="button"
             >
               Clubs
             </button>
             <button
               className={`nav-link admin-nav-button ${adminSection === 'players' ? 'nav-link--active' : ''}`}
-              onClick={() => setAdminSection('players')}
+              onClick={() => {
+                setAdminSection('players');
+                setAdminMenuOpen(false);
+              }}
               type="button"
             >
               Players
             </button>
             <button
               className={`nav-link admin-nav-button ${adminSection === 'tools' ? 'nav-link--active' : ''}`}
-              onClick={() => setAdminSection('tools')}
+              onClick={() => {
+                setAdminSection('tools');
+                setAdminMenuOpen(false);
+              }}
               type="button"
             >
               Challenges
@@ -7492,10 +7560,10 @@ export function ClubAffiliationAdminPage() {
           </div>
         </nav>
         <div className="sidebar__footer-actions">
-          <Link className="sidebar__footer-link" to="/teams">
+          <Link className="sidebar__footer-link" onClick={() => setAdminMenuOpen(false)} to="/teams">
             My Teams
           </Link>
-          <Link className="sidebar__footer-link" to="/">
+          <Link className="sidebar__footer-link" onClick={() => setAdminMenuOpen(false)} to="/">
             Home
           </Link>
           <button className="sidebar__signout" onClick={handleSignOut} type="button">

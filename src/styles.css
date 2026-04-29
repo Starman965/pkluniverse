@@ -679,6 +679,7 @@ textarea {
 .field {
   display: grid;
   gap: 0.45rem;
+  min-width: 0;
 }
 
 .field label {
@@ -693,6 +694,7 @@ textarea {
 
 .field input,
 .field select {
+  min-width: 0;
   width: 100%;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -1428,9 +1430,11 @@ ul {
 
 .team-division-field {
   display: grid;
-  grid-template-columns: minmax(150px, 220px) 52px;
+  grid-template-columns: minmax(0, 220px) 52px;
   gap: 0.55rem;
   align-items: stretch;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .team-division-field select {
@@ -1440,6 +1444,7 @@ ul {
 .team-division-field__symbol {
   display: grid;
   place-items: center;
+  min-width: 0;
   min-height: 100%;
   border-radius: 14px;
   border: 1px solid rgba(240, 193, 75, 0.32);
@@ -3144,6 +3149,7 @@ ul {
   }
 
   .settings-admin-branding-fields {
+    width: 100%;
     max-width: none;
   }
 
@@ -3653,6 +3659,7 @@ ul {
 
 .team-members-card__header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: start;
   gap: 1rem;
@@ -3661,6 +3668,7 @@ ul {
 .team-members-card__header-copy {
   display: grid;
   gap: 0.35rem;
+  min-width: 0;
 }
 
 .team-members-card__header-copy h1,
@@ -3672,11 +3680,11 @@ ul {
   max-width: 46ch;
   margin: 0;
   color: #c9d7ea;
-  white-space: nowrap;
 }
 
 .team-members-card__count {
   flex-shrink: 0;
+  max-width: 100%;
   padding: 0.5rem 0.9rem;
   border-radius: 999px;
   border: 1px solid rgba(255, 209, 102, 0.2);
@@ -4533,10 +4541,11 @@ ul {
 
 .settings-admin-branding-grid {
   display: grid;
-  grid-template-columns: 160px minmax(260px, 460px) minmax(260px, 1fr);
+  grid-template-columns: 160px minmax(0, 460px) minmax(0, 1fr);
   column-gap: 2rem;
   row-gap: 1.25rem;
   align-items: start;
+  min-width: 0;
 }
 
 .settings-admin-branding-preview {
@@ -4549,6 +4558,7 @@ ul {
   display: grid;
   gap: 0.9rem;
   max-width: 460px;
+  min-width: 0;
 }
 
 .settings-admin-form__logo-field {
@@ -5060,6 +5070,15 @@ ul {
   grid-template-columns: 280px minmax(0, 1fr);
 }
 
+.hub-nav-overlay,
+.hub-topbar {
+  display: none;
+}
+
+.mobile-page-menu {
+  display: none;
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -5144,6 +5163,17 @@ ul {
   box-shadow: inset 0 0 0 1px rgba(126, 161, 255, 0.2);
   object-fit: contain;
   padding: 0.3rem;
+}
+
+.hub-topbar__logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(8, 17, 29, 0.96) 0%, rgba(12, 24, 40, 0.96) 100%);
+  box-shadow: inset 0 0 0 1px rgba(126, 161, 255, 0.2);
+  object-fit: contain;
+  padding: 0.25rem;
 }
 
 .sidebar__nav {
@@ -5329,6 +5359,154 @@ code {
 }
 
 @media (max-width: 900px) {
+  body.hub-nav-open {
+    overflow: hidden;
+  }
+
+  .app-shell {
+    display: block;
+  }
+
+  .standalone-mobile-page {
+    width: min(1200px, calc(100% - 1rem));
+    padding-top: 0.5rem;
+  }
+
+  .hub-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 35;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid rgba(126, 161, 255, 0.14);
+    background: rgba(4, 10, 18, 0.92);
+    backdrop-filter: blur(14px);
+  }
+
+  .hub-nav-toggle {
+    display: inline-grid;
+    width: 44px;
+    height: 44px;
+    align-content: center;
+    gap: 0.24rem;
+    border: 1px solid rgba(126, 161, 255, 0.18);
+    border-radius: 999px;
+    background: rgba(13, 24, 39, 0.98);
+    color: #f2f5f8;
+    cursor: pointer;
+  }
+
+  .hub-nav-toggle span {
+    display: block;
+    width: 1.15rem;
+    height: 2px;
+    margin: 0 auto;
+    border-radius: 999px;
+    background: currentColor;
+  }
+
+  .hub-nav-toggle:hover,
+  .hub-nav-toggle:focus-visible {
+    border-color: rgba(240, 193, 75, 0.34);
+    outline: none;
+  }
+
+  .hub-topbar__team {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 0.65rem;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .hub-topbar__team strong {
+    display: block;
+    overflow: hidden;
+    color: #ffffff;
+    font-size: 1rem;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hub-topbar__eyebrow {
+    margin: 0 0 0.1rem;
+    color: #9fb6d8;
+    font-size: 0.68rem;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .hub-nav-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: block;
+    border: none;
+    background: rgba(3, 8, 15, 0.68);
+    backdrop-filter: blur(4px);
+  }
+
+  .hub-nav-overlay[hidden] {
+    display: none;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 45;
+    width: min(320px, calc(100vw - 2rem));
+    height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-right: 1px solid rgba(126, 161, 255, 0.14);
+    border-bottom: none;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+    transform: translateX(calc(-100% - 1rem));
+    transition: transform 180ms ease;
+  }
+
+  .sidebar--open {
+    transform: translateX(0);
+  }
+
+  .mobile-page-menu {
+    display: flex;
+  }
+
+  .content {
+    padding: 1rem;
+  }
+
+  .team-members-card__header {
+    display: grid;
+  }
+
+  .team-members-card__count {
+    justify-self: start;
+  }
+
+  .team-division-field {
+    grid-template-columns: minmax(0, 1fr) 48px;
+    width: 100%;
+  }
+
+  .settings-admin-branding-grid {
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
+  }
+
+  .settings-admin-branding-preview,
+  .settings-admin-branding-fields,
+  .settings-admin-logo-prompt {
+    width: 100%;
+    max-width: none;
+  }
+
   .club-teams-page__info-card {
     grid-template-columns: 72px minmax(0, 1fr);
   }
@@ -5338,8 +5516,7 @@ code {
     justify-content: start;
   }
 
-  .hero,
-  .app-shell {
+  .hero {
     grid-template-columns: 1fr;
   }
 
@@ -5397,6 +5574,24 @@ code {
     grid-template-columns: 1fr;
   }
 
+  .admin-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 45;
+    width: min(320px, calc(100vw - 2rem));
+    height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-right: 1px solid rgba(126, 161, 255, 0.14);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+    transform: translateX(calc(-100% - 1rem));
+    transition: transform 180ms ease;
+  }
+
+  .admin-sidebar--open {
+    transform: translateX(0);
+  }
+
   .onboarding-flow {
     grid-template-columns: 1fr;
   }
@@ -5435,11 +5630,4 @@ code {
     align-items: flex-start;
   }
 
-  .sidebar {
-    position: static;
-    height: auto;
-    overflow-y: visible;
-    border-right: none;
-    border-bottom: 1px solid rgba(126, 161, 255, 0.12);
-  }
 }

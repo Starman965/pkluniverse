@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   getMembership,
@@ -81,6 +81,7 @@ function buildCaptainLabel(members, players, currentUser) {
 
 export default function AppShell() {
   const { signOutUser, user } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
   const { clubSlug, teamSlug } = useParams();
   const [memberships, setMemberships] = useState([]);
@@ -89,6 +90,7 @@ export default function AppShell() {
   const [activeMembership, setActiveMembership] = useState(null);
   const [isAppAdmin, setIsAppAdmin] = useState(false);
   const [captainLabel, setCaptainLabel] = useState('Captain: TBD');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [teamRefreshKey, setTeamRefreshKey] = useState(0);
 
   const loadMemberships = useCallback(async () => {
@@ -233,14 +235,73 @@ export default function AppShell() {
     });
   }, [clubSlug, currentMembership, teamSlug, user?.uid]);
 
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) {
+      return undefined;
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        setMobileNavOpen(false);
+      }
+    }
+
+    document.body.classList.add('hub-nav-open');
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.classList.remove('hub-nav-open');
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [mobileNavOpen]);
+
   async function handleSignOut() {
+    setMobileNavOpen(false);
     await signOutUser();
     navigate('/', { replace: true });
   }
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <button
+        aria-label="Close team menu"
+        className="hub-nav-overlay"
+        hidden={!mobileNavOpen}
+        onClick={() => setMobileNavOpen(false)}
+        type="button"
+      />
+
+      <header className="hub-topbar">
+        <button
+          aria-controls="team-hub-sidebar"
+          aria-expanded={mobileNavOpen}
+          aria-label="Open team menu"
+          className="hub-nav-toggle"
+          onClick={() => setMobileNavOpen((current) => !current)}
+          type="button"
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+        <div className="hub-topbar__team">
+          <img alt="" aria-hidden="true" className="hub-topbar__logo" src={teamLogo} />
+          <div>
+            <p className="hub-topbar__eyebrow">Team Hub</p>
+            <strong>{teamTitle}</strong>
+          </div>
+        </div>
+      </header>
+
+      <aside
+        id="team-hub-sidebar"
+        className={`sidebar ${mobileNavOpen ? 'sidebar--open' : ''}`}
+        aria-label="Team hub navigation"
+      >
         <div className="sidebar__header">
           <div className="sidebar__team-card">
             <img alt={`${teamTitle} logo`} className="sidebar__team-logo" src={teamLogo} />
@@ -258,6 +319,7 @@ export default function AppShell() {
               <NavLink
                 key={route.label}
                 className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`}
+                onClick={() => setMobileNavOpen(false)}
                 to={route.to}
               >
                 {route.label}
@@ -272,6 +334,7 @@ export default function AppShell() {
                 <NavLink
                   key={route.label}
                   className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`}
+                  onClick={() => setMobileNavOpen(false)}
                   to={route.to}
                 >
                   {route.label}
@@ -292,15 +355,21 @@ export default function AppShell() {
           <strong>{user?.displayName ?? user?.email}</strong>
           <div className="sidebar__footer-actions">
             {memberships.length > 0 ? (
-              <NavLink className="sidebar__footer-link" to="/teams">
+              <NavLink className="sidebar__footer-link" onClick={() => setMobileNavOpen(false)} to="/teams">
                 My Teams
               </NavLink>
             ) : null}
-            <NavLink className="sidebar__footer-link" to="help">
+            <NavLink className="sidebar__footer-link" onClick={() => setMobileNavOpen(false)} to="help">
               Help & Feedback
             </NavLink>
             {isAppAdmin ? (
-              <NavLink className="sidebar__footer-link" rel="noreferrer" target="_blank" to="/admin">
+              <NavLink
+                className="sidebar__footer-link"
+                onClick={() => setMobileNavOpen(false)}
+                rel="noreferrer"
+                target="_blank"
+                to="/admin"
+              >
                 App Admin
               </NavLink>
             ) : null}
