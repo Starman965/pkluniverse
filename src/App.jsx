@@ -9,6 +9,7 @@ import AuthPage from './pages/AuthPage';
 import ClubDirectoryPage from './pages/ClubDirectoryPage';
 import CreateTeamPage from './pages/CreateTeamPage';
 import JoinTeamPage from './pages/JoinTeamPage';
+import { ContactPage, PrivacyPolicyPage, TermsPage } from './pages/LegalPages';
 import OnboardingPage from './pages/OnboardingPage';
 import TeamChooserPage from './pages/TeamChooserPage';
 import TeamDirectoryPage from './pages/TeamDirectoryPage';
@@ -70,6 +71,9 @@ export default function App() {
         <Route element={<CreateTeamPage />} path="/create" />
         <Route element={<JoinTeamPage />} path="/join" />
         <Route element={<OnboardingPage />} path="/onboarding" />
+        <Route element={<ContactPage />} path="/contact" />
+        <Route element={<PrivacyPolicyPage />} path="/privacy" />
+        <Route element={<TermsPage />} path="/terms" />
         <Route
           element={
             <ProtectedRoute>

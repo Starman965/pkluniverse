@@ -220,6 +220,11 @@ export default function LandingPage() {
       </section>
 
       <footer className="site-footer">
+        <div className="site-footer__legal-links" aria-label="Legal links">
+          <Link to="/terms">Terms</Link>
+          <Link to="/privacy">Privacy Policy</Link>
+          <Link to="/contact">Contact</Link>
+        </div>
         <p className="site-footer__copy">© 2026 PKL Universe</p>
         <p className="site-footer__copy">Developed by: David Lewis</p>
       </footer>

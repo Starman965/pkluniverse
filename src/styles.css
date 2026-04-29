@@ -611,6 +611,59 @@ textarea {
   color: rgba(255, 255, 255, 0.74);
 }
 
+.site-footer__legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+}
+
+.site-footer__legal-links a {
+  color: #dce9fb;
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.site-footer__legal-links a:hover,
+.site-footer__legal-links a:focus-visible {
+  color: #f0c14b;
+  outline: none;
+}
+
+.legal-page {
+  max-width: 920px;
+}
+
+.legal-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.legal-card h1,
+.legal-card h2,
+.legal-card p {
+  margin: 0;
+}
+
+.legal-card h2 {
+  margin-top: 0.5rem;
+  font-size: 1.25rem;
+}
+
+.legal-card p {
+  color: #c9d7ea;
+  line-height: 1.65;
+}
+
+.legal-card__updated {
+  color: #9fb6d8;
+  font-size: 0.92rem;
+}
+
+.legal-card__footer {
+  margin-top: 0.75rem;
+}
+
 .hero__actions,
 .stack,
 .action-grid {
