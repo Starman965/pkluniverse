@@ -55,7 +55,7 @@ import {
   updateTeamMemberRole,
   updateTeamSettings,
 } from '../lib/data';
-import { TEAM_DIVISION_OPTIONS, getVisibleTeamDivisionLabel } from '../lib/teamDivision';
+import { TEAM_DIVISION_OPTIONS, getTeamDivisionLabel, getVisibleTeamDivisionLabel, normalizeTeamDivision } from '../lib/teamDivision';
 import blackhawkPickleballCourts from '../../blackhawk_pickleball_courts.webp';
 import defaultTeamLogo from '../../default_team_logo.webp';
 
@@ -851,7 +851,169 @@ function MatchupLabelField({ onChange, value }) {
   );
 }
 
-function StandingsSummary({ games, team }) {
+const STANDINGS_DIVISIONS = [
+  { label: 'Men', value: 'men' },
+  { label: 'Women', value: 'women' },
+  { label: 'Mixed + Unknown', value: 'mixed' },
+];
+
+function getStandingsDivision(value) {
+  return normalizeTeamDivision(value) || 'mixed';
+}
+
+function getTeamStandingsStats(games) {
+  const summary = buildStandingsSummary(games);
+  const gamesPlayed = summary.completedGames.length;
+  const pointsFor = summary.opponents.reduce((total, row) => total + row.pointsFor, 0);
+  const pointsAgainst = summary.opponents.reduce((total, row) => total + row.pointsAgainst, 0);
+  const pointDifferential = pointsFor - pointsAgainst;
+
+  return {
+    gamesPlayed,
+    losses: summary.losses,
+    pointDifferential,
+    pointsAgainst,
+    pointsFor,
+    ties: summary.ties,
+    winPct: gamesPlayed ? (summary.wins + summary.ties * 0.5) / gamesPlayed : 0,
+    wins: summary.wins,
+  };
+}
+
+function buildClubStandingsRow(teamSummary, games, currentTeamKey) {
+  const teamKey = `${teamSummary.clubSlug}/${teamSummary.teamSlug}`;
+
+  return {
+    ...getTeamStandingsStats(games),
+    clubSlug: teamSummary.clubSlug,
+    division: getStandingsDivision(teamSummary.teamDivision),
+    isCurrentTeam: teamKey === currentTeamKey,
+    logoUrl: teamSummary.logoUrl ?? '',
+    name: teamSummary.name ?? teamSummary.teamName ?? teamSummary.teamSlug,
+    teamSlug: teamSummary.teamSlug,
+  };
+}
+
+function sortStandingsRows(rows) {
+  return [...rows].sort((left, right) => {
+    if (right.wins !== left.wins) {
+      return right.wins - left.wins;
+    }
+
+    if (left.losses !== right.losses) {
+      return left.losses - right.losses;
+    }
+
+    if (right.winPct !== left.winPct) {
+      return right.winPct - left.winPct;
+    }
+
+    if (right.pointDifferential !== left.pointDifferential) {
+      return right.pointDifferential - left.pointDifferential;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+}
+
+function ClubStandingsBoard({ loading, rows }) {
+  const rowsByDivision = STANDINGS_DIVISIONS.map((division) => ({
+    ...division,
+    rows: sortStandingsRows(rows.filter((row) => row.division === division.value)),
+  })).filter((division) => division.rows.length > 0);
+
+  if (loading) {
+    return (
+      <div className="standings-league-card">
+        <div className="standings-league-card__header">
+          <div>
+            <p className="eyebrow">Club Standings</p>
+            <h2>Building the division table...</h2>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!rowsByDivision.length) {
+    return null;
+  }
+
+  return (
+    <div className="standings-league-card">
+      <div className="standings-league-card__header">
+        <div>
+          <p className="eyebrow">Club Standings</p>
+          <h2>Division race</h2>
+          <p>Teams are ranked by wins, then losses, win percentage, and point differential.</p>
+        </div>
+      </div>
+
+      <div className="standings-division-stack">
+        {rowsByDivision.map((division) => (
+          <section key={division.value} className="standings-division">
+            <div className="standings-division__header">
+              <TeamDivisionLabel value={division.value} />
+              <span>{division.rows.length} team{division.rows.length === 1 ? '' : 's'}</span>
+            </div>
+
+            <div className="standings-table" role="table" aria-label={`${division.label} standings`}>
+              <div className="standings-table__row standings-table__row--head" role="row">
+                <span role="columnheader">Rank</span>
+                <span role="columnheader">Team</span>
+                <span role="columnheader">GP</span>
+                <span role="columnheader">W</span>
+                <span role="columnheader">L</span>
+                <span role="columnheader">T</span>
+                <span role="columnheader">Win %</span>
+                <span role="columnheader">PF</span>
+                <span role="columnheader">PA</span>
+                <span role="columnheader">Diff</span>
+              </div>
+
+              {division.rows.map((row, index) => (
+                <div
+                  key={`${row.clubSlug}-${row.teamSlug}`}
+                  className={`standings-table__row ${row.isCurrentTeam ? 'standings-table__row--current' : ''}`}
+                  role="row"
+                >
+                  <span className="standings-table__rank" data-label="Rank" role="cell">#{index + 1}</span>
+                  <span className="standings-table__team" data-label="Team" role="cell">
+                    <img
+                      alt=""
+                      aria-hidden="true"
+                      decoding="async"
+                      loading="lazy"
+                      src={row.logoUrl || defaultTeamLogo}
+                    />
+                    <strong>{row.name}</strong>
+                    {row.isCurrentTeam ? <small>Your team</small> : null}
+                  </span>
+                  <span data-label="GP" role="cell">{row.gamesPlayed}</span>
+                  <span data-label="W" role="cell">{row.wins}</span>
+                  <span data-label="L" role="cell">{row.losses}</span>
+                  <span data-label="T" role="cell">{row.ties}</span>
+                  <span data-label="Win %" role="cell">{Math.round(row.winPct * 100)}%</span>
+                  <span data-label="PF" role="cell">{row.pointsFor}</span>
+                  <span data-label="PA" role="cell">{row.pointsAgainst}</span>
+                  <span
+                    className={row.pointDifferential >= 0 ? 'standings-positive' : 'standings-negative'}
+                    data-label="Diff"
+                    role="cell"
+                  >
+                    {row.pointDifferential >= 0 ? `+${row.pointDifferential}` : row.pointDifferential}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StandingsSummary({ clubStandingsLoading = false, clubStandingsRows = [], games, team }) {
   const standings = useMemo(() => buildStandingsSummary(games), [games]);
   const totalDecisions = standings.wins + standings.losses + standings.ties;
   const pointsFor = standings.opponents.reduce((total, row) => total + row.pointsFor, 0);
@@ -866,6 +1028,8 @@ function StandingsSummary({ games, team }) {
 
   return (
     <div className="standings-summary">
+      <ClubStandingsBoard loading={clubStandingsLoading} rows={clubStandingsRows} />
+
       {standings.completedGames.length > 0 ? (
         <>
           <div className="standings-hero">
@@ -3169,22 +3333,96 @@ export function ScheduleScoresPage() {
 }
 export function StandingsPage() {
   const { clubSlug, teamSlug } = useParams();
+  const [clubStandingsLoading, setClubStandingsLoading] = useState(true);
+  const [clubStandingsRows, setClubStandingsRows] = useState([]);
   const [games, setGames] = useState([]);
   const [team, setTeam] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
+
+    setClubStandingsLoading(true);
+    setError('');
+
     Promise.all([
       listGames(clubSlug, teamSlug),
       getTeam(clubSlug, teamSlug),
     ])
-      .then(([gameData, teamData]) => {
+      .then(async ([gameData, teamData]) => {
+        if (cancelled) {
+          return;
+        }
+
         setGames(gameData);
         setTeam(teamData);
+
+        const approvedClubSlug =
+          teamData?.affiliationStatus === 'approved' && teamData?.approvedClubSlug !== 'independent'
+            ? teamData.approvedClubSlug
+            : '';
+
+        const clubTeams = approvedClubSlug
+          ? await listApprovedClubTeams(approvedClubSlug)
+          : [
+              {
+                clubSlug,
+                logoUrl: teamData?.logoUrl ?? '',
+                name: teamData?.name ?? teamSlug,
+                teamDivision: teamData?.teamDivision ?? '',
+                teamSlug,
+              },
+            ];
+
+        if (cancelled) {
+          return;
+        }
+
+        const currentTeamKey = `${clubSlug}/${teamSlug}`;
+        const teamsForStandings = clubTeams.some(
+          (clubTeam) => clubTeam.clubSlug === clubSlug && clubTeam.teamSlug === teamSlug,
+        )
+          ? clubTeams
+          : [
+              ...clubTeams,
+              {
+                clubSlug,
+                logoUrl: teamData?.logoUrl ?? '',
+                name: teamData?.name ?? teamSlug,
+                teamDivision: teamData?.teamDivision ?? '',
+                teamSlug,
+              },
+            ];
+
+        const rows = await Promise.all(
+          teamsForStandings.map(async (clubTeam) => {
+            const teamGames =
+              clubTeam.clubSlug === clubSlug && clubTeam.teamSlug === teamSlug
+                ? gameData
+                : await listGames(clubTeam.clubSlug, clubTeam.teamSlug);
+
+            return buildClubStandingsRow(clubTeam, teamGames, currentTeamKey);
+          }),
+        );
+
+        if (!cancelled) {
+          setClubStandingsRows(rows);
+        }
       })
       .catch((loadError) => {
-        setError(loadError.message ?? 'Unable to load standings yet.');
+        if (!cancelled) {
+          setError(loadError.message ?? 'Unable to load standings yet.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setClubStandingsLoading(false);
+        }
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [clubSlug, teamSlug]);
 
   return (
@@ -3193,9 +3431,9 @@ export function StandingsPage() {
         <div className="standings-page__header">
           <div>
             <p className="eyebrow">Standings</p>
-            <h1>Team results</h1>
+            <h1>Pickleball Team Standings</h1>
             <p className="standings-page__copy">
-              Track your team&apos;s record, scoring edge, and head-to-head results as match scores come in.
+              See how your team ranks by division, with wins, losses, ties, scoring edge, and head-to-head results.
             </p>
           </div>
           <img
@@ -3206,7 +3444,12 @@ export function StandingsPage() {
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        <StandingsSummary games={games} team={team} />
+        <StandingsSummary
+          clubStandingsLoading={clubStandingsLoading}
+          clubStandingsRows={clubStandingsRows}
+          games={games}
+          team={team}
+        />
       </section>
     </div>
   );

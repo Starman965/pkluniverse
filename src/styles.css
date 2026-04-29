@@ -1985,6 +1985,148 @@ ul {
   background: #ffb8a6;
 }
 
+.standings-league-card {
+  display: grid;
+  gap: 1rem;
+  overflow: hidden;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top left, rgba(240, 193, 75, 0.12), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(77, 124, 255, 0.14), transparent 38%),
+    rgba(255, 255, 255, 0.045);
+  padding: 1rem;
+}
+
+.standings-league-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.standings-league-card__header h2,
+.standings-league-card__header p {
+  margin: 0;
+}
+
+.standings-league-card__header p:not(.eyebrow) {
+  color: #c9d7ea;
+}
+
+.standings-division-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.standings-division {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.standings-division__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.standings-division__header > span:last-child {
+  color: #9fb6d8;
+  font-size: 0.84rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.standings-table {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid rgba(126, 161, 255, 0.14);
+  border-radius: 18px;
+  background: rgba(8, 18, 31, 0.54);
+}
+
+.standings-table__row {
+  display: grid;
+  grid-template-columns: 64px minmax(180px, 1fr) repeat(8, minmax(52px, 0.45fr));
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.7rem 0.85rem;
+  border-top: 1px solid rgba(126, 161, 255, 0.1);
+  color: #dce9fb;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.standings-table__row:first-child {
+  border-top: 0;
+}
+
+.standings-table__row--head {
+  border-top: 0;
+  background:
+    linear-gradient(90deg, rgba(240, 193, 75, 0.14), rgba(77, 124, 255, 0.08));
+  color: #9fb6d8;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.standings-table__row--current {
+  background:
+    linear-gradient(90deg, rgba(240, 193, 75, 0.16), rgba(77, 124, 255, 0.08)),
+    rgba(255, 255, 255, 0.035);
+  box-shadow: inset 4px 0 0 #f0c14b;
+}
+
+.standings-table__rank {
+  color: #f0c14b;
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.standings-table__team {
+  display: grid;
+  grid-template-columns: 42px minmax(0, max-content) minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.standings-table__team img {
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(8, 17, 29, 0.96) 0%, rgba(12, 24, 40, 0.96) 100%);
+  object-fit: contain;
+  padding: 0.25rem;
+}
+
+.standings-table__team strong {
+  overflow: hidden;
+  color: #ffffff;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.standings-table__team small {
+  width: fit-content;
+  border-radius: 999px;
+  background: rgba(240, 193, 75, 0.14);
+  color: #f0c14b;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 0.18rem 0.4rem;
+  text-transform: uppercase;
+}
+
 .standings-opponents {
   display: grid;
   gap: 0.85rem;
@@ -5619,6 +5761,45 @@ code {
 
   .standings-page__logo {
     justify-self: start;
+  }
+
+  .standings-table {
+    gap: 0.75rem;
+    border: 0;
+    background: transparent;
+  }
+
+  .standings-table__row,
+  .standings-table__row:first-child {
+    border: 1px solid rgba(126, 161, 255, 0.14);
+  }
+
+  .standings-table__row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-radius: 16px;
+    background: rgba(8, 18, 31, 0.62);
+  }
+
+  .standings-table__row--head {
+    display: none;
+  }
+
+  .standings-table__team {
+    grid-column: 1 / -1;
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .standings-table__team small {
+    grid-column: 2;
+  }
+
+  .standings-table__row > span:not(.standings-table__team)::before {
+    content: attr(data-label);
+    display: block;
+    color: #9fb6d8;
+    font-size: 0.64rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .standings-scoreboard {

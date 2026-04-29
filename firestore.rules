@@ -56,6 +56,14 @@ service cloud.firestore {
       return isPlatformAdmin();
     }
 
+    function isApprovedClubTeam(clubId, teamId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/clubs/$(clubId)/teams/$(teamId)).data.status == 'active'
+        && get(/databases/$(database)/documents/clubs/$(clubId)/teams/$(teamId)).data.affiliationStatus == 'approved'
+        && get(/databases/$(database)/documents/clubs/$(clubId)/teams/$(teamId)).data.approvedClubSlug is string
+        && get(/databases/$(database)/documents/clubs/$(clubId)/teams/$(teamId)).data.approvedClubSlug != 'independent';
+    }
+
     function isReservedClubCreate(clubId) {
       return clubId in ['independent'];
     }
@@ -615,7 +623,7 @@ service cloud.firestore {
         }
 
         match /games/{gameId} {
-          allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin();
+          allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin() || isApprovedClubTeam(clubId, teamId);
           allow create: if isManager(clubId, teamId) || safeChallengeGameCreate(clubId, teamId);
           allow update: if isManager(clubId, teamId)
             || isPlatformAdmin()
