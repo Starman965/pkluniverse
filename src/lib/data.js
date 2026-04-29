@@ -3634,7 +3634,7 @@ export async function listNewsPosts(clubSlug, teamSlug) {
     };
   }));
 
-  posts.sort((left, right) => (right.updatedAtMs || right.createdAtMs) - (left.updatedAtMs || left.createdAtMs));
+  posts.sort((left, right) => (right.createdAtMs || right.updatedAtMs) - (left.createdAtMs || left.updatedAtMs));
 
   return posts;
 }

@@ -4093,10 +4093,12 @@ function NewsFeed({
   onEditComment,
   onEditPost,
   onPostEditChange,
+  onPostEditImageSelected,
   onReactionToggle,
   onSaveCommentEdit,
   onSavePostEdit,
   postEditDraft = '',
+  postEditImagePreviewUrl = '',
   reactingPostId = '',
   savingCommentId = '',
   savingPostId = '',
@@ -4183,6 +4185,22 @@ function NewsFeed({
                     value={postEditDraft}
                   />
                 </label>
+                <label className="field">
+                  <span>Replace image</span>
+                  <input
+                    accept="image/*"
+                    disabled={savingPostId === post.id}
+                    onChange={(event) => onPostEditImageSelected?.(event.target.files?.[0] ?? null)}
+                    type="file"
+                  />
+                </label>
+                {postEditImagePreviewUrl ? (
+                  <div className="news-composer-preview">
+                    <img alt="Selected replacement preview" src={postEditImagePreviewUrl} />
+                  </div>
+                ) : post.imageUrl ? (
+                  <p className="news-feed-card__date">Choose a replacement image to change the current photo.</p>
+                ) : null}
                 <div className="news-edit-form__actions">
                   <button
                     className="button button--ghost"
@@ -4192,7 +4210,11 @@ function NewsFeed({
                   >
                     Cancel
                   </button>
-                  <button className="button" disabled={savingPostId === post.id || !postEditDraft.trim()} type="submit">
+                  <button
+                    className="button"
+                    disabled={savingPostId === post.id || (!postEditDraft.trim() && !postEditImagePreviewUrl && !post.imageUrl)}
+                    type="submit"
+                  >
                     {savingPostId === post.id ? 'Saving...' : 'Save'}
                   </button>
                 </div>
@@ -4454,6 +4476,8 @@ export function NewsPage() {
   const [commentDrafts, setCommentDrafts] = useState({});
   const [editingPostId, setEditingPostId] = useState('');
   const [postEditDraft, setPostEditDraft] = useState('');
+  const [postEditImageFile, setPostEditImageFile] = useState(null);
+  const [postEditImagePreviewUrl, setPostEditImagePreviewUrl] = useState('');
   const [editingCommentId, setEditingCommentId] = useState('');
   const [commentEditDraft, setCommentEditDraft] = useState('');
   const [saving, setSaving] = useState(false);
@@ -4484,6 +4508,14 @@ export function NewsPage() {
       setError(loadError.message ?? 'Unable to load team news yet.');
     });
   }, [clubSlug, teamSlug, user?.uid]);
+
+  useEffect(() => (
+    () => {
+      if (postEditImagePreviewUrl) {
+        URL.revokeObjectURL(postEditImagePreviewUrl);
+      }
+    }
+  ), [postEditImagePreviewUrl]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -4532,8 +4564,14 @@ export function NewsPage() {
   }
 
   function handleEditPost(post) {
+    if (postEditImagePreviewUrl) {
+      URL.revokeObjectURL(postEditImagePreviewUrl);
+    }
+
     setEditingPostId(post.id);
     setPostEditDraft(post.body ?? '');
+    setPostEditImageFile(null);
+    setPostEditImagePreviewUrl('');
     setEditingCommentId('');
     setCommentEditDraft('');
     setError('');
@@ -4541,8 +4579,40 @@ export function NewsPage() {
   }
 
   function handleCancelPostEdit() {
+    if (postEditImagePreviewUrl) {
+      URL.revokeObjectURL(postEditImagePreviewUrl);
+    }
+
     setEditingPostId('');
     setPostEditDraft('');
+    setPostEditImageFile(null);
+    setPostEditImagePreviewUrl('');
+  }
+
+  async function handlePostEditImageSelected(file) {
+    if (!file) {
+      if (postEditImagePreviewUrl) {
+        URL.revokeObjectURL(postEditImagePreviewUrl);
+      }
+
+      setPostEditImageFile(null);
+      setPostEditImagePreviewUrl('');
+      return;
+    }
+
+    setError('');
+
+    try {
+      const resizedFile = await createResizedNewsImageFile(file);
+      if (postEditImagePreviewUrl) {
+        URL.revokeObjectURL(postEditImagePreviewUrl);
+      }
+
+      setPostEditImageFile(resizedFile);
+      setPostEditImagePreviewUrl(URL.createObjectURL(resizedFile));
+    } catch (selectionError) {
+      setError(selectionError.message ?? 'Unable to prepare that image.');
+    }
   }
 
   async function handleSavePostEdit(post) {
@@ -4554,15 +4624,21 @@ export function NewsPage() {
       await saveNewsPost({
         body: postEditDraft,
         clubSlug,
-        imageFile: null,
+        imageFile: postEditImageFile,
         linkUrl: post.linkUrl ?? '',
         post,
         teamSlug,
         title: post.title || `${user?.displayName || 'Team'} post`,
         user,
       });
+      if (postEditImagePreviewUrl) {
+        URL.revokeObjectURL(postEditImagePreviewUrl);
+      }
+
       setEditingPostId('');
       setPostEditDraft('');
+      setPostEditImageFile(null);
+      setPostEditImagePreviewUrl('');
       setMessage('Post updated.');
       await loadNewsData();
     } catch (editError) {
@@ -4613,10 +4689,16 @@ export function NewsPage() {
   }
 
   function handleEditComment(comment) {
+    if (postEditImagePreviewUrl) {
+      URL.revokeObjectURL(postEditImagePreviewUrl);
+    }
+
     setEditingCommentId(comment.id);
     setCommentEditDraft(comment.body ?? '');
     setEditingPostId('');
     setPostEditDraft('');
+    setPostEditImageFile(null);
+    setPostEditImagePreviewUrl('');
     setError('');
     setMessage('');
   }
@@ -4811,10 +4893,12 @@ export function NewsPage() {
           onEditComment={handleEditComment}
           onEditPost={handleEditPost}
           onPostEditChange={setPostEditDraft}
+          onPostEditImageSelected={handlePostEditImageSelected}
           onReactionToggle={(post, reactionType) => handleReactionToggle(post, reactionType)}
           onSaveCommentEdit={handleSaveCommentEdit}
           onSavePostEdit={handleSavePostEdit}
           postEditDraft={postEditDraft}
+          postEditImagePreviewUrl={postEditImagePreviewUrl}
           reactingPostId={reactingPostId}
           savingCommentId={savingCommentId}
           savingPostId={savingPostId}
