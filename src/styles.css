@@ -5221,6 +5221,10 @@ ul {
   display: none;
 }
 
+.standalone-page-menu {
+  display: none;
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -5618,6 +5622,22 @@ code {
 
   .mobile-page-menu {
     display: flex;
+  }
+
+  .standalone-page-menu {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 0.55rem;
+    margin: 0 0 1rem;
+    padding: 0.75rem;
+    border: 1px solid rgba(126, 161, 255, 0.16);
+    border-radius: 20px;
+    background: rgba(4, 10, 18, 0.72);
+  }
+
+  .standalone-page-menu[hidden] {
+    display: none;
   }
 
   .content {

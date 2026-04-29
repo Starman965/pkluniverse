@@ -150,11 +150,9 @@ export default function TeamChooserPage() {
       }
     }
 
-    document.body.classList.add('hub-nav-open');
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      document.body.classList.remove('hub-nav-open');
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [mobileMenuOpen]);
@@ -165,14 +163,6 @@ export default function TeamChooserPage() {
 
   return (
     <div className="auth-page standalone-mobile-page">
-      <button
-        aria-label="Close page menu"
-        className="hub-nav-overlay"
-        hidden={!mobileMenuOpen}
-        onClick={() => setMobileMenuOpen(false)}
-        type="button"
-      />
-
       <header className="hub-topbar standalone-mobile-topbar">
         <button
           aria-controls="standalone-page-menu"
@@ -198,17 +188,9 @@ export default function TeamChooserPage() {
       <aside
         id="standalone-page-menu"
         aria-label="Page navigation"
-        className={`sidebar mobile-page-menu ${mobileMenuOpen ? 'sidebar--open' : ''}`}
+        className="standalone-page-menu"
+        hidden={!mobileMenuOpen}
       >
-        <div className="sidebar__header">
-          <div className="sidebar__team-card">
-            <img alt="PKL Universe" className="sidebar__team-logo" src={defaultTeamLogo} />
-            <div className="sidebar__team-copy">
-              <h1 className="sidebar__team-title">My Teams</h1>
-              <p className="sidebar__team-captain">Choose where to go next</p>
-            </div>
-          </div>
-        </div>
         <nav className="sidebar__nav">
           <div className="sidebar__nav-group">
             {lastActiveTeam ? (
