@@ -565,6 +565,17 @@ service cloud.firestore {
               'requestedClubSlug',
               'updatedAt',
             ])
+          )
+          || (
+            isPlatformAdmin()
+            && request.resource.data.clubId == resource.data.clubId
+            && request.resource.data.slug == resource.data.slug
+            && request.resource.data.createdBy == resource.data.createdBy
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'logoPath',
+              'logoUrl',
+              'updatedAt',
+            ])
           );
         allow delete: if isPlatformAdmin();
 

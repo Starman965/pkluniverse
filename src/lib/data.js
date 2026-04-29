@@ -1799,6 +1799,50 @@ export async function updateTeamSettings({
   }
 }
 
+export async function updateTeamLogoAsAdmin({ clubSlug, logoFile, teamSlug, user }) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to update a team logo.');
+  }
+
+  const platformAdmin = await isPlatformAdmin(user.uid, user.email);
+
+  if (!platformAdmin) {
+    throw new Error('Only app admins can update team logos here.');
+  }
+
+  if (!logoFile) {
+    throw new Error('Choose a logo image first.');
+  }
+
+  const teamRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug);
+  const teamSnapshot = await getDoc(teamRef);
+
+  if (!teamSnapshot.exists()) {
+    throw new Error('That team could not be found.');
+  }
+
+  const currentTeam = teamSnapshot.data();
+  const uploadedLogo = await uploadTeamLogo({
+    clubSlug,
+    file: logoFile,
+    teamSlug,
+  });
+
+  await updateDoc(teamRef, {
+    logoPath: uploadedLogo.logoPath,
+    logoUrl: uploadedLogo.logoUrl,
+    updatedAt: serverTimestamp(),
+  });
+
+  if (currentTeam.logoPath && currentTeam.logoPath !== uploadedLogo.logoPath) {
+    await deleteStoragePath(currentTeam.logoPath);
+  }
+
+  return uploadedLogo;
+}
+
 export async function archiveTeam({ clubSlug, teamSlug, user }) {
   requireDb();
 

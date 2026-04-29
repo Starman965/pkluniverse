@@ -67,7 +67,13 @@ export default function ClubDirectoryPage() {
             {clubs.map((club) => (
               <article key={club.slug} className="club-directory-card">
                 {club.logoUrl ? (
-                  <img alt={`${club.name} logo`} className="club-directory-card__logo" src={club.logoUrl} />
+                  <img
+                    alt={`${club.name} logo`}
+                    className="club-directory-card__logo"
+                    decoding="async"
+                    loading="lazy"
+                    src={club.logoUrl}
+                  />
                 ) : (
                   <div className="club-directory-card__badge">{buildClubInitials(club.name)}</div>
                 )}

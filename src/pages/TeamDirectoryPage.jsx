@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import defaultTeamLogo from '../../default_team_logo.png';
+import defaultTeamLogo from '../../default_team_logo.webp';
 import { listTeamDirectory } from '../lib/data';
 
 export default function TeamDirectoryPage() {
@@ -68,6 +68,8 @@ export default function TeamDirectoryPage() {
                         <img
                           alt={`${team.name} logo`}
                           className="membership-card__logo"
+                          decoding="async"
+                          loading="lazy"
                           src={team.logoUrl || defaultTeamLogo}
                         />
                         <div className="membership-card__content">

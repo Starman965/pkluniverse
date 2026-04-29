@@ -10,8 +10,8 @@ import {
   listTeamMembers,
   setLastActiveTeam,
 } from '../lib/data';
-import defaultTeamLogo from '../../default_team_logo.png';
-import pklUniverseWideLogo from '../../pkl_universe_wide_logo.png';
+import defaultTeamLogo from '../../default_team_logo.webp';
+import pklUniverseWideLogo from '../../pkl_universe_wide_logo.webp';
 
 const primaryRoutes = [
   { label: 'News Feed', to: 'news' },

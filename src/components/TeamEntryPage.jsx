@@ -3,8 +3,8 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { createTeam, joinTeamByCode, listMemberships } from '../lib/data';
 import { clearOnboardingIntent, readOnboardingIntent, writeOnboardingIntent } from '../lib/onboardingIntent';
-import createTeamImage from '../../create_team.png';
-import joinTeamImage from '../../join_team.png';
+import createTeamImage from '../../create_team.webp';
+import joinTeamImage from '../../join_team.webp';
 
 const MODE_CONTENT = {
   create: {
@@ -199,6 +199,8 @@ export default function TeamEntryPage({ mode }) {
             <img
               alt={content.imageAlt}
               className={`onboarding-card__image ${content.imageClassName}`}
+              decoding="async"
+              loading="lazy"
               src={content.image}
             />
           </div>

@@ -29,7 +29,7 @@ service firebase.storage {
     }
 
     match /clubs/{clubId}/teams/{teamId}/branding/{fileName} {
-      allow read: if isTeamMember(clubId, teamId);
+      allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin();
       allow write: if hasTeamRole(clubId, teamId, ['captain', 'coCaptain']) || isPlatformAdmin();
     }
 

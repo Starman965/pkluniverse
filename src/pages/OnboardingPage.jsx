@@ -1,7 +1,7 @@
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import createTeamImage from '../../create_team.png';
-import joinTeamImage from '../../join_team.png';
+import createTeamImage from '../../create_team.webp';
+import joinTeamImage from '../../join_team.webp';
 
 export default function OnboardingPage() {
   const { signOutUser, user } = useAuth();
@@ -37,7 +37,13 @@ export default function OnboardingPage() {
 
         <div className="marketing-action-grid">
           <Link className="marketing-action-card" to="/create">
-            <img alt="Create a team" className="marketing-action-card__image" src={createTeamImage} />
+            <img
+              alt="Create a team"
+              className="marketing-action-card__image"
+              decoding="async"
+              loading="lazy"
+              src={createTeamImage}
+            />
             <div className="marketing-action-card__body">
               <strong>Create a Team</strong>
               <span>Pick a name and create a team hub for your teammates in one click.</span>
@@ -45,7 +51,13 @@ export default function OnboardingPage() {
           </Link>
 
           <Link className="marketing-action-card" to="/join">
-            <img alt="Join a team" className="marketing-action-card__image" src={joinTeamImage} />
+            <img
+              alt="Join a team"
+              className="marketing-action-card__image"
+              decoding="async"
+              loading="lazy"
+              src={joinTeamImage}
+            />
             <div className="marketing-action-card__body">
               <strong>Join a Team</strong>
               <span>Ask your team captain for the invite code to get added to your team hub.</span>

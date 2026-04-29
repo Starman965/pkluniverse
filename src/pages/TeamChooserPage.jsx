@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getTeam, isPlatformAdmin, listClubs, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
-import createTeamImage from '../../create_a_team.png';
-import defaultTeamLogo from '../../default_team_logo.png';
+import createTeamImage from '../../create_a_team.webp';
+import defaultTeamLogo from '../../default_team_logo.webp';
 
 function buildCaptainLabel(members, players) {
   const playerMap = new Map(players.map((player) => [player.id, player]));
@@ -138,7 +138,7 @@ export default function TeamChooserPage() {
           </div>
 
           <Link className="team-chooser__create-card" to="/create">
-            <img alt="" aria-hidden="true" src={createTeamImage} />
+            <img alt="" aria-hidden="true" decoding="async" loading="lazy" src={createTeamImage} />
             <span>
               <strong>Create a team</strong>
               <small>Start another team hub and invite players.</small>
@@ -163,6 +163,8 @@ export default function TeamChooserPage() {
                 <img
                   alt={`${membership.teamName} logo`}
                   className="membership-card__logo"
+                  decoding="async"
+                  loading="lazy"
                   src={membership.logoUrl || defaultTeamLogo}
                 />
                 <div className="membership-card__content">

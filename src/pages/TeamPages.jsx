@@ -50,11 +50,12 @@ import {
   toggleNewsReaction,
   updateChallenge,
   updateNewsComment,
+  updateTeamLogoAsAdmin,
   updateTeamMemberRole,
   updateTeamSettings,
 } from '../lib/data';
-import blackhawkPickleballCourts from '../../blackhawk_pickleball_courts.png';
-import defaultTeamLogo from '../../default_team_logo.png';
+import blackhawkPickleballCourts from '../../blackhawk_pickleball_courts.webp';
+import defaultTeamLogo from '../../default_team_logo.webp';
 
 function canManageRole(role) {
   return role === 'captain' || role === 'coCaptain';
@@ -330,10 +331,15 @@ function loadImageElement(source) {
   });
 }
 
-async function createCroppedSquareImageFile(source, cropPixels, fileName = 'image.png') {
+const CROPPED_IMAGE_QUALITY = 0.82;
+const LOGO_CROP_OUTPUT_SIZE = 256;
+const HEADSHOT_CROP_OUTPUT_SIZE = 384;
+const NEWS_IMAGE_MAX_SIDE = 1200;
+const NEWS_IMAGE_QUALITY = 0.82;
+
+async function createCroppedSquareImageFile(source, cropPixels, fileName = 'image.webp', outputSize = LOGO_CROP_OUTPUT_SIZE) {
   const image = await loadImageElement(source);
   const canvas = document.createElement('canvas');
-  const outputSize = 1024;
   canvas.width = outputSize;
   canvas.height = outputSize;
 
@@ -362,10 +368,48 @@ async function createCroppedSquareImageFile(source, cropPixels, fileName = 'imag
       }
 
       reject(new Error('We could not create that cropped image.'));
-    }, 'image/png');
+    }, 'image/webp', CROPPED_IMAGE_QUALITY);
   });
 
-  return new File([blob], fileName.replace(/\.[^.]+$/, '') + '.png', { type: 'image/png' });
+  return new File([blob], fileName.replace(/\.[^.]+$/, '') + '.webp', { type: 'image/webp' });
+}
+
+async function createResizedNewsImageFile(file, maxSide = NEWS_IMAGE_MAX_SIDE) {
+  const source = await readFileAsDataUrl(file);
+  const image = await loadImageElement(source);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+
+  if (!sourceWidth || !sourceHeight) {
+    throw new Error('That news image could not be read.');
+  }
+
+  const scale = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
+  const outputWidth = Math.max(1, Math.round(sourceWidth * scale));
+  const outputHeight = Math.max(1, Math.round(sourceHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('We could not prepare that news image.');
+  }
+
+  context.drawImage(image, 0, 0, outputWidth, outputHeight);
+
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob((nextBlob) => {
+      if (nextBlob) {
+        resolve(nextBlob);
+        return;
+      }
+
+      reject(new Error('We could not create that news image.'));
+    }, 'image/webp', NEWS_IMAGE_QUALITY);
+  });
+
+  return new File([blob], (file.name || 'news-image').replace(/\.[^.]+$/, '') + '.webp', { type: 'image/webp' });
 }
 
 function formatRoleLabel(role) {
@@ -888,6 +932,8 @@ function StandingsSummary({ games, team }) {
                         <div className="standings-scoreboard__team">
                           <img
                             alt={`${team?.name ?? 'Your team'} logo`}
+                            decoding="async"
+                            loading="lazy"
                             src={team?.logoUrl || defaultTeamLogo}
                           />
                           <span>{team?.name ?? 'Your team'}</span>
@@ -1252,6 +1298,8 @@ export function ClubTeamsPage() {
                   <img
                     alt={`${clubTeam.name} logo`}
                     className="membership-card__logo"
+                    decoding="async"
+                    loading="lazy"
                     src={clubTeam.logoUrl || defaultTeamLogo}
                   />
                   <div className="membership-card__content">
@@ -1392,7 +1440,12 @@ export function ClubCentralPage() {
             </div>
 
             <div className="club-central-page__image-card">
-              <img alt="Blackhawk Sports Complex Pickleball court map" src={blackhawkPickleballCourts} />
+              <img
+                alt="Blackhawk Sports Complex Pickleball court map"
+                decoding="async"
+                loading="lazy"
+                src={blackhawkPickleballCourts}
+              />
             </div>
 
             <div className="club-central-page__section">
@@ -1612,6 +1665,8 @@ export function TeamMembersPage() {
                     <img
                       alt={`${entry.fullName} headshot`}
                       className="team-member-card__avatar team-member-card__avatar--photo"
+                      decoding="async"
+                      loading="lazy"
                       src={entry.headshotUrl}
                     />
                   ) : (
@@ -1694,7 +1749,7 @@ export function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [headshotPreviewUrl, setHeadshotPreviewUrl] = useState('');
   const [headshotCropImageSrc, setHeadshotCropImageSrc] = useState('');
-  const [headshotCropFileName, setHeadshotCropFileName] = useState('player-headshot.png');
+  const [headshotCropFileName, setHeadshotCropFileName] = useState('player-headshot.webp');
   const [headshotCrop, setHeadshotCrop] = useState({ x: 0, y: 0 });
   const [headshotZoom, setHeadshotZoom] = useState(1);
   const [headshotCropPixels, setHeadshotCropPixels] = useState(null);
@@ -1712,7 +1767,7 @@ export function ProfilePage() {
 
   function clearHeadshotCropper() {
     setHeadshotCropImageSrc('');
-    setHeadshotCropFileName('player-headshot.png');
+    setHeadshotCropFileName('player-headshot.webp');
     setHeadshotCrop({ x: 0, y: 0 });
     setHeadshotZoom(1);
     setHeadshotCropPixels(null);
@@ -1781,7 +1836,7 @@ export function ProfilePage() {
     try {
       const imageSrc = await readFileAsDataUrl(file);
       setHeadshotCropImageSrc(imageSrc);
-      setHeadshotCropFileName(file.name || 'player-headshot.png');
+      setHeadshotCropFileName(file.name || 'player-headshot.webp');
       setHeadshotCrop({ x: 0, y: 0 });
       setHeadshotZoom(1);
       setHeadshotCropPixels(null);
@@ -1805,6 +1860,7 @@ export function ProfilePage() {
         headshotCropImageSrc,
         headshotCropPixels,
         headshotCropFileName,
+        HEADSHOT_CROP_OUTPUT_SIZE,
       );
       setForm((current) => ({ ...current, headshotFile: croppedFile }));
       replaceHeadshotPreview(URL.createObjectURL(croppedFile));
@@ -4065,7 +4121,7 @@ function NewsFeed({
               <div className="news-feed-card__author">
                 <div className="news-feed-card__avatar">
                   {post.authorPhotoUrl ? (
-                    <img alt="" src={post.authorPhotoUrl} />
+                    <img alt="" decoding="async" loading="lazy" src={post.authorPhotoUrl} />
                   ) : (
                     buildPlayerInitials(post.authorName || 'Teammate')
                   )}
@@ -4107,7 +4163,7 @@ function NewsFeed({
 
             {post.imageUrl ? (
               <div className="news-feed-card__image-wrap">
-                <img alt="" className="news-feed-card__image" src={post.imageUrl} />
+                <img alt="" className="news-feed-card__image" decoding="async" loading="lazy" src={post.imageUrl} />
               </div>
             ) : null}
 
@@ -4614,18 +4670,30 @@ export function NewsPage() {
     }
   }
 
-  function handleImageSelected(file) {
-    setForm((current) => {
-      if (current.imagePreviewUrl) {
-        URL.revokeObjectURL(current.imagePreviewUrl);
-      }
+  async function handleImageSelected(file) {
+    if (!file) {
+      removeSelectedImage();
+      return;
+    }
 
-      return {
-        ...current,
-        imageFile: file,
-        imagePreviewUrl: file ? URL.createObjectURL(file) : '',
-      };
-    });
+    setError('');
+
+    try {
+      const resizedFile = await createResizedNewsImageFile(file);
+      setForm((current) => {
+        if (current.imagePreviewUrl) {
+          URL.revokeObjectURL(current.imagePreviewUrl);
+        }
+
+        return {
+          ...current,
+          imageFile: resizedFile,
+          imagePreviewUrl: URL.createObjectURL(resizedFile),
+        };
+      });
+    } catch (selectionError) {
+      setError(selectionError.message ?? 'Unable to prepare that image.');
+    }
   }
 
   function removeSelectedImage() {
@@ -4906,6 +4974,22 @@ export function NewsroomPage() {
     setDrawerOpen(true);
   }
 
+  async function handleImageSelected(file) {
+    if (!file) {
+      setForm((current) => ({ ...current, imageFile: null }));
+      return;
+    }
+
+    setError('');
+
+    try {
+      const resizedFile = await createResizedNewsImageFile(file);
+      setForm((current) => ({ ...current, imageFile: resizedFile }));
+    } catch (selectionError) {
+      setError(selectionError.message ?? 'Unable to prepare that image.');
+    }
+  }
+
   return (
     <div className="page-grid news-page newsroom-page">
       <section className="card">
@@ -5051,9 +5135,8 @@ export function NewsroomPage() {
               <label className="field">
                 <span>Optional image</span>
                 <input
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, imageFile: event.target.files?.[0] ?? null }))
-                  }
+                  accept="image/*"
+                  onChange={(event) => handleImageSelected(event.target.files?.[0] ?? null)}
                   type="file"
                 />
               </label>
@@ -5863,7 +5946,7 @@ export function SettingsPage() {
   const [requestedClubSlug, setRequestedClubSlug] = useState('');
   const [logoPreviewUrl, setLogoPreviewUrl] = useState('');
   const [cropImageSrc, setCropImageSrc] = useState('');
-  const [cropFileName, setCropFileName] = useState('team-logo.png');
+  const [cropFileName, setCropFileName] = useState('team-logo.webp');
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [cropPixels, setCropPixels] = useState(null);
@@ -5894,7 +5977,7 @@ export function SettingsPage() {
 
   function clearCropper() {
     setCropImageSrc('');
-    setCropFileName('team-logo.png');
+    setCropFileName('team-logo.webp');
     setCrop({ x: 0, y: 0 });
     setZoom(1);
     setCropPixels(null);
@@ -5967,7 +6050,7 @@ export function SettingsPage() {
     try {
       const nextCropSource = await readFileAsDataUrl(file);
       setCropImageSrc(nextCropSource);
-      setCropFileName(file.name || 'team-logo.png');
+      setCropFileName(file.name || 'team-logo.webp');
       setCrop({ x: 0, y: 0 });
       setZoom(1);
       setCropPixels(null);
@@ -6564,9 +6647,17 @@ export function ClubAffiliationAdminPage() {
   const [adminPlayers, setAdminPlayers] = useState([]);
   const [loadingAdminPlayers, setLoadingAdminPlayers] = useState(false);
   const [copyingPlayers, setCopyingPlayers] = useState(false);
+  const [updatingTeamLogoId, setUpdatingTeamLogoId] = useState('');
+  const [teamLogoCropTarget, setTeamLogoCropTarget] = useState(null);
+  const [teamLogoCropImageSrc, setTeamLogoCropImageSrc] = useState('');
+  const [teamLogoCropFileName, setTeamLogoCropFileName] = useState('team-logo.webp');
+  const [teamLogoCrop, setTeamLogoCrop] = useState({ x: 0, y: 0 });
+  const [teamLogoZoom, setTeamLogoZoom] = useState(1);
+  const [teamLogoCropPixels, setTeamLogoCropPixels] = useState(null);
+  const [creatingTeamLogoCrop, setCreatingTeamLogoCrop] = useState(false);
   const [clubCropTarget, setClubCropTarget] = useState(null);
   const [clubCropImageSrc, setClubCropImageSrc] = useState('');
-  const [clubCropFileName, setClubCropFileName] = useState('club-logo.png');
+  const [clubCropFileName, setClubCropFileName] = useState('club-logo.webp');
   const [clubCrop, setClubCrop] = useState({ x: 0, y: 0 });
   const [clubZoom, setClubZoom] = useState(1);
   const [clubCropPixels, setClubCropPixels] = useState(null);
@@ -6826,10 +6917,85 @@ export function ClubAffiliationAdminPage() {
     }
   }
 
+  function getTeamLogoUpdateKey(teamSummary) {
+    return `${teamSummary.clubSlug}-${teamSummary.teamSlug}`;
+  }
+
+  function clearTeamLogoCropper() {
+    setTeamLogoCropTarget(null);
+    setTeamLogoCropImageSrc('');
+    setTeamLogoCropFileName('team-logo.webp');
+    setTeamLogoCrop({ x: 0, y: 0 });
+    setTeamLogoZoom(1);
+    setTeamLogoCropPixels(null);
+    setCreatingTeamLogoCrop(false);
+  }
+
+  async function handleTeamLogoSelection(teamSummary, event) {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    setError('');
+    setMessage('');
+
+    try {
+      const nextCropSource = await readFileAsDataUrl(file);
+      setTeamLogoCropTarget(teamSummary);
+      setTeamLogoCropImageSrc(nextCropSource);
+      setTeamLogoCropFileName(file.name || 'team-logo.webp');
+      setTeamLogoCrop({ x: 0, y: 0 });
+      setTeamLogoZoom(1);
+      setTeamLogoCropPixels(null);
+    } catch (selectionError) {
+      setError(selectionError.message ?? 'That logo file could not be read as an image.');
+    }
+  }
+
+  async function handleApplyTeamLogoCrop() {
+    if (!teamLogoCropTarget || !teamLogoCropImageSrc || !teamLogoCropPixels) {
+      setError('Move and zoom the team logo before applying the crop.');
+      return;
+    }
+
+    const updateKey = getTeamLogoUpdateKey(teamLogoCropTarget);
+    setCreatingTeamLogoCrop(true);
+    setUpdatingTeamLogoId(updateKey);
+    setError('');
+    setMessage('');
+
+    try {
+      const croppedFile = await createCroppedSquareImageFile(
+        teamLogoCropImageSrc,
+        teamLogoCropPixels,
+        teamLogoCropFileName,
+      );
+
+      await updateTeamLogoAsAdmin({
+        clubSlug: teamLogoCropTarget.clubSlug,
+        logoFile: croppedFile,
+        teamSlug: teamLogoCropTarget.teamSlug,
+        user,
+      });
+
+      setMessage(`${teamLogoCropTarget.name} logo updated.`);
+      clearTeamLogoCropper();
+      await loadAdminData();
+    } catch (cropError) {
+      setError(cropError.message ?? 'Unable to update that team logo.');
+    } finally {
+      setCreatingTeamLogoCrop(false);
+      setUpdatingTeamLogoId('');
+    }
+  }
+
   function clearClubCropper() {
     setClubCropTarget(null);
     setClubCropImageSrc('');
-    setClubCropFileName('club-logo.png');
+    setClubCropFileName('club-logo.webp');
     setClubCrop({ x: 0, y: 0 });
     setClubZoom(1);
     setClubCropPixels(null);
@@ -6868,7 +7034,7 @@ export function ClubAffiliationAdminPage() {
       const nextCropSource = await readFileAsDataUrl(file);
       setClubCropTarget(target);
       setClubCropImageSrc(nextCropSource);
-      setClubCropFileName(file.name || 'club-logo.png');
+      setClubCropFileName(file.name || 'club-logo.webp');
       setClubCrop({ x: 0, y: 0 });
       setClubZoom(1);
       setClubCropPixels(null);
@@ -7190,6 +7356,8 @@ export function ClubAffiliationAdminPage() {
                     <img
                       alt={`${teamSummary.name} logo`}
                       className="admin-team-card__logo"
+                      decoding="async"
+                      loading="lazy"
                       src={teamSummary.logoUrl || defaultTeamLogo}
                     />
                     <div className="admin-team-card__content">
@@ -7221,6 +7389,18 @@ export function ClubAffiliationAdminPage() {
                         <span>Primary location: {teamSummary.primaryLocation}</span>
                       ) : null}
                       <div className="admin-team-card__actions">
+                        <label className="button button--ghost">
+                          {updatingTeamLogoId === `${teamSummary.clubSlug}-${teamSummary.teamSlug}`
+                            ? 'Updating logo...'
+                            : 'Replace logo'}
+                          <input
+                            accept="image/*"
+                            className="settings-admin-form__file-input"
+                            disabled={updatingTeamLogoId === `${teamSummary.clubSlug}-${teamSummary.teamSlug}`}
+                            onChange={(event) => handleTeamLogoSelection(teamSummary, event)}
+                            type="file"
+                          />
+                        </label>
                         <Link
                           className="button button--ghost"
                           to={`/c/${teamSummary.clubSlug}/t/${teamSummary.teamSlug}/settings`}
@@ -7338,6 +7518,8 @@ export function ClubAffiliationAdminPage() {
                         <img
                           alt={`${club.name} logo`}
                           className="club-admin-card__logo"
+                          decoding="async"
+                          loading="lazy"
                           src={clubDrafts[club.slug]?.logoPreviewUrl || club.logoUrl}
                         />
                       ) : (
@@ -7698,6 +7880,67 @@ export function ClubAffiliationAdminPage() {
           </section>
         )}
       </section>
+
+      {teamLogoCropImageSrc ? (
+        <div className="logo-cropper" role="dialog" aria-modal="true" aria-label="Crop team logo">
+          <button
+            aria-label="Close team logo cropper"
+            className="logo-cropper__backdrop"
+            onClick={clearTeamLogoCropper}
+            type="button"
+          />
+          <aside className="logo-cropper__panel">
+            <div className="logo-cropper__header">
+              <div>
+                <p className="eyebrow">Crop team logo</p>
+                <h2>{teamLogoCropTarget?.name ?? 'Team'} logo</h2>
+                <p className="logo-cropper__copy">
+                  Reposition the original logo and zoom until it fits well inside the square preview.
+                </p>
+              </div>
+              <button className="button button--ghost" onClick={clearTeamLogoCropper} type="button">
+                Cancel
+              </button>
+            </div>
+
+            <div className="logo-cropper__workspace">
+              <div className="logo-cropper__canvas">
+                <Cropper
+                  aspect={1}
+                  crop={teamLogoCrop}
+                  image={teamLogoCropImageSrc}
+                  onCropChange={setTeamLogoCrop}
+                  onCropComplete={(_, croppedAreaPixels) => setTeamLogoCropPixels(croppedAreaPixels)}
+                  onZoomChange={setTeamLogoZoom}
+                  showGrid={false}
+                  zoom={teamLogoZoom}
+                />
+              </div>
+
+              <label className="field logo-cropper__zoom">
+                <span>Zoom</span>
+                <input
+                  max="3"
+                  min="1"
+                  onChange={(event) => setTeamLogoZoom(Number(event.target.value))}
+                  step="0.01"
+                  type="range"
+                  value={teamLogoZoom}
+                />
+              </label>
+            </div>
+
+            <div className="settings-admin-form__actions">
+              <button className="button" disabled={creatingTeamLogoCrop} onClick={handleApplyTeamLogoCrop} type="button">
+                {creatingTeamLogoCrop ? 'Updating logo...' : 'Use cropped logo'}
+              </button>
+              <button className="button button--ghost" onClick={clearTeamLogoCropper} type="button">
+                Cancel
+              </button>
+            </div>
+          </aside>
+        </div>
+      ) : null}
 
       {clubCropImageSrc ? (
         <div className="logo-cropper" role="dialog" aria-modal="true" aria-label="Crop club logo">

@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import clubTileImage from '../../club_tile.png';
-import createTeamImage from '../../create_team.png';
-import heroShot from '../../hero_shot.png';
-import joinTeamImage from '../../join_team.png';
-import loginNowImage from '../../login_now.png';
-import pklUniverseWideLogo from '../../pkl_universe_wide_logo.png';
-import teamHubAvailImage from '../../team_hub_avail.png';
-import teamHubMatchImage from '../../team_hub_match.png';
-import teamHubNewsImage from '../../team_hub_news.png';
-import teamHubRosterImage from '../../team_hub_roster.png';
+import clubTileImage from '../../club_tile.webp';
+import createTeamImage from '../../create_team.webp';
+import heroShot from '../../hero_shot.webp';
+import joinTeamImage from '../../join_team.webp';
+import loginNowImage from '../../login_now.webp';
+import pklUniverseWideLogo from '../../pkl_universe_wide_logo.webp';
+import teamHubAvailImage from '../../team_hub_avail.webp';
+import teamHubMatchImage from '../../team_hub_match.webp';
+import teamHubNewsImage from '../../team_hub_news.webp';
+import teamHubRosterImage from '../../team_hub_roster.webp';
 
 const TEAM_HUB_PREVIEWS = [
   {
@@ -98,7 +98,13 @@ export default function LandingPage() {
 
         <div className="marketing-action-grid">
           <Link className="marketing-action-card" to="/teams">
-            <img alt="Login to PKL Universe" className="marketing-action-card__image" src={loginNowImage} />
+            <img
+              alt="Login to PKL Universe"
+              className="marketing-action-card__image"
+              decoding="async"
+              loading="lazy"
+              src={loginNowImage}
+            />
             <div className="marketing-action-card__body">
               <strong>Log In</strong>
               <span>Already using PKL Universe? Sign in to get back to your team hub.</span>
@@ -106,7 +112,13 @@ export default function LandingPage() {
           </Link>
 
           <Link className="marketing-action-card" to="/join">
-            <img alt="Join a team" className="marketing-action-card__image" src={joinTeamImage} />
+            <img
+              alt="Join a team"
+              className="marketing-action-card__image"
+              decoding="async"
+              loading="lazy"
+              src={joinTeamImage}
+            />
             <div className="marketing-action-card__body">
               <strong>Join Team</strong>
               <span>Have an invite code? Join a PKL Universe roster created by your captain or organizer.</span>
@@ -114,7 +126,13 @@ export default function LandingPage() {
           </Link>
 
           <Link className="marketing-action-card" to="/create">
-            <img alt="Create a team" className="marketing-action-card__image" src={createTeamImage} />
+            <img
+              alt="Create a team"
+              className="marketing-action-card__image"
+              decoding="async"
+              loading="lazy"
+              src={createTeamImage}
+            />
             <div className="marketing-action-card__body">
               <strong>Create Team</strong>
               <span>Organizing your players? Create a team hub, invite your roster, and keep match day moving.</span>
@@ -128,6 +146,8 @@ export default function LandingPage() {
           <img
             alt="Club players organizing regular pickleball play into fun team competition"
             className="marketing-info-card__image"
+            decoding="async"
+            loading="lazy"
             src={clubTileImage}
           />
           <div className="marketing-info-card__content">
@@ -167,6 +187,8 @@ export default function LandingPage() {
             <img
               alt={activeTeamHubPreview.alt}
               className="team-hub-preview-card__image"
+              decoding="async"
+              loading="lazy"
               src={activeTeamHubPreview.image}
             />
           </button>
