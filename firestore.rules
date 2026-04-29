@@ -512,6 +512,7 @@ service cloud.firestore {
             && request.resource.data.slug == resource.data.slug
             && request.resource.data.createdBy == resource.data.createdBy
             && request.resource.data.status == resource.data.status
+            && request.resource.data.teamDivision in ['', 'men', 'women', 'mixed']
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
               'affiliationStatus',
               'joinCode',
@@ -523,6 +524,7 @@ service cloud.firestore {
               'requestedClubName',
               'requestedClubSlug',
               'status',
+              'teamDivision',
               'updatedAt',
             ])
             && (

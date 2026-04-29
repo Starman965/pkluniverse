@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Cropper from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import TeamDivisionLabel from '../components/TeamDivisionLabel';
 import { useAuth } from '../context/AuthContext';
 import {
   PLAYER_AVAILABLE_DAYS,
@@ -54,6 +55,7 @@ import {
   updateTeamMemberRole,
   updateTeamSettings,
 } from '../lib/data';
+import { TEAM_DIVISION_OPTIONS, getVisibleTeamDivisionLabel } from '../lib/teamDivision';
 import blackhawkPickleballCourts from '../../blackhawk_pickleball_courts.webp';
 import defaultTeamLogo from '../../default_team_logo.webp';
 
@@ -662,11 +664,12 @@ function MemberStatIcon({ type }) {
   );
 }
 
-function createEmptyTeamSettingsForm(teamName = '', primaryLocation = '') {
+function createEmptyTeamSettingsForm(team = {}) {
   return {
     logoFile: null,
-    primaryLocation,
-    teamName,
+    primaryLocation: team.primaryLocation ?? '',
+    teamDivision: team.teamDivision ?? '',
+    teamName: team.name ?? '',
   };
 }
 
@@ -1148,6 +1151,8 @@ export function ClubTeamsPage() {
   const [clubTeams, setClubTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [challengeConfirmTeam, setChallengeConfirmTeam] = useState(null);
+  const [challengeNoticeTeam, setChallengeNoticeTeam] = useState(null);
 
   useEffect(() => {
     let ignore = false;
@@ -1222,14 +1227,20 @@ export function ClubTeamsPage() {
   const clubLogo = approvedClub?.logoUrl || currentTeam?.logoUrl || defaultTeamLogo;
   const canShowClubInformation = currentTeam?.affiliationStatus === 'approved' && approvedClubSlug && approvedClubSlug !== 'independent';
   const canChallengeClubTeams = canManageRole(membership?.role);
+  const clubTeamCount = clubTeams.length;
+  const clubMemberCount = clubTeams.reduce((total, clubTeam) => total + (clubTeam.memberCount ?? 0), 0);
 
   function handleChallengeTeam(clubTeam) {
-    const confirmed = window.confirm(`Challenge ${clubTeam.name}?`);
-
-    if (!confirmed) {
+    if (!canChallengeClubTeams) {
+      setChallengeNoticeTeam(clubTeam);
       return;
     }
 
+    setChallengeConfirmTeam(clubTeam);
+  }
+
+  function startChallengeTeam(clubTeam) {
+    setChallengeConfirmTeam(null);
     navigate('../challenges', {
       state: {
         challengeTargetTeamKey: `${clubTeam.clubSlug}:${clubTeam.teamSlug}`,
@@ -1244,21 +1255,11 @@ export function ClubTeamsPage() {
         <div className="club-teams-page__header">
           <div className="club-teams-page__intro">
             <p className="eyebrow">Club teams</p>
-            <h1>{approvedClubSlug ? `${clubName} teams` : 'Club Teams'}</h1>
+            <h1>{approvedClubSlug ? `${clubName} Team Hub` : 'Club Team Hub'}</h1>
             <p className="club-teams-page__copy">
               See the other teams playing in your club network. These are the teams you can challenge.
             </p>
           </div>
-
-          {canShowClubInformation ? (
-            <Link className="club-teams-page__info-card" to="../club-central">
-              <img alt={`${clubName} logo`} src={clubLogo} />
-              <span>
-                <strong>Club Information</strong>
-                <small>Pickleball Club News and Information</small>
-              </span>
-            </Link>
-          ) : null}
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -1272,18 +1273,41 @@ export function ClubTeamsPage() {
             This team is not connected to a club yet. Once it is approved for a club, the other club teams will appear here.
           </div>
         ) : clubTeams.length > 0 ? (
-          <div className="membership-list club-teams-page__list">
-            {clubTeams.map((clubTeam) => {
+          <>
+            {canShowClubInformation ? (
+              <Link className="club-teams-page__info-card" to="../club-central">
+                <img alt={`${clubName} logo`} src={clubLogo} />
+                <span className="club-teams-page__info-copy">
+                  <span className="eyebrow">Club Information</span>
+                  <strong>{clubName}</strong>
+                  <small>Open club news, court information, and pickleball program details.</small>
+                  <span className="club-teams-page__info-cta">View club info</span>
+                </span>
+                <span className="club-teams-page__stats" aria-label="Club team stats">
+                  <span>
+                    <strong>{clubTeamCount}</strong>
+                    <small>{clubTeamCount === 1 ? 'Team' : 'Teams'}</small>
+                  </span>
+                  <span>
+                    <strong>{clubMemberCount}</strong>
+                    <small>{clubMemberCount === 1 ? 'Member' : 'Members'}</small>
+                  </span>
+                </span>
+              </Link>
+            ) : null}
+
+            <div className="membership-list club-teams-page__list">
+              {clubTeams.map((clubTeam) => {
               const isCurrentTeam = clubTeam.clubSlug === clubSlug && clubTeam.teamSlug === teamSlug;
-              const canChallengeTeam = canChallengeClubTeams && !isCurrentTeam;
+              const canOpenChallengeAction = !isCurrentTeam;
 
               return (
                 <article
                   key={`${clubTeam.clubSlug}-${clubTeam.teamSlug}`}
-                  className={`membership-card ${isCurrentTeam ? 'membership-card--active' : ''} ${canChallengeTeam ? 'membership-card--actionable' : ''}`}
-                  onClick={canChallengeTeam ? () => handleChallengeTeam(clubTeam) : undefined}
+                  className={`membership-card ${isCurrentTeam ? 'membership-card--active' : ''} ${canOpenChallengeAction ? 'membership-card--actionable' : ''}`}
+                  onClick={canOpenChallengeAction ? () => handleChallengeTeam(clubTeam) : undefined}
                   onKeyDown={
-                    canChallengeTeam
+                    canOpenChallengeAction
                       ? (event) => {
                           if (event.key === 'Enter' || event.key === ' ') {
                             event.preventDefault();
@@ -1292,8 +1316,8 @@ export function ClubTeamsPage() {
                         }
                       : undefined
                   }
-                  role={canChallengeTeam ? 'button' : undefined}
-                  tabIndex={canChallengeTeam ? 0 : undefined}
+                  role={canOpenChallengeAction ? 'button' : undefined}
+                  tabIndex={canOpenChallengeAction ? 0 : undefined}
                 >
                   <img
                     alt={`${clubTeam.name} logo`}
@@ -1308,17 +1332,76 @@ export function ClubTeamsPage() {
                       Captain: {clubTeam.captainNames?.length ? clubTeam.captainNames.join(', ') : 'TBD'}
                     </span>
                     <span>Members: {clubTeam.memberCount ?? 0}</span>
+                    {getVisibleTeamDivisionLabel(clubTeam) ? (
+                      <TeamDivisionLabel className="membership-card__division" value={clubTeam.teamDivision} />
+                    ) : null}
                     <span>Location: {clubTeam.primaryLocation || 'Not set'}</span>
-                    {canChallengeTeam ? <span className="membership-card__action">Click to challenge this team</span> : null}
+                    {canOpenChallengeAction ? (
+                      <span className="membership-card__action">
+                        <svg className="membership-card__action-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                          <path d="M8 4h8v4.5a4 4 0 0 1-8 0V4z" />
+                          <path d="M8 6H5.5a2.5 2.5 0 0 0 2.8 3.7" />
+                          <path d="M16 6h2.5a2.5 2.5 0 0 1-2.8 3.7" />
+                          <path d="M12 12.5V17" />
+                          <path d="M8.5 20h7" />
+                          <path d="M10 17h4l.8 3H9.2z" />
+                        </svg>
+                        Challenge team
+                      </span>
+                    ) : null}
                   </div>
                 </article>
               );
             })}
-          </div>
+            </div>
+          </>
         ) : (
           <p>No other approved teams are connected to this club yet.</p>
         )}
       </section>
+
+      {challengeConfirmTeam ? (
+        <div className="club-challenge-dialog" role="dialog" aria-modal="true" aria-label="Confirm team challenge">
+          <button
+            aria-label="Close challenge confirmation"
+            className="club-challenge-dialog__backdrop"
+            onClick={() => setChallengeConfirmTeam(null)}
+            type="button"
+          />
+          <div className="club-challenge-dialog__panel">
+            <p className="eyebrow">Team challenge</p>
+            <h2>Challenge {challengeConfirmTeam.name}?</h2>
+            <p>Start a club challenge request that the other team captain can review and respond to.</p>
+            <div className="club-challenge-dialog__actions">
+              <button className="button button--ghost" onClick={() => setChallengeConfirmTeam(null)} type="button">
+                Cancel
+              </button>
+              <button className="button" onClick={() => startChallengeTeam(challengeConfirmTeam)} type="button">
+                Start challenge
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {challengeNoticeTeam ? (
+        <div className="club-challenge-dialog" role="dialog" aria-modal="true" aria-label="Challenge team notice">
+          <button
+            aria-label="Close challenge notice"
+            className="club-challenge-dialog__backdrop"
+            onClick={() => setChallengeNoticeTeam(null)}
+            type="button"
+          />
+          <div className="club-challenge-dialog__panel">
+            <p className="eyebrow">Team challenge</p>
+            <h2>{challengeNoticeTeam.name}</h2>
+            <p>Your team captain must initiate the challenge.</p>
+            <button className="button" onClick={() => setChallengeNoticeTeam(null)} type="button">
+              Got it
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -6082,7 +6165,7 @@ export function SettingsPage() {
     setMembers(memberData);
     setPlayers(playerData);
     setMembership(membershipData);
-    setForm(createEmptyTeamSettingsForm(teamData?.name ?? '', teamData?.primaryLocation ?? ''));
+    setForm(createEmptyTeamSettingsForm(teamData ?? {}));
     setRequestedClubSlug(
       teamData?.affiliationStatus === 'pending'
         ? teamData?.requestedClubSlug || ''
@@ -6177,6 +6260,7 @@ export function SettingsPage() {
         clubSlug,
         logoFile: form.logoFile,
         primaryLocation: form.primaryLocation,
+        teamDivision: form.teamDivision,
         teamName: form.teamName,
         teamSlug,
         user,
@@ -6383,9 +6467,9 @@ export function SettingsPage() {
         <section className="schedule-admin-card">
           <div className="schedule-admin-card__header">
             <div>
-              <p className="eyebrow">Branding</p>
-              <h2>Team profile</h2>
-              <p>Upload your own custom logo, and add your primary match location.</p>
+              <p className="eyebrow">Profile</p>
+              <h2>{team?.name ? `${team.name} Profile` : 'Team Profile'}</h2>
+              <p>Upload your own custom logo, add your primary match location, and set your team division.</p>
             </div>
           </div>
 
@@ -6425,6 +6509,31 @@ export function SettingsPage() {
                       value={form.primaryLocation}
                     />
                   </label>
+                  <label className="field">
+                    <span>Team division</span>
+                    <span className="team-division-field">
+                      <select
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            teamDivision: event.target.value,
+                          }))
+                        }
+                        value={form.teamDivision}
+                      >
+                        {TEAM_DIVISION_OPTIONS.map((option) => (
+                          <option key={option.value || 'not-set'} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <TeamDivisionLabel
+                        className="team-division-field__symbol"
+                        showLabel={false}
+                        value={form.teamDivision}
+                      />
+                    </span>
+                  </label>
                   <button className="button settings-admin-save-button" disabled={saving} type="submit">
                     {saving ? 'Saving settings...' : hasUnsavedLogo ? 'Save Settings & Publish Logo' : 'Save Settings'}
                   </button>
@@ -6432,7 +6541,7 @@ export function SettingsPage() {
                 <div className="settings-admin-logo-prompt">
                   <strong>Need help with a team logo?</strong>
                   <p>Copy and paste this into ChatGPT or your favorite AI image generator.</p>
-                  <pre>{`Create a 512 x 512 square PNG team logo for a pickleball team named "${form.teamName || 'Team Name'}". Use a bold sports logo style, clean vector look, strong contrast, a simple dark background behind the logo, and make it readable as a small app icon. Avoid transparent backgrounds, tiny text, and photo-realistic details.`}</pre>
+                  <pre>{`Create a square team logo image for a pickleball team named "${form.teamName || 'Team Name'}". Use a bold sports logo style, clean vector look, strong contrast, a simple dark background behind the logo, and make it readable as a small app icon. Avoid transparent backgrounds, tiny text, and photo-realistic details.`}</pre>
                 </div>
               </div>
             </form>
@@ -7469,6 +7578,9 @@ export function ClubAffiliationAdminPage() {
                           : 'TBD'}
                       </span>
                       <span>Members: {teamSummary.memberCount}</span>
+                      {getVisibleTeamDivisionLabel(teamSummary) ? (
+                        <TeamDivisionLabel className="membership-card__division" value={teamSummary.teamDivision} />
+                      ) : null}
                       {teamSummary.primaryLocation ? (
                         <span>Primary location: {teamSummary.primaryLocation}</span>
                       ) : null}

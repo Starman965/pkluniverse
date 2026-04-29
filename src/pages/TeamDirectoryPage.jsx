@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import TeamDivisionLabel from '../components/TeamDivisionLabel';
+import { getVisibleTeamDivisionLabel } from '../lib/teamDivision';
 import defaultTeamLogo from '../../default_team_logo.webp';
 import { listTeamDirectory } from '../lib/data';
 
@@ -81,6 +83,9 @@ export default function TeamDirectoryPage() {
                           <span>
                             Members: {team.memberCount ?? 0}
                           </span>
+                          {getVisibleTeamDivisionLabel(team) ? (
+                            <TeamDivisionLabel className="membership-card__division" value={team.teamDivision} />
+                          ) : null}
                           <span>Club: {group.clubName}</span>
                           <span>Location: {team.primaryLocation || 'Not set'}</span>
                         </div>

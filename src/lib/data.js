@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, isFirebaseConfigured, storage } from './firebase';
+import { normalizeTeamDivision } from './teamDivision';
 
 const INDEPENDENT_CLUB = {
   id: 'independent',
@@ -1157,6 +1158,7 @@ export async function listAdminTeamSummaries(user) {
             name: team.name ?? teamSlug,
             primaryLocation: team.primaryLocation ?? '',
             requestedClubSlug: team.requestedClubSlug ?? '',
+            teamDivision: normalizeTeamDivision(team.teamDivision),
             teamSlug: sourceTeamSlug,
           };
         }),
@@ -1241,6 +1243,7 @@ export async function listTeamDirectory() {
           name: team.name ?? teamSlug,
           primaryLocation: team.primaryLocation ?? '',
           sourceClubSlug: club.slug,
+          teamDivision: normalizeTeamDivision(team.teamDivision),
           teamSlug: sourceTeamSlug,
         };
       }));
@@ -1433,6 +1436,7 @@ export async function createTeam({ teamName, user }) {
     requestedClubSlug: '',
     slug: teamSlug,
     status: 'active',
+    teamDivision: '',
     updatedAt: serverTimestamp(),
   });
 
@@ -1744,6 +1748,7 @@ export async function updateTeamSettings({
   logoFile,
   primaryLocation = '',
   status = 'active',
+  teamDivision = '',
   teamName,
   teamSlug,
   user,
@@ -1765,6 +1770,7 @@ export async function updateTeamSettings({
 
   const currentTeam = teamSnapshot.data();
   const normalizedPrimaryLocation = primaryLocation.trim();
+  const normalizedTeamDivision = normalizeTeamDivision(teamDivision);
   let uploadedLogo = null;
 
   if (logoFile) {
@@ -1782,6 +1788,7 @@ export async function updateTeamSettings({
     primaryLocation: normalizedPrimaryLocation,
     publicSlug: slugify(normalizedName),
     status,
+    teamDivision: normalizedTeamDivision,
     updatedAt: serverTimestamp(),
   });
 
@@ -2107,7 +2114,7 @@ export async function listApprovedClubTeams(clubSlug) {
     return snapshot.docs
       .map((entry) => {
         const data = entry.data();
-          const teamSlug = entry.id;
+        const teamSlug = entry.id;
 
         return {
           affiliationStatus: data.affiliationStatus ?? 'independent',
@@ -2118,7 +2125,8 @@ export async function listApprovedClubTeams(clubSlug) {
           name: data.name ?? entry.id,
           primaryLocation: data.primaryLocation ?? '',
           status: data.status ?? 'active',
-            teamSlug,
+          teamDivision: normalizeTeamDivision(data.teamDivision),
+          teamSlug,
         };
       })
       .filter((team) =>

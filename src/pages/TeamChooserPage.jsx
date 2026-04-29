@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
+import TeamDivisionLabel from '../components/TeamDivisionLabel';
 import { useAuth } from '../context/AuthContext';
 import { getTeam, isPlatformAdmin, listClubs, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
+import { getVisibleTeamDivisionLabel } from '../lib/teamDivision';
 import createTeamImage from '../../create_a_team.webp';
 import defaultTeamLogo from '../../default_team_logo.webp';
 
@@ -89,6 +91,7 @@ export default function TeamChooserPage() {
                 clubLabel: buildClubLabel(team, clubNameBySlug),
                 logoUrl: team?.logoUrl || '',
                 memberCountLabel: buildMemberCountLabel(members),
+                teamDivision: team?.teamDivision ?? '',
                 teamName: team?.name || membership.teamName,
               };
             } catch {
@@ -172,6 +175,9 @@ export default function TeamChooserPage() {
                   <span>{membership.captainLabel}</span>
                   <span>{membership.clubLabel}</span>
                   <span>{membership.memberCountLabel}</span>
+                  {getVisibleTeamDivisionLabel(membership) ? (
+                    <TeamDivisionLabel className="membership-card__division" value={membership.teamDivision} />
+                  ) : null}
                 </div>
               </Link>
             ))}
