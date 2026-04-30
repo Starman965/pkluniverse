@@ -14,24 +14,137 @@ import defaultTeamLogo from '../../default_team_logo.webp';
 import pklUniverseWideLogo from '../../pkl_universe_wide_logo.webp';
 
 const primaryRoutes = [
-  { label: 'News Feed', to: 'news' },
-  { label: 'Team Members', to: 'team' },
-  { label: 'Team Matches', to: 'schedule' },
-  { label: 'Team Standing', to: 'team-standing' },
-  { label: 'Club Hub', requiresApprovedClub: true, to: 'club-teams' },
-  { label: 'My Profile', to: 'profile' },
+  { icon: 'news', label: 'News Feed', to: 'news' },
+  { icon: 'members', label: 'Team Members', to: 'team' },
+  { icon: 'matches', label: 'Team Matches', to: 'schedule' },
+  { icon: 'standings', label: 'Team Standing', to: 'team-standing' },
+  { icon: 'club', label: 'Club Hub', requiresApprovedClub: true, to: 'club-teams' },
+  { icon: 'profile', label: 'My Profile', to: 'profile' },
 ];
 
 const adminRoutes = [
-  { label: 'Club Challenges', to: 'challenges' },
-  { label: 'Manage Matches', to: 'schedule-scores' },
-  { label: 'Build Rosters', to: 'roster-mgmt' },
-  { label: 'Manage Players', to: 'player-mgmt' },
-  { label: 'Team Settings', to: 'settings' },
+  { icon: 'challenges', label: 'Club Challenges', to: 'challenges' },
+  { icon: 'manageMatches', label: 'Manage Matches', to: 'schedule-scores' },
+  { icon: 'rosters', label: 'Build Rosters', to: 'roster-mgmt' },
+  { icon: 'managePlayers', label: 'Manage Players', to: 'player-mgmt' },
+  { icon: 'settings', label: 'Team Settings', to: 'settings' },
 ];
 
 function canManageRole(role) {
   return role === 'captain' || role === 'coCaptain';
+}
+
+function PlayerMenuIcon({ type }) {
+  if (type === 'news') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M5 5.5h14v13H5z" />
+        <path d="M8 9h8M8 12h8M8 15h5" />
+      </svg>
+    );
+  }
+
+  if (type === 'members') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M8.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+        <path d="M2.8 20a5.8 5.8 0 0 1 11.4 0" />
+        <path d="M16.5 10.5a3 3 0 1 0-1.1-5.8M16.2 14.2A5 5 0 0 1 21.2 20" />
+      </svg>
+    );
+  }
+
+  if (type === 'matches') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M6.5 3.5v3M17.5 3.5v3M4.5 8h15" />
+        <path d="M5 5.5h14v15H5z" />
+        <path d="M8 12h3v3H8zM14 12h2" />
+      </svg>
+    );
+  }
+
+  if (type === 'standings') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M5 20V9h4v11M10 20V4h4v16M15 20v-7h4v7" />
+      </svg>
+    );
+  }
+
+  if (type === 'club') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M4 20V8l8-4 8 4v12" />
+        <path d="M9 20v-7h6v7M7 10.5h2M15 10.5h2" />
+      </svg>
+    );
+  }
+
+  if (type === 'profile') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
+        <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+      </svg>
+    );
+  }
+
+  return null;
+}
+
+function CaptainMenuIcon({ type }) {
+  if (type === 'challenges') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M7 17 17 7" />
+        <path d="M14 4h6v6" />
+        <path d="M10 20H4v-6" />
+      </svg>
+    );
+  }
+
+  if (type === 'manageMatches') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M6.5 3.5v3M17.5 3.5v3M4.5 8h15" />
+        <path d="M5 5.5h14v15H5z" />
+        <path d="M8 13h4M8 16h7" />
+        <path d="m16.5 11 1.2 1.2 2-2" />
+      </svg>
+    );
+  }
+
+  if (type === 'rosters') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M5 5h14v15H5z" />
+        <path d="M8 9h8M8 13h8M8 17h5" />
+        <path d="M3.5 8h3M3.5 14h3" />
+      </svg>
+    );
+  }
+
+  if (type === 'managePlayers') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+        <path d="M3.5 20a5.5 5.5 0 0 1 10.8-1.4" />
+        <path d="M17.5 14v6M14.5 17h6" />
+      </svg>
+    );
+  }
+
+  if (type === 'settings') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3.2" />
+        <path d="M12 2.8v3M12 18.2v3M4.9 4.9 7 7M17 17l2.1 2.1M2.8 12h3M18.2 12h3M4.9 19.1 7 17M17 7l2.1-2.1" />
+      </svg>
+    );
+  }
+
+  return null;
 }
 
 function formatClubLabel(clubSlug) {
@@ -322,7 +435,8 @@ export default function AppShell() {
                 onClick={() => setMobileNavOpen(false)}
                 to={route.to}
               >
-                {route.label}
+                <PlayerMenuIcon type={route.icon} />
+                <span>{route.label}</span>
               </NavLink>
             ))}
           </div>
@@ -337,7 +451,8 @@ export default function AppShell() {
                   onClick={() => setMobileNavOpen(false)}
                   to={route.to}
                 >
-                  {route.label}
+                  <CaptainMenuIcon type={route.icon} />
+                  <span>{route.label}</span>
                 </NavLink>
               ))}
             </div>

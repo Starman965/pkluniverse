@@ -2166,7 +2166,7 @@ export async function listApprovedClubTeams(clubSlug) {
 
 function normalizeChallenge(entry, challengeClubSlug) {
   const data = entry.data();
-  const normalizedPlayersNeeded = [2, 4, 6, 8].includes(Number(data.playersNeeded))
+  const normalizedPlayersNeeded = [1, 2, 4, 6, 8].includes(Number(data.playersNeeded))
     ? Number(data.playersNeeded)
     : 8;
 
@@ -2325,7 +2325,7 @@ export async function createChallenge({
   const trimmedNotes = notes.trim();
   const trimmedTimeLabel = timeLabel.trim();
   const normalizedDateTbd = dateTbd === true;
-  const normalizedPlayersNeeded = [2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
+  const normalizedPlayersNeeded = [1, 2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
 
   if (!normalizedDateTbd && !trimmedIsoDate) {
     throw new Error('Choose a date or mark the challenge date as TBD.');
@@ -2470,7 +2470,7 @@ export async function updateChallenge({
   const trimmedNotes = notes.trim();
   const trimmedTimeLabel = timeLabel.trim();
   const normalizedDateTbd = dateTbd === true;
-  const normalizedPlayersNeeded = [2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
+  const normalizedPlayersNeeded = [1, 2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
 
   if (!normalizedDateTbd && !trimmedIsoDate) {
     throw new Error('Choose a date or mark the challenge date as TBD.');
@@ -3281,7 +3281,7 @@ export async function listGames(clubSlug, teamSlug) {
       opponent: data.opponent ?? '',
       opponentScore: normalizeNullableNumber(data.opponentScore),
       pairings: normalizePairings(data.pairings, data.rosterPlayerIds ?? []),
-      playersNeeded: [2, 4, 6, 8].includes(Number(data.playersNeeded)) ? Number(data.playersNeeded) : 8,
+      playersNeeded: [1, 2, 4, 6, 8].includes(Number(data.playersNeeded)) ? Number(data.playersNeeded) : 8,
       result:
         data.result ??
         deriveMatchResult(
@@ -3345,7 +3345,7 @@ export async function saveGame({
   const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', nextGameId);
   const normalizedTeamScore = normalizeNullableNumber(teamScore);
   const normalizedOpponentScore = normalizeNullableNumber(opponentScore);
-  const normalizedPlayersNeeded = [2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
+  const normalizedPlayersNeeded = [1, 2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
   const finalStatus =
     matchStatus === 'completed' ||
     (normalizedTeamScore !== null && normalizedOpponentScore !== null)
@@ -3513,7 +3513,7 @@ export async function saveGamePairings({
   const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', gameId);
 
   const gameSnapshot = await getDoc(gameRef);
-  const playersNeeded = [2, 4, 6, 8].includes(Number(gameSnapshot.data()?.playersNeeded))
+  const playersNeeded = [1, 2, 4, 6, 8].includes(Number(gameSnapshot.data()?.playersNeeded))
     ? Number(gameSnapshot.data().playersNeeded)
     : 8;
 

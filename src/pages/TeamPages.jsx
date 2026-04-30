@@ -111,7 +111,7 @@ function buildScheduleAdminDrafts(games) {
 
 function createEmptyScheduleAdminForm() {
   return {
-    dateTbd: false,
+    dateTbd: true,
     isoDate: '',
     location: '',
     matchStatus: 'scheduled',
@@ -131,7 +131,7 @@ function createEmptyChallengeForm(primaryLocation = '') {
     location: primaryLocation,
     minute: '00',
     notes: '',
-    period: 'PM',
+    period: 'AM',
     playersNeeded: 8,
     targetTeamKey: '',
     visibility: 'targeted',
@@ -761,7 +761,7 @@ function parseTimeLabel(timeLabel) {
     return {
       hour: '',
       minute: '00',
-      period: 'PM',
+      period: 'AM',
     };
   }
 
@@ -772,7 +772,7 @@ function parseTimeLabel(timeLabel) {
   return {
     hour: hour >= 1 && hour <= 12 ? String(hour) : '',
     minute,
-    period: TIME_PICKER_PERIODS.includes(period) ? period : 'PM',
+    period: TIME_PICKER_PERIODS.includes(period) ? period : 'AM',
   };
 }
 
@@ -781,7 +781,7 @@ function buildTimeLabel({ hour, minute, period }) {
     return '';
   }
 
-  return `${hour}:${minute || '00'} ${period || 'PM'}`;
+  return `${hour}:${minute || '00'} ${period || 'AM'}`;
 }
 
 function TimePickerField({ disabled = false, onChange, value }) {
@@ -3082,23 +3082,30 @@ export function ScheduleScoresPage() {
     }
   }
 
-  function formatMatchDateLabel(game) {
+  function getMatchDateBadge(game) {
     if (game.dateTbd) {
-      return 'DATE TBD';
+      return {
+        day: 'TBD',
+        month: 'Date',
+        weekday: '',
+      };
     }
 
     if (!game.isoDate) {
-      return 'DATE TBD';
+      return {
+        day: 'TBD',
+        month: 'Date',
+        weekday: '',
+      };
     }
 
-    return new Intl.DateTimeFormat('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    })
-      .format(new Date(`${game.isoDate}T12:00:00`))
-      .toUpperCase();
+    const date = new Date(`${game.isoDate}T12:00:00`);
+
+    return {
+      day: new Intl.DateTimeFormat('en-US', { day: 'numeric' }).format(date),
+      month: new Intl.DateTimeFormat('en-US', { month: 'short' }).format(date),
+      weekday: new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date),
+    };
   }
 
   return (
@@ -3106,9 +3113,7 @@ export function ScheduleScoresPage() {
       <section className="card">
         <p className="eyebrow">Match admin</p>
         <h1>Manage Matches</h1>
-        <p>
-          Manage your team schedule, including manual matches and accepted club challenges.
-        </p>
+        <p>Add matches, enter scores, and update your team schedule.</p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
         {message ? <div className="notice notice--success">{message}</div> : null}
@@ -3122,16 +3127,6 @@ export function ScheduleScoresPage() {
           </div>
         ) : canManage ? (
           <>
-            <div className="schedule-admin-toolbar">
-              <div>
-                <h2>Team schedule</h2>
-                <p>Review, score, edit, or remove matches from your team's schedule.</p>
-              </div>
-              <button className="button" onClick={openAddEditor} type="button">
-                Add Match
-              </button>
-            </div>
-
             {isEditorOpen ? (
               <section className="schedule-admin-card schedule-admin-card--editor">
                 <div className="schedule-admin-card__header">
@@ -3140,7 +3135,7 @@ export function ScheduleScoresPage() {
                     <p>
                       {isEditing
                         ? 'Update match details and scores.'
-                        : 'Add a league, outside, or already-arranged match to the live team schedule.'}
+                        : 'Add a match to your team schedule.'}
                     </p>
                   </div>
                   {isEditing && form.timeLabel ? (
@@ -3163,12 +3158,35 @@ export function ScheduleScoresPage() {
                       />
                     </label>
                   </div>
+                  <label className="checkbox-field schedule-admin-form__tbd">
+                    <input
+                      checked={form.dateTbd}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          dateTbd: event.target.checked,
+                          isoDate: event.target.checked ? '' : current.isoDate,
+                          timeLabel: event.target.checked ? '' : current.timeLabel,
+                        }))
+                      }
+                      type="checkbox"
+                    />
+                    <span>
+                      <strong>Date and time TBD</strong>
+                      <small>Leave checked until the match date is confirmed.</small>
+                    </span>
+                  </label>
                   <div className="schedule-admin-form__datetime-row">
                     <label className="field schedule-admin-form__date-field">
                       <span>Game date</span>
                       <input
-                        disabled={form.dateTbd}
-                        onChange={(event) => setForm((current) => ({ ...current, isoDate: event.target.value }))}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            dateTbd: event.target.value ? false : current.dateTbd,
+                            isoDate: event.target.value,
+                          }))
+                        }
                         type="date"
                         value={form.isoDate}
                       />
@@ -3186,7 +3204,7 @@ export function ScheduleScoresPage() {
                         }
                         value={form.playersNeeded}
                       >
-                        {[2, 4, 6, 8].map((count) => (
+                        {[1, 2, 4, 6, 8].map((count) => (
                           <option key={count} value={count}>
                             {count}
                           </option>
@@ -3194,21 +3212,6 @@ export function ScheduleScoresPage() {
                       </select>
                     </label>
                   </div>
-                  <label className="checkbox-field schedule-admin-form__tbd">
-                    <input
-                      checked={form.dateTbd}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          dateTbd: event.target.checked,
-                          isoDate: event.target.checked ? '' : current.isoDate,
-                          timeLabel: event.target.checked ? '' : current.timeLabel,
-                        }))
-                      }
-                      type="checkbox"
-                    />
-                    <span>Date and time TBD</span>
-                  </label>
                   <div className="schedule-admin-form__status-score-row">
                     <label className="field schedule-admin-form__status-field">
                       <span>Match status</span>
@@ -3265,20 +3268,25 @@ export function ScheduleScoresPage() {
 
             {games.length > 0 ? (
               <>
-                <div className="availability-tabs" aria-label="Schedule admin views">
-                  <button
-                    className={`availability-tabs__button ${activeTab === 'upcoming' ? 'availability-tabs__button--active' : ''}`}
-                    onClick={() => setActiveTab('upcoming')}
-                    type="button"
-                  >
-                    Upcoming ({upcomingGames.length})
-                  </button>
-                  <button
-                    className={`availability-tabs__button ${activeTab === 'past' ? 'availability-tabs__button--active' : ''}`}
-                    onClick={() => setActiveTab('past')}
-                    type="button"
-                  >
-                    Past ({pastGames.length})
+                <div className="schedule-admin-list-controls">
+                  <div className="availability-tabs" aria-label="Schedule admin views">
+                    <button
+                      className={`availability-tabs__button ${activeTab === 'upcoming' ? 'availability-tabs__button--active' : ''}`}
+                      onClick={() => setActiveTab('upcoming')}
+                      type="button"
+                    >
+                      Upcoming ({upcomingGames.length})
+                    </button>
+                    <button
+                      className={`availability-tabs__button ${activeTab === 'past' ? 'availability-tabs__button--active' : ''}`}
+                      onClick={() => setActiveTab('past')}
+                      type="button"
+                    >
+                      Past ({pastGames.length})
+                    </button>
+                  </div>
+                  <button className="button" onClick={openAddEditor} type="button">
+                    Add Match
                   </button>
                 </div>
 
@@ -3286,34 +3294,41 @@ export function ScheduleScoresPage() {
                   <div className="schedule-admin-match-grid">
                     {visibleGames.map((game) => {
                       const hasScore = game.teamScore !== null || game.opponentScore !== null;
+                      const dateBadge = getMatchDateBadge(game);
 
                       return (
                         <article key={game.id} className="schedule-match-card schedule-admin-match-card">
-                          <p className="schedule-match-card__date">{formatMatchDateLabel(game)}</p>
-                          <h2 className="schedule-match-card__title">
-                            VS. {game.opponent || 'Opponent TBD'}
-                          </h2>
-                          <span>
-                            {game.timeLabel || 'Time TBD'} {game.timeLabel ? '·' : ''}{' '}
-                            {game.location || 'Location TBD'}
-                          </span>
-                          <div className="schedule-match-card__stats">
-                            <span>Status: {game.matchStatus === 'completed' ? 'Completed' : 'Scheduled'}</span>
-                            <span>{game.playersNeeded ?? 8} Players</span>
-                            <span>
-                              {hasScore
-                                ? `${teamName || 'Team'} ${game.teamScore ?? '-'} · Opponent ${game.opponentScore ?? '-'}`
-                                : 'Score not entered'}
-                            </span>
+                          <div className="schedule-match-card__date-badge" aria-label={game.dateLabel || 'Date TBD'}>
+                            <span>{dateBadge.month}</span>
+                            <strong>{dateBadge.day}</strong>
+                            {dateBadge.weekday ? <small>{dateBadge.weekday}</small> : null}
                           </div>
-                          <div className="schedule-admin-match-card__actions">
-                            <button
-                              className="choice-button"
-                              onClick={() => openEditEditor(game)}
-                              type="button"
-                            >
-                              Edit
-                            </button>
+                          <div className="schedule-match-card__content">
+                            <h2 className="schedule-match-card__title">
+                              VS. {game.opponent || 'Opponent TBD'}
+                            </h2>
+                            <span>
+                              {game.timeLabel || 'Time TBD'} {game.timeLabel ? '·' : ''}{' '}
+                              {game.location || 'Location TBD'}
+                            </span>
+                            <div className="schedule-match-card__stats">
+                              <span>Status: {game.matchStatus === 'completed' ? 'Completed' : 'Scheduled'}</span>
+                              <span>{game.playersNeeded ?? 8} Players</span>
+                              <span>
+                                {hasScore
+                                  ? `${teamName || 'Team'} ${game.teamScore ?? '-'} · Opponent ${game.opponentScore ?? '-'}`
+                                  : 'Score not entered'}
+                              </span>
+                            </div>
+                            <div className="schedule-admin-match-card__actions">
+                              <button
+                                className="choice-button"
+                                onClick={() => openEditEditor(game)}
+                                type="button"
+                              >
+                                Edit
+                              </button>
+                            </div>
                           </div>
                         </article>
                       );
@@ -3324,7 +3339,12 @@ export function ScheduleScoresPage() {
                 )}
               </>
             ) : (
-              <p>No matches yet. Use Add Match to add league play or an outside matchup.</p>
+              <div className="schedule-admin-empty">
+                <p>No matches yet.</p>
+                <button className="button" onClick={openAddEditor} type="button">
+                  Add Match
+                </button>
+              </div>
             )}
           </>
         ) : (
@@ -5621,7 +5641,7 @@ function createChallengeFormFromChallenge(challenge, primaryLocation = '') {
     location: challenge.location && challenge.location !== 'Location TBD' ? challenge.location : primaryLocation,
     minute: challenge.dateTbd === true ? '00' : match?.[2] ?? '00',
     notes: challenge.notes ?? '',
-    period: challenge.dateTbd === true ? 'PM' : match?.[3]?.toUpperCase() ?? 'PM',
+    period: challenge.dateTbd === true ? 'AM' : match?.[3]?.toUpperCase() ?? 'AM',
     playersNeeded: challenge.playersNeeded ?? 8,
     targetTeamKey:
       challenge.visibility === 'targeted'
@@ -6111,7 +6131,7 @@ export function ChallengesPage() {
                           }
                           value={form.playersNeeded}
                         >
-                          {[2, 4, 6, 8].map((count) => (
+                          {[1, 2, 4, 6, 8].map((count) => (
                             <option key={count} value={count}>
                               {count}
                             </option>
@@ -6128,7 +6148,7 @@ export function ChallengesPage() {
                               hour: event.target.checked ? '' : current.hour,
                               isoDate: event.target.checked ? '' : current.isoDate,
                               minute: event.target.checked ? '00' : current.minute,
-                              period: event.target.checked ? 'PM' : current.period,
+                              period: event.target.checked ? 'AM' : current.period,
                             }))
                           }
                           type="checkbox"
