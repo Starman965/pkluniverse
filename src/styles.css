@@ -1535,6 +1535,7 @@ ul {
   gap: 1rem;
   align-items: center;
   margin-top: 1.2rem;
+  max-width: calc((360px * 3) + (0.9rem * 2));
   padding: 0.9rem;
   border: 1px solid rgba(126, 161, 255, 0.18);
   border-radius: 22px;
@@ -1620,6 +1621,139 @@ ul {
   grid-template-columns: repeat(auto-fit, minmax(300px, 360px));
   justify-content: start;
   margin-top: 1rem;
+}
+
+.club-teams-page__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  max-width: calc((360px * 3) + (0.9rem * 2));
+  margin-top: 1rem;
+}
+
+.club-teams-page__tabs {
+  display: inline-flex;
+  width: fit-content;
+  gap: 0.35rem;
+  padding: 0.3rem;
+  border: 1px solid rgba(126, 161, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(3, 8, 20, 0.34);
+}
+
+.club-teams-page__tabs button {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #c9d7ea;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+  padding: 0.55rem 0.95rem;
+}
+
+.club-teams-page__tabs button:hover,
+.club-teams-page__tabs button:focus-visible,
+.club-teams-page__tabs .club-teams-page__tab--active {
+  border-color: rgba(240, 193, 75, 0.28);
+  background: rgba(240, 193, 75, 0.12);
+  color: #f0c14b;
+  outline: none;
+}
+
+.club-teams-page__search {
+  display: grid;
+  gap: 0.25rem;
+  width: min(100%, 280px);
+}
+
+.club-teams-page__search span {
+  color: #9fb6d8;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.club-teams-page__search input {
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(3, 8, 20, 0.38);
+  color: #f5f8ff;
+  font: inherit;
+  font-weight: 800;
+  padding: 0.68rem 0.95rem;
+}
+
+.club-teams-page__search input:focus {
+  border-color: rgba(240, 193, 75, 0.34);
+  outline: none;
+}
+
+.club-teams-page__players-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  justify-content: start;
+  margin-top: 1rem;
+  max-width: calc((360px * 3) + (0.9rem * 2));
+}
+
+.club-player-card {
+  min-height: 230px;
+}
+
+.club-player-card__roles {
+  color: #f0c14b;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.club-player-card__teams {
+  display: grid;
+  gap: 0.4rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.club-player-card__teams span {
+  display: grid;
+  justify-items: center;
+  gap: 0.25rem;
+  border: 1px solid rgba(126, 161, 255, 0.16);
+  border-radius: 16px;
+  background: rgba(126, 161, 255, 0.08);
+  color: #c9d7ea;
+  min-width: 0;
+  padding: 0.4rem 0.25rem;
+}
+
+.club-player-card__teams img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: rgba(3, 8, 20, 0.38);
+  padding: 0.18rem;
+}
+
+.club-player-card__teams small {
+  max-width: 100%;
+  color: #c9d7ea;
+  font-size: 0.62rem;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.club-player-card__stats {
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+}
+
+.club-player-card__stats .team-member-card__stat--record {
+  grid-column: auto;
 }
 
 .club-challenge-dialog {
@@ -5658,6 +5792,10 @@ code {
 @media (max-width: 900px) {
   body.hub-nav-open {
     overflow: hidden;
+  }
+
+  .club-teams-page__players-grid {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   }
 
   .app-shell {

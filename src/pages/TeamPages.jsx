@@ -1349,6 +1349,8 @@ export function ClubTeamsPage() {
   const [error, setError] = useState('');
   const [challengeConfirmTeam, setChallengeConfirmTeam] = useState(null);
   const [challengeNoticeTeam, setChallengeNoticeTeam] = useState(null);
+  const [activeClubTab, setActiveClubTab] = useState('teams');
+  const [clubPlayerSearch, setClubPlayerSearch] = useState('');
 
   useEffect(() => {
     let ignore = false;
@@ -1374,15 +1376,19 @@ export function ClubTeamsPage() {
       ]);
       const enrichedTeams = await Promise.all(
         approvedTeams.map(async (clubTeam) => {
-          const [members, players] = await Promise.all([
+          const [members, players, games] = await Promise.all([
             listTeamMembers(clubTeam.clubSlug, clubTeam.teamSlug).catch(() => []),
             listPlayers(clubTeam.clubSlug, clubTeam.teamSlug).catch(() => []),
+            listGames(clubTeam.clubSlug, clubTeam.teamSlug).catch(() => []),
           ]);
 
           return {
             ...clubTeam,
             captainNames: buildClubTeamCaptainNames(members, players),
+            games,
             memberCount: members.length,
+            members,
+            players,
           };
         }),
       );
@@ -1423,8 +1429,142 @@ export function ClubTeamsPage() {
   const clubLogo = approvedClub?.logoUrl || currentTeam?.logoUrl || defaultTeamLogo;
   const canShowClubInformation = currentTeam?.affiliationStatus === 'approved' && approvedClubSlug && approvedClubSlug !== 'independent';
   const canChallengeClubTeams = canManageRole(membership?.role);
+  const clubPlayers = useMemo(() => {
+    const playersByKey = new Map();
+
+    function getPlayerKey(player, member) {
+      if (player?.uid || member?.uid) {
+        return `uid:${player?.uid || member.uid}`;
+      }
+
+      if (player?.email) {
+        return `email:${player.email.trim().toLowerCase()}`;
+      }
+
+      if (player?.fullName) {
+        return `name:${player.fullName.trim().toLowerCase()}`;
+      }
+
+      return `member:${member?.id ?? player?.id}`;
+    }
+
+    function ensureClubPlayer({ clubTeam, member, player }) {
+      const key = getPlayerKey(player, member);
+      const playerName =
+        player?.fullName ||
+        player?.email ||
+        (member?.uid === user?.uid ? user?.displayName || 'You' : '') ||
+        'Pending roster link';
+      const record = buildPlayerRecord(clubTeam.games ?? [], player?.id);
+      const existing = playersByKey.get(key);
+      const role = member?.role ?? 'member';
+      const teamAffiliation = {
+        logoUrl: clubTeam.logoUrl || defaultTeamLogo,
+        role,
+        teamName: clubTeam.name,
+        teamSlug: clubTeam.teamSlug,
+      };
+
+      if (!existing) {
+        playersByKey.set(key, {
+          id: key,
+          active: player ? player.active !== false : member?.status === 'active',
+          availableCount: countAvailableGames(clubTeam.games ?? [], player?.id),
+          fullName: playerName,
+          gamesPlayedCount: countGamesPlayed(clubTeam.games ?? [], player?.id),
+          headshotUrl: player?.headshotUrl ?? '',
+          initials: buildPlayerInitials(playerName),
+          record,
+          roles: new Set([role]),
+          skillLevel: player?.skillLevel || 'TBD',
+          teamAffiliations: [teamAffiliation],
+        });
+        return;
+      }
+
+      existing.active = existing.active || (player ? player.active !== false : member?.status === 'active');
+      existing.availableCount += countAvailableGames(clubTeam.games ?? [], player?.id);
+      existing.gamesPlayedCount += countGamesPlayed(clubTeam.games ?? [], player?.id);
+      existing.record = {
+        losses: existing.record.losses + record.losses,
+        ties: existing.record.ties + record.ties,
+        wins: existing.record.wins + record.wins,
+      };
+      existing.roles.add(role);
+
+      if (!existing.headshotUrl && player?.headshotUrl) {
+        existing.headshotUrl = player.headshotUrl;
+      }
+
+      if (existing.skillLevel === 'TBD' && player?.skillLevel) {
+        existing.skillLevel = player.skillLevel;
+      }
+
+      if (!existing.teamAffiliations.some((affiliation) => affiliation.teamSlug === teamAffiliation.teamSlug)) {
+        existing.teamAffiliations.push(teamAffiliation);
+      }
+    }
+
+    clubTeams.forEach((clubTeam) => {
+      const memberByPlayerId = new Map(
+        (clubTeam.members ?? []).filter((member) => member.playerId).map((member) => [member.playerId, member]),
+      );
+      const memberByUid = new Map((clubTeam.members ?? []).map((member) => [member.uid, member]));
+      const representedMemberIds = new Set();
+
+      (clubTeam.players ?? []).forEach((player) => {
+        const linkedMember = memberByPlayerId.get(player.id) ?? memberByUid.get(player.uid);
+
+        if (linkedMember?.id) {
+          representedMemberIds.add(linkedMember.id);
+        }
+
+        ensureClubPlayer({ clubTeam, member: linkedMember, player });
+      });
+
+      (clubTeam.members ?? []).forEach((member) => {
+        if (!representedMemberIds.has(member.id)) {
+          ensureClubPlayer({ clubTeam, member, player: null });
+        }
+      });
+    });
+
+    return Array.from(playersByKey.values())
+      .map((clubPlayer) => ({
+        ...clubPlayer,
+        roleLabels: Array.from(clubPlayer.roles).map(formatRoleLabel),
+        winRate: formatPlayerWinRate(clubPlayer.record),
+      }))
+      .sort((left, right) => {
+        if (left.active !== right.active) {
+          return left.active ? -1 : 1;
+        }
+
+        return left.fullName.localeCompare(right.fullName);
+      });
+  }, [clubTeams, user?.displayName, user?.uid]);
+  const filteredClubPlayers = useMemo(() => {
+    const query = clubPlayerSearch.trim().toLowerCase();
+
+    if (!query) {
+      return clubPlayers;
+    }
+
+    return clubPlayers.filter((clubPlayer) => {
+      const searchableText = [
+        clubPlayer.fullName,
+        ...clubPlayer.roleLabels,
+        ...clubPlayer.teamAffiliations.flatMap((affiliation) => [
+          affiliation.teamName,
+          formatRoleLabel(affiliation.role),
+        ]),
+      ].join(' ').toLowerCase();
+
+      return searchableText.includes(query);
+    });
+  }, [clubPlayerSearch, clubPlayers]);
   const clubTeamCount = clubTeams.length;
-  const clubMemberCount = clubTeams.reduce((total, clubTeam) => total + (clubTeam.memberCount ?? 0), 0);
+  const clubMemberCount = clubPlayers.length;
 
   function handleChallengeTeam(clubTeam) {
     if (!canChallengeClubTeams) {
@@ -1492,64 +1632,159 @@ export function ClubTeamsPage() {
               </Link>
             ) : null}
 
-            <div className="membership-list club-teams-page__list">
-              {clubTeams.map((clubTeam) => {
-              const isCurrentTeam = clubTeam.clubSlug === clubSlug && clubTeam.teamSlug === teamSlug;
-              const canOpenChallengeAction = !isCurrentTeam;
-
-              return (
-                <article
-                  key={`${clubTeam.clubSlug}-${clubTeam.teamSlug}`}
-                  className={`membership-card ${isCurrentTeam ? 'membership-card--active' : ''} ${canOpenChallengeAction ? 'membership-card--actionable' : ''}`}
-                  onClick={canOpenChallengeAction ? () => handleChallengeTeam(clubTeam) : undefined}
-                  onKeyDown={
-                    canOpenChallengeAction
-                      ? (event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault();
-                            handleChallengeTeam(clubTeam);
-                          }
-                        }
-                      : undefined
-                  }
-                  role={canOpenChallengeAction ? 'button' : undefined}
-                  tabIndex={canOpenChallengeAction ? 0 : undefined}
+            <div className="club-teams-page__toolbar">
+              <div className="club-teams-page__tabs" role="tablist" aria-label="Club hub sections">
+                <button
+                  aria-controls="club-hub-teams-panel"
+                  aria-selected={activeClubTab === 'teams'}
+                  className={activeClubTab === 'teams' ? 'club-teams-page__tab--active' : ''}
+                  onClick={() => setActiveClubTab('teams')}
+                  role="tab"
+                  type="button"
                 >
-                  <img
-                    alt={`${clubTeam.name} logo`}
-                    className="membership-card__logo"
-                    decoding="async"
-                    loading="lazy"
-                    src={clubTeam.logoUrl || defaultTeamLogo}
+                  Teams
+                </button>
+                <button
+                  aria-controls="club-hub-players-panel"
+                  aria-selected={activeClubTab === 'players'}
+                  className={activeClubTab === 'players' ? 'club-teams-page__tab--active' : ''}
+                  onClick={() => setActiveClubTab('players')}
+                  role="tab"
+                  type="button"
+                >
+                  Players
+                </button>
+              </div>
+
+              {activeClubTab === 'players' ? (
+                <label className="club-teams-page__search">
+                  <span>Search players</span>
+                  <input
+                    aria-label="Search club players"
+                    onChange={(event) => setClubPlayerSearch(event.target.value)}
+                    placeholder="Search players..."
+                    type="search"
+                    value={clubPlayerSearch}
                   />
-                  <div className="membership-card__content">
-                    <strong>{clubTeam.name}{isCurrentTeam ? ' (your team)' : ''}</strong>
-                    <span>
-                      Captain: {clubTeam.captainNames?.length ? clubTeam.captainNames.join(', ') : 'TBD'}
-                    </span>
-                    <span>Members: {clubTeam.memberCount ?? 0}</span>
-                    {getVisibleTeamDivisionLabel(clubTeam) ? (
-                      <TeamDivisionLabel className="membership-card__division" value={clubTeam.teamDivision} />
-                    ) : null}
-                    <span>Location: {clubTeam.primaryLocation || 'Not set'}</span>
-                    {canOpenChallengeAction ? (
-                      <span className="membership-card__action">
-                        <svg className="membership-card__action-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24">
-                          <path d="M8 4h8v4.5a4 4 0 0 1-8 0V4z" />
-                          <path d="M8 6H5.5a2.5 2.5 0 0 0 2.8 3.7" />
-                          <path d="M16 6h2.5a2.5 2.5 0 0 1-2.8 3.7" />
-                          <path d="M12 12.5V17" />
-                          <path d="M8.5 20h7" />
-                          <path d="M10 17h4l.8 3H9.2z" />
-                        </svg>
-                        Challenge team
-                      </span>
-                    ) : null}
-                  </div>
-                </article>
-              );
-            })}
+                </label>
+              ) : null}
             </div>
+
+            {activeClubTab === 'teams' ? (
+              <div id="club-hub-teams-panel" className="membership-list club-teams-page__list" role="tabpanel">
+                {clubTeams.map((clubTeam) => {
+                  const isCurrentTeam = clubTeam.clubSlug === clubSlug && clubTeam.teamSlug === teamSlug;
+                  const canOpenChallengeAction = !isCurrentTeam;
+
+                  return (
+                    <article
+                      key={`${clubTeam.clubSlug}-${clubTeam.teamSlug}`}
+                      className={`membership-card ${isCurrentTeam ? 'membership-card--active' : ''} ${canOpenChallengeAction ? 'membership-card--actionable' : ''}`}
+                      onClick={canOpenChallengeAction ? () => handleChallengeTeam(clubTeam) : undefined}
+                      onKeyDown={
+                        canOpenChallengeAction
+                          ? (event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                handleChallengeTeam(clubTeam);
+                              }
+                            }
+                          : undefined
+                      }
+                      role={canOpenChallengeAction ? 'button' : undefined}
+                      tabIndex={canOpenChallengeAction ? 0 : undefined}
+                    >
+                      <img
+                        alt={`${clubTeam.name} logo`}
+                        className="membership-card__logo"
+                        decoding="async"
+                        loading="lazy"
+                        src={clubTeam.logoUrl || defaultTeamLogo}
+                      />
+                      <div className="membership-card__content">
+                        <strong>{clubTeam.name}{isCurrentTeam ? ' (your team)' : ''}</strong>
+                        <span>
+                          Captain: {clubTeam.captainNames?.length ? clubTeam.captainNames.join(', ') : 'TBD'}
+                        </span>
+                        <span>Members: {clubTeam.memberCount ?? 0}</span>
+                        {getVisibleTeamDivisionLabel(clubTeam) ? (
+                          <TeamDivisionLabel className="membership-card__division" value={clubTeam.teamDivision} />
+                        ) : null}
+                        <span>Location: {clubTeam.primaryLocation || 'Not set'}</span>
+                        {canOpenChallengeAction ? (
+                          <span className="membership-card__action">
+                            <svg className="membership-card__action-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                              <path d="M8 4h8v4.5a4 4 0 0 1-8 0V4z" />
+                              <path d="M8 6H5.5a2.5 2.5 0 0 0 2.8 3.7" />
+                              <path d="M16 6h2.5a2.5 2.5 0 0 1-2.8 3.7" />
+                              <path d="M12 12.5V17" />
+                              <path d="M8.5 20h7" />
+                              <path d="M10 17h4l.8 3H9.2z" />
+                            </svg>
+                            Challenge team
+                          </span>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div id="club-hub-players-panel" className="club-teams-page__players-grid" role="tabpanel">
+                {filteredClubPlayers.length > 0 ? (
+                  filteredClubPlayers.map((clubPlayer) => (
+                    <article key={clubPlayer.id} className="team-member-card club-player-card">
+                      <div className="team-member-card__top">
+                        {clubPlayer.headshotUrl ? (
+                          <img
+                            alt={`${clubPlayer.fullName} headshot`}
+                            className="team-member-card__avatar team-member-card__avatar--photo"
+                            decoding="async"
+                            loading="lazy"
+                            src={clubPlayer.headshotUrl}
+                          />
+                        ) : (
+                          <div className="team-member-card__avatar">{clubPlayer.initials}</div>
+                        )}
+                        <div className="team-member-card__body">
+                          <strong className="team-member-card__name">{clubPlayer.fullName}</strong>
+                          <span className="team-member-card__subtitle">
+                            {clubPlayer.teamAffiliations.map((affiliation) => affiliation.teamName).join(', ')}
+                          </span>
+                          <span className="club-player-card__roles">{clubPlayer.roleLabels.join(', ')}</span>
+                        </div>
+                      </div>
+
+                      <div className="club-player-card__teams" aria-label={`${clubPlayer.fullName} club teams`}>
+                        {clubPlayer.teamAffiliations.map((affiliation) => (
+                          <span key={affiliation.teamSlug} title={`${affiliation.teamName} · ${formatRoleLabel(affiliation.role)}`}>
+                            <img alt={`${affiliation.teamName} logo`} src={affiliation.logoUrl} />
+                            <small>{formatRoleLabel(affiliation.role)}</small>
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="team-member-card__stats club-player-card__stats">
+                        <span className="team-member-card__stat team-member-card__stat--record">
+                          <span><MemberStatIcon type="record" /> Overall Record</span>
+                          <strong>{clubPlayer.record.wins}-{clubPlayer.record.losses}-{clubPlayer.record.ties}</strong>
+                        </span>
+                        <span className="team-member-card__stat team-member-card__stat--win-rate">
+                          <span><MemberStatIcon type="winRate" /> Win Rate</span>
+                          <strong>{clubPlayer.winRate}</strong>
+                        </span>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <p>
+                    {clubPlayers.length > 0
+                      ? 'No players match that search.'
+                      : 'No players are connected to this club yet.'}
+                  </p>
+                )}
+              </div>
+            )}
           </>
         ) : (
           <p>No other approved teams are connected to this club yet.</p>
