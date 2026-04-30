@@ -139,7 +139,7 @@ export default function AuthPage() {
           </button>
 
           <Link className="button button--ghost" to="/">
-            Back to home
+            Return to HomePage
           </Link>
 
           {isAuthenticated ? (
