@@ -333,7 +333,7 @@ textarea {
   gap: 1.1rem;
   grid-template-columns: minmax(240px, 0.78fr) minmax(0, 1fr);
   align-items: center;
-  max-width: 1040px;
+  width: 100%;
   border: 1px solid rgba(126, 161, 255, 0.18);
   border-radius: 24px;
   background:
@@ -422,6 +422,7 @@ textarea {
 .team-hub-preview-card {
   display: grid;
   width: min(100%, 900px);
+  justify-self: center;
   border: 1px solid rgba(126, 161, 255, 0.18);
   border-radius: 24px;
   background: rgba(9, 17, 30, 0.78);
