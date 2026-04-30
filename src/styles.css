@@ -257,9 +257,7 @@ textarea {
 .hero__overlay {
   position: absolute;
   inset: 0;
-  background:
-    linear-gradient(90deg, rgba(5, 10, 18, 0.92) 0%, rgba(5, 10, 18, 0.76) 34%, rgba(5, 10, 18, 0.36) 58%, rgba(5, 10, 18, 0.22) 100%),
-    linear-gradient(180deg, rgba(3, 8, 15, 0.18) 0%, rgba(3, 8, 15, 0.5) 100%);
+  display: none;
   z-index: 1;
   pointer-events: none;
 }

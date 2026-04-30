@@ -77,7 +77,7 @@ export default function LandingPage() {
 
         <div className="hero__top-nav">
           <Link className="hero__top-link" to="/teams">
-            Log In
+            Account
           </Link>
           <span className="hero__top-separator">|</span>
           <Link className="hero__top-link" to="/join">
@@ -91,7 +91,13 @@ export default function LandingPage() {
 
         <div className="hero__content hero__content--landing">
           <img alt="PKL Universe" className="hero__brand" src={pklUniverseWideLogo} />
-          <h1>Add organized team play to your club—without changing how your members already play.</h1>
+          <h1>
+            Add organized team play to your
+            <br />
+            club—without changing how your
+            <br />
+            members already play.
+          </h1>
           <p className="hero__copy">
             PKL Universe gives clubs a simple way to introduce fun, friendly team competition alongside drop-ins and
             regular games—enhancing the member experience, not replacing it.
