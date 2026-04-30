@@ -2675,7 +2675,7 @@ ul {
 
 .news-page {
   grid-template-columns: minmax(0, 1fr);
-  justify-items: center;
+  justify-items: start;
 }
 
 .news-page > .card {
