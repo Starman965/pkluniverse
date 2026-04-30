@@ -1626,7 +1626,7 @@ export function ClubTeamsPage() {
                   </span>
                   <span>
                     <strong>{clubMemberCount}</strong>
-                    <small>{clubMemberCount === 1 ? 'Member' : 'Members'}</small>
+                    <small>{clubMemberCount === 1 ? 'Player' : 'Players'}</small>
                   </span>
                 </span>
               </Link>
