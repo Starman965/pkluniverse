@@ -1236,12 +1236,35 @@ ul {
 }
 
 .challenge-form__tbd {
-  display: inline-flex;
-  gap: 0.55rem;
   align-items: center;
-  min-height: 48px;
+  width: fit-content;
+  min-height: 58px;
   margin: 0;
-  white-space: nowrap;
+  padding: 0.8rem 0.95rem;
+  border: 1px solid rgba(240, 193, 75, 0.24);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top left, rgba(240, 193, 75, 0.12), transparent 42%),
+    rgba(255, 255, 255, 0.045);
+}
+
+.challenge-form__tbd input {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.challenge-form__tbd span {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.challenge-form__tbd strong {
+  color: #ffffff;
+}
+
+.challenge-form__tbd small {
+  color: #9fb6d8;
+  font-size: 0.82rem;
 }
 
 .challenge-form__location {
@@ -2305,8 +2328,8 @@ ul {
 }
 
 .roster-builder-hero__copy {
-  max-width: none !important;
-  white-space: nowrap;
+  max-width: 72ch;
+  overflow-wrap: anywhere;
 }
 
 .roster-builder-match-picker {
@@ -5356,7 +5379,7 @@ ul {
 }
 
 .sidebar__app-brand {
-  padding: 0 0.2rem 0;
+  padding: 0;
 }
 
 .sidebar__team-card {
@@ -5367,14 +5390,14 @@ ul {
 .sidebar__app-logo {
   display: block;
   width: 100%;
-  max-width: 248px;
+  max-width: 180px;
   height: auto;
   object-fit: contain;
 }
 
 .sidebar__footer-brand {
-  margin-top: 0.35rem;
-  padding-top: 0.75rem;
+  margin-top: 0;
+  padding-top: 0.25rem;
   border-top: 1px solid rgba(126, 161, 255, 0.12);
 }
 
@@ -5430,12 +5453,12 @@ ul {
 
 .sidebar__nav {
   display: grid;
-  gap: 1.1rem;
+  gap: 0.9rem;
 }
 
 .sidebar__nav-group {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.28rem;
 }
 
 .sidebar__nav-heading,
@@ -5472,7 +5495,8 @@ ul {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  padding: 0.8rem 1rem;
+  min-height: 44px;
+  padding: 0.62rem 0.85rem;
   border-radius: 16px;
   color: #d2def0;
 }
@@ -5539,8 +5563,8 @@ ul {
   border-radius: 20px;
   border: 1px solid rgba(126, 161, 255, 0.16);
   background: linear-gradient(180deg, rgba(13, 24, 39, 0.98) 0%, rgba(9, 17, 28, 0.98) 100%);
-  padding: 0.9rem;
-  gap: 0.55rem;
+  padding: 0.75rem 0.75rem 0.45rem;
+  gap: 0.32rem;
 }
 
 .sidebar__footer-title {
@@ -5560,15 +5584,15 @@ ul {
 
 .sidebar__footer-actions {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.2rem;
 }
 
 .sidebar__footer-link,
 .sidebar__signout {
   width: 100%;
   display: block;
-  border-radius: 16px;
-  padding: 0.8rem 1rem;
+  border-radius: 12px;
+  padding: 0.5rem 0.7rem;
   text-align: left;
   font: inherit;
   font-weight: 600;

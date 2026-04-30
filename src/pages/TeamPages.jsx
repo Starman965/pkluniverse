@@ -125,7 +125,7 @@ function createEmptyScheduleAdminForm() {
 
 function createEmptyChallengeForm(primaryLocation = '') {
   return {
-    dateTbd: false,
+    dateTbd: true,
     hour: '',
     isoDate: '',
     location: primaryLocation,
@@ -157,6 +157,35 @@ function normalizeDraftPairings(pairings = [], rosterPlayerIds = []) {
   const seen = new Set();
 
   return Array.from({ length: getPairingCountForRoster(rosterPlayerIds) }, (_, index) => {
+    const sourcePairing = pairings[index] ?? {};
+    const playerIds = (sourcePairing.playerIds ?? []).filter((playerId) => {
+      if (!selectedIds.has(playerId) || seen.has(playerId)) {
+        return false;
+      }
+
+      seen.add(playerId);
+      return true;
+    });
+
+    return {
+      courtLabel:
+        typeof sourcePairing.courtLabel === 'string' && sourcePairing.courtLabel.trim()
+          ? sourcePairing.courtLabel.trim()
+          : `Court ${index + 1}`,
+      playerIds: playerIds.slice(0, 2),
+    };
+  });
+}
+
+function normalizeDraftPairingsForMatch(pairings = [], rosterPlayerIds = [], playersNeeded = 8) {
+  const selectedIds = new Set(rosterPlayerIds);
+  const seen = new Set();
+  const pairingCount = Math.min(
+    4,
+    Math.max(getPairingCountForRoster(rosterPlayerIds), Math.ceil(Math.max(1, Number(playersNeeded) || 8) / 2)),
+  );
+
+  return Array.from({ length: pairingCount }, (_, index) => {
     const sourcePairing = pairings[index] ?? {};
     const playerIds = (sourcePairing.playerIds ?? []).filter((playerId) => {
       if (!selectedIds.has(playerId) || seen.has(playerId)) {
@@ -3645,6 +3674,7 @@ export function RosterMgmtPage() {
 
   const canManage = canManageRole(membership?.role);
   const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
+  const activePlayerIds = useMemo(() => new Set(activePlayers.map((player) => player.id)), [activePlayers]);
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
 
   async function loadPairingsData() {
@@ -3695,8 +3725,8 @@ export function RosterMgmtPage() {
 
     setPairingDrafts((current) => {
       const draft = current[activeGame.id] ?? createPairingDraft(activeGame);
-      const rosterPlayerIds = draft.rosterPlayerIds.filter((playerId) => availablePlayerIds.has(playerId));
-      const pairings = normalizeDraftPairings(draft.pairings, rosterPlayerIds);
+      const rosterPlayerIds = draft.rosterPlayerIds.filter((playerId) => activePlayerIds.has(playerId));
+      const pairings = normalizeDraftPairingsForMatch(draft.pairings, rosterPlayerIds, playersNeeded);
 
       if (
         rosterPlayerIds.length === draft.rosterPlayerIds.length &&
@@ -3714,7 +3744,7 @@ export function RosterMgmtPage() {
         },
       };
     });
-  }, [activeGame, availablePlayerIds]);
+  }, [activeGame, activePlayerIds, playersNeeded]);
 
   const pairingSummary = useMemo(() => {
     if (!activeGame || !activeDraft) {
@@ -3733,6 +3763,11 @@ export function RosterMgmtPage() {
       players,
     );
   }, [activeDraft, activeGame, players]);
+  const visiblePairings = useMemo(
+    () =>
+      activeDraft ? normalizeDraftPairingsForMatch(activeDraft.pairings, activeDraft.rosterPlayerIds, playersNeeded) : [],
+    [activeDraft, playersNeeded],
+  );
 
   function updateDraft(updater) {
     if (!activeGame) {
@@ -3783,10 +3818,11 @@ export function RosterMgmtPage() {
 
   function updatePairingSlot(pairIndex, slotIndex, playerId) {
     updateDraft((draft) => {
-      const nextPairings = draft.pairings.map((pairing) => ({
+      const nextPairings = normalizeDraftPairingsForMatch(draft.pairings, draft.rosterPlayerIds, playersNeeded).map((pairing) => ({
         ...pairing,
         playerIds: [...pairing.playerIds],
       }));
+      const previousPlayerId = nextPairings[pairIndex]?.playerIds?.[slotIndex] ?? '';
 
       nextPairings.forEach((pairing) => {
         pairing.playerIds = pairing.playerIds.filter((id) => id !== playerId);
@@ -3803,10 +3839,27 @@ export function RosterMgmtPage() {
         ...nextPairings[pairIndex],
         playerIds: nextPlayerIds.filter(Boolean).slice(0, 2),
       };
+      const pairedPlayerIds = new Set(nextPairings.flatMap((pairing) => pairing.playerIds ?? []).filter(Boolean));
+      let rosterPlayerIds = draft.rosterPlayerIds.filter((id) => activePlayerIds.has(id));
 
+      if (playerId && !rosterPlayerIds.includes(playerId)) {
+        if (rosterPlayerIds.length >= playersNeeded) {
+          setError(`Choose up to ${playersNeeded} players for this match roster.`);
+          return draft;
+        }
+
+        rosterPlayerIds = [...rosterPlayerIds, playerId];
+      }
+
+      if (previousPlayerId && !pairedPlayerIds.has(previousPlayerId) && !availablePlayerIds.has(previousPlayerId)) {
+        rosterPlayerIds = rosterPlayerIds.filter((id) => id !== previousPlayerId);
+      }
+
+      setError('');
       return {
         ...draft,
-        pairings: normalizeDraftPairings(nextPairings, draft.rosterPlayerIds),
+        pairings: normalizeDraftPairingsForMatch(nextPairings, rosterPlayerIds, playersNeeded),
+        rosterPlayerIds,
       };
     });
   }
@@ -3845,8 +3898,8 @@ export function RosterMgmtPage() {
             <p className="eyebrow">Match rosters</p>
             <h1>Build Rosters</h1>
             <p className="roster-builder-hero__copy">
-              Pick a match, choose the needed available players, then assign them into court slots.
-              Saved rosters appear on the player Team Matches page.
+                  Pick a match, choose available players, or manually assign any active player into court slots.
+                  Saved rosters appear on the player Team Matches page.
             </p>
           </div>
           {activeDraft ? (
@@ -3908,8 +3961,8 @@ export function RosterMgmtPage() {
                 <p className="eyebrow">Available Players</p>
                 <h2>Select the roster</h2>
                 <p>
-                  Select the needed players marked Available. Selecting a player auto-fills the next
-                  open court slot, and you can adjust court assignments below.
+                  Select players marked Available for quick setup. If someone forgot to mark availability,
+                  assign them manually in the court dropdowns below.
                 </p>
               </div>
               <span className="settings-admin-member-pill">
@@ -3968,7 +4021,7 @@ export function RosterMgmtPage() {
             </div>
 
             <div className="pairing-grid roster-builder-court-grid">
-              {pairingSummary.pairings.map((pairing, pairIndex) => {
+              {visiblePairings.map((pairing, pairIndex) => {
                 const slotValues = pairing.playerIds.length > 0 ? [...pairing.playerIds] : ['', ''];
 
                 while (slotValues.length < 2) {
@@ -3983,7 +4036,7 @@ export function RosterMgmtPage() {
                         {[0, 1].map((slotIndex) => {
                           const currentValue = slotValues[slotIndex] ?? '';
                           const selectedElsewhere = new Set(
-                            (activeDraft?.pairings ?? [])
+                            visiblePairings
                               .flatMap((entry, entryIndex) =>
                                 entryIndex === pairIndex ? [] : entry.playerIds ?? [],
                               )
@@ -4000,14 +4053,16 @@ export function RosterMgmtPage() {
                                 value={currentValue}
                               >
                                 <option value="">Open slot</option>
-                                {(activeDraft?.rosterPlayerIds ?? []).map((playerId) => {
-                                  const player = players.find((entry) => entry.id === playerId);
+                                {activePlayers.map((player) => {
+                                  const attendanceStatus = formatAttendanceStatus(
+                                    activeGame.attendance?.[player.id] ?? 'unknown',
+                                  );
                                   const disabled =
-                                    currentValue !== playerId && selectedElsewhere.has(playerId);
+                                    currentValue !== player.id && selectedElsewhere.has(player.id);
 
                                   return (
-                                    <option key={playerId} disabled={disabled} value={playerId}>
-                                      {player?.fullName || playerId}
+                                    <option key={player.id} disabled={disabled} value={player.id}>
+                                      {player.fullName || 'Unnamed player'} · {attendanceStatus}
                                     </option>
                                   );
                                 })}
@@ -4018,8 +4073,8 @@ export function RosterMgmtPage() {
                       </div>
                     ) : (
                       <div className="pairing-card__slots">
-                        {pairing.players.length > 0 ? (
-                          pairing.players.map((player) => (
+                        {(pairingSummary.pairings[pairIndex]?.players ?? []).length > 0 ? (
+                          (pairingSummary.pairings[pairIndex]?.players ?? []).map((player) => (
                             <div key={player.id} className="pairing-chip pairing-chip--readonly">
                               <strong>{player.fullName || 'Unnamed player'}</strong>
                             </div>
@@ -6077,12 +6132,37 @@ export function ChallengesPage() {
                       <h3>When and where?</h3>
                       <p>Add proposed match details. Use TBD if captains still need to coordinate.</p>
                     </div>
+                    <label className="checkbox-field challenge-form__tbd">
+                      <input
+                        checked={form.dateTbd}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            dateTbd: event.target.checked,
+                            hour: event.target.checked ? '' : current.hour,
+                            isoDate: event.target.checked ? '' : current.isoDate,
+                            minute: event.target.checked ? '00' : current.minute,
+                            period: event.target.checked ? 'AM' : current.period,
+                          }))
+                        }
+                        type="checkbox"
+                      />
+                      <span>
+                        <strong>Date and time TBD</strong>
+                        <small>Leave checked until captains confirm the match date.</small>
+                      </span>
+                    </label>
                     <div className="challenge-form__date-time-row">
                       <label className="field challenge-form__date">
-                        <span>Date</span>
+                        <span>Game date</span>
                         <input
-                          disabled={form.dateTbd}
-                          onChange={(event) => setForm((current) => ({ ...current, isoDate: event.target.value }))}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              dateTbd: event.target.value ? false : current.dateTbd,
+                              isoDate: event.target.value,
+                            }))
+                          }
                           type="date"
                           value={form.isoDate}
                         />
@@ -6137,23 +6217,6 @@ export function ChallengesPage() {
                             </option>
                           ))}
                         </select>
-                      </label>
-                      <label className="checkbox-field challenge-form__tbd">
-                        <input
-                          checked={form.dateTbd}
-                          onChange={(event) =>
-                            setForm((current) => ({
-                              ...current,
-                              dateTbd: event.target.checked,
-                              hour: event.target.checked ? '' : current.hour,
-                              isoDate: event.target.checked ? '' : current.isoDate,
-                              minute: event.target.checked ? '00' : current.minute,
-                              period: event.target.checked ? 'AM' : current.period,
-                            }))
-                          }
-                          type="checkbox"
-                        />
-                        <span>Date and time TBD</span>
                       </label>
                     </div>
                     <label className="field challenge-form__location">
