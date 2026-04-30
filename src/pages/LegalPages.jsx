@@ -161,6 +161,12 @@ export function ContactPage() {
         or general PKL Universe questions, contact the app administrator.
       </p>
 
+      <p>
+        Clubs interested in using PKL Universe for organized team play can also use this contact email to ask about setup,
+        club administration, and how the platform can fit alongside regular drop-ins, ladders, leagues, or recurring
+        player groups.
+      </p>
+
       <h2>Email</h2>
       <p>
         <a href="mailto:demandgendave@gmail.com">demandgendave@gmail.com</a>

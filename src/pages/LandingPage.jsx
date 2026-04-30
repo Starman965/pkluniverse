@@ -91,16 +91,16 @@ export default function LandingPage() {
 
         <div className="hero__content hero__content--landing">
           <img alt="PKL Universe" className="hero__brand" src={pklUniverseWideLogo} />
-          <h1>Turn regular pickleball play into fun, organized team-vs-team competition.</h1>
+          <h1>Add organized team play to your club—without changing how your members already play.</h1>
           <p className="hero__copy">
-            PKL Universe helps clubs, captains, and player groups organize casual competitive play with team hubs,
-            rosters, matches, availability, and updates in one place.
+            PKL Universe gives clubs a simple way to introduce fun, friendly team competition alongside drop-ins and
+            regular games—enhancing the member experience, not replacing it.
           </p>
 
           <ul className="feature-list hero__feature-list">
-            <li>Give regular club play a team-vs-team format</li>
-            <li>Keep matches, scores, and availability easier to manage</li>
-            <li>Help captains and organizers keep everyone connected</li>
+            <li>Layer team-based match play on top of existing schedules</li>
+            <li>Keep rosters, matches, and availability organized automatically</li>
+            <li>Give members a more social, engaging reason to play</li>
           </ul>
         </div>
 
@@ -110,7 +110,7 @@ export default function LandingPage() {
         <div className="marketing-section__header">
           <div>
             <p className="eyebrow">Take your next step</p>
-            <h2>Sign in, join a roster, or create a team hub for your group.</h2>
+            <h2>Sign in, join a team, or create a new team hub as a captain.</h2>
           </div>
         </div>
 
@@ -160,34 +160,6 @@ export default function LandingPage() {
       </section>
 
       <section className="marketing-section">
-        <div className="marketing-info-card">
-          <img
-            alt="Club players organizing regular pickleball play into fun team competition"
-            className="marketing-info-card__image"
-            decoding="async"
-            loading="lazy"
-            src={clubTileImage}
-          />
-          <div className="marketing-info-card__content">
-            <div>
-              <p className="eyebrow">For clubs & player groups</p>
-              <h2>Make regular play feel more organized, competitive, and fun.</h2>
-            </div>
-            <p>
-              PKL Universe is built for club communities and recurring player groups that want more structure without
-              turning every match into a formal tournament. Clubs can help members assemble into teams, while captains
-              get a simple hub for rosters, schedules, availability, and team updates.
-            </p>
-            <ul className="feature-list">
-              <li>Help club members turn regular play into team-based competition</li>
-              <li>Give captains one place to organize players and matches</li>
-              <li>Keep the vibe flexible for friendly leagues, club ladders, and recurring groups</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <section className="marketing-section">
         <div className="marketing-section__header">
           <div>
             <p className="eyebrow">Team hub preview</p>
@@ -233,6 +205,36 @@ export default function LandingPage() {
                 Next
               </button>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="marketing-section">
+        <div className="marketing-info-card">
+          <img
+            alt="Club players organizing regular pickleball play into fun team competition"
+            className="marketing-info-card__image"
+            decoding="async"
+            loading="lazy"
+            src={clubTileImage}
+          />
+          <div className="marketing-info-card__content">
+            <div>
+              <p className="eyebrow">For clubs & player groups</p>
+              <h2>Make regular play more organized, competitive, and fun.</h2>
+            </div>
+            <p>
+              PKL Universe helps clubs add structure to everyday play—without turning it into a formal league or
+              tournament. Members get team-based competition, while captains get a simple system to manage it all.
+            </p>
+            <ul className="feature-list">
+              <li>Turn drop-in play into optional team-based competition</li>
+              <li>Give captains one place to manage players, matches, and availability</li>
+              <li>Keep it flexible for leagues, ladders, and recurring groups</li>
+            </ul>
+            <Link className="button button--ghost marketing-info-card__cta" to="/contact">
+              Interested in adding PKL Universe to your club?
+            </Link>
           </div>
         </div>
       </section>

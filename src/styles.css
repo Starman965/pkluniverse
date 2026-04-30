@@ -368,6 +368,10 @@ textarea {
   color: #c9d7ea;
 }
 
+.marketing-info-card__cta {
+  justify-self: start;
+}
+
 .marketing-action-grid {
   display: grid;
   gap: 1rem;
