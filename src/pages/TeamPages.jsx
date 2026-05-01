@@ -22,6 +22,7 @@ import {
   createChallenge,
   deleteClub,
   deleteChallengeAsAdmin,
+  deleteClubEvent,
   deleteGame,
   deleteNewsComment,
   deleteNewsPost,
@@ -735,7 +736,7 @@ function createEmptyClubEventForm(event = null) {
     eventType: event?.eventType ?? 'singleDay',
     flyerFile: null,
     locationLabel: event?.locationLabel ?? '',
-    registrationInfo: event?.registrationInfo ?? '',
+    registrationInfo: formatRegistrationInfo(event?.registrationInfo ?? 'Click to register.'),
     registrationUrl: event?.registrationUrl ?? '',
     startDate: event?.startDate ?? '',
     status: event?.status ?? 'draft',
@@ -754,6 +755,10 @@ function formatEventDateRange(event) {
 
 function formatEventCost(costLabel) {
   return costLabel?.trim() || 'Cost TBD';
+}
+
+function formatRegistrationInfo(registrationInfo = '') {
+  return registrationInfo.replace(/\blink\b/gi, 'button');
 }
 
 function createEmptyPlayerCopyForm() {
@@ -1384,6 +1389,7 @@ function ClubEventsPanel({ clubName = '', clubSlug, managerView = false, user })
   const [editingEventId, setEditingEventId] = useState('');
   const [savingEvent, setSavingEvent] = useState(false);
   const [archivingEventId, setArchivingEventId] = useState('');
+  const [deletingEventId, setDeletingEventId] = useState('');
   const [eventMessage, setEventMessage] = useState('');
   const [eventError, setEventError] = useState('');
   const [showEventForm, setShowEventForm] = useState(false);
@@ -1509,6 +1515,33 @@ function ClubEventsPanel({ clubName = '', clubSlug, managerView = false, user })
     }
   }
 
+  async function handleDeleteEvent(event) {
+    const confirmed = window.confirm(
+      `Delete ${event.title}? This permanently removes the event listing and flyer image.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingEventId(event.id);
+    setEventMessage('');
+    setEventError('');
+
+    try {
+      await deleteClubEvent({ clubSlug, eventId: event.id, user });
+      setEventMessage('Event deleted.');
+      if (editingEventId === event.id) {
+        cancelEventEdit();
+      }
+      await loadEvents();
+    } catch (deleteError) {
+      setEventError(deleteError.message ?? 'Unable to delete that event.');
+    } finally {
+      setDeletingEventId('');
+    }
+  }
+
   return (
     <div className="club-events-panel">
       {eventError ? <div className="notice notice--error">{eventError}</div> : null}
@@ -1613,7 +1646,7 @@ function ClubEventsPanel({ clubName = '', clubSlug, managerView = false, user })
                 <span>Registration information</span>
                 <textarea
                   onChange={(event) => updateEventForm('registrationInfo', event.target.value)}
-                  placeholder="Scan the QR code or use the signup link."
+                  placeholder="Click to register."
                   rows={3}
                   value={form.registrationInfo}
                 />
@@ -1680,7 +1713,9 @@ function ClubEventsPanel({ clubName = '', clubSlug, managerView = false, user })
                     ) : null}
                   </div>
                 ) : null}
-                {event.registrationInfo ? <p className="club-event-card__registration">{event.registrationInfo}</p> : null}
+                {event.registrationInfo ? (
+                  <p className="club-event-card__registration">{formatRegistrationInfo(event.registrationInfo)}</p>
+                ) : null}
                 <div className="club-event-card__actions">
                   {event.registrationUrl ? (
                     <a className="button" href={event.registrationUrl} rel="noreferrer" target="_blank">
@@ -1699,6 +1734,14 @@ function ClubEventsPanel({ clubName = '', clubSlug, managerView = false, user })
                         type="button"
                       >
                         {archivingEventId === event.id ? 'Archiving...' : 'Archive'}
+                      </button>
+                      <button
+                        className="button button--danger"
+                        disabled={deletingEventId === event.id}
+                        onClick={() => handleDeleteEvent(event)}
+                        type="button"
+                      >
+                        {deletingEventId === event.id ? 'Deleting...' : 'Delete'}
                       </button>
                     </>
                   ) : null}
@@ -1746,7 +1789,7 @@ export function ClubTeamsPage() {
   const [error, setError] = useState('');
   const [challengeConfirmTeam, setChallengeConfirmTeam] = useState(null);
   const [challengeNoticeTeam, setChallengeNoticeTeam] = useState(null);
-  const [activeClubTab, setActiveClubTab] = useState('teams');
+  const [activeClubTab, setActiveClubTab] = useState('events');
   const [clubPlayerSearch, setClubPlayerSearch] = useState('');
   const [canManageClubEvents, setCanManageClubEvents] = useState(false);
   const [publishedEventCount, setPublishedEventCount] = useState(0);
@@ -2037,7 +2080,7 @@ export function ClubTeamsPage() {
                   </span>
                   <span>
                     <strong>{publishedEventCount}</strong>
-                    <small>{publishedEventCount === 1 ? 'Event' : 'Events'}</small>
+                    <small>Events</small>
                   </span>
                 </span>
               </Link>
@@ -2045,6 +2088,16 @@ export function ClubTeamsPage() {
 
             <div className="club-teams-page__toolbar">
               <div className="club-teams-page__tabs" role="tablist" aria-label="Club hub sections">
+                <button
+                  aria-controls="club-hub-events-panel"
+                  aria-selected={activeClubTab === 'events'}
+                  className={activeClubTab === 'events' ? 'club-teams-page__tab--active' : ''}
+                  onClick={() => setActiveClubTab('events')}
+                  role="tab"
+                  type="button"
+                >
+                  Events
+                </button>
                 <button
                   aria-controls="club-hub-teams-panel"
                   aria-selected={activeClubTab === 'teams'}
@@ -2065,16 +2118,6 @@ export function ClubTeamsPage() {
                 >
                   Players
                 </button>
-                <button
-                  aria-controls="club-hub-events-panel"
-                  aria-selected={activeClubTab === 'events'}
-                  className={activeClubTab === 'events' ? 'club-teams-page__tab--active' : ''}
-                  onClick={() => setActiveClubTab('events')}
-                  role="tab"
-                  type="button"
-                >
-                  Events
-                </button>
               </div>
 
               {activeClubTab === 'players' ? (
@@ -2091,7 +2134,16 @@ export function ClubTeamsPage() {
               ) : null}
             </div>
 
-            {activeClubTab === 'teams' ? (
+            {activeClubTab === 'events' ? (
+              <div id="club-hub-events-panel" role="tabpanel">
+                <ClubEventsPanel
+                  clubName={clubName}
+                  clubSlug={approvedClubSlug}
+                  managerView={canManageClubEvents}
+                  user={user}
+                />
+              </div>
+            ) : activeClubTab === 'teams' ? (
               <div id="club-hub-teams-panel" className="membership-list club-teams-page__list" role="tabpanel">
                 {clubTeams.map((clubTeam) => {
                   const isCurrentTeam = clubTeam.clubSlug === clubSlug && clubTeam.teamSlug === teamSlug;
@@ -2204,16 +2256,7 @@ export function ClubTeamsPage() {
                   </p>
                 )}
               </div>
-            ) : (
-              <div id="club-hub-events-panel" role="tabpanel">
-                <ClubEventsPanel
-                  clubName={clubName}
-                  clubSlug={approvedClubSlug}
-                  managerView={canManageClubEvents}
-                  user={user}
-                />
-              </div>
-            )}
+            ) : null}
           </>
         ) : (
           <p>No other approved teams are connected to this club yet.</p>

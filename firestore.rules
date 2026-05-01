@@ -593,7 +593,7 @@ service cloud.firestore {
           && request.resource.data.createdBy == request.auth.uid;
         allow update: if safeClubEventWrite(clubId)
           && request.resource.data.createdBy == resource.data.createdBy;
-        allow delete: if isPlatformAdmin();
+        allow delete: if isClubApprover(clubId);
       }
 
       match /affiliationRequests/{requestId} {

@@ -4280,6 +4280,28 @@ export async function archiveClubEvent({ clubSlug, eventId, user }) {
   });
 }
 
+export async function deleteClubEvent({ clubSlug, eventId, user }) {
+  requireDb();
+
+  if (!(await canManageClub({ clubSlug, user }))) {
+    throw new Error('Only club managers can delete events.');
+  }
+
+  if (!eventId) {
+    throw new Error('Choose an event to delete.');
+  }
+
+  const eventRef = doc(db, 'clubs', clubSlug, 'events', eventId);
+  const eventSnapshot = await getDoc(eventRef);
+  const event = eventSnapshot.exists() ? eventSnapshot.data() : null;
+
+  await deleteDoc(eventRef);
+
+  if (event?.flyerImagePath) {
+    await deleteStoragePath(event.flyerImagePath);
+  }
+}
+
 export function buildStandingsSummary(games) {
   const completedGames = games.filter(
     (game) => game.matchStatus === 'completed' && game.result && game.result !== 'pending',
