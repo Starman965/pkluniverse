@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import TeamDivisionLabel from '../components/TeamDivisionLabel';
 import { useAuth } from '../context/AuthContext';
-import { getTeam, getUserProfileData, isPlatformAdmin, listClubs, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
+import { getTeam, getUserProfileData, isPlatformAdmin, listClubs, listManagedClubs, listMemberships, listPlayers, listTeamMembers } from '../lib/data';
 import { getVisibleTeamDivisionLabel } from '../lib/teamDivision';
 import createTeamImage from '../../create_a_team.webp';
 import defaultTeamLogo from '../../default_team_logo.webp';
@@ -42,6 +42,7 @@ function buildMemberCountLabel(members) {
 export default function TeamChooserPage() {
   const { isFirebaseConfigured, user } = useAuth();
   const [memberships, setMemberships] = useState([]);
+  const [managedClubs, setManagedClubs] = useState([]);
   const [isAppAdmin, setIsAppAdmin] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [lastActiveTeam, setLastActiveTeam] = useState(null);
@@ -51,6 +52,7 @@ export default function TeamChooserPage() {
   useEffect(() => {
     if (!user?.uid || !isFirebaseConfigured) {
       setIsAppAdmin(false);
+      setManagedClubs([]);
       return;
     }
 
@@ -63,6 +65,7 @@ export default function TeamChooserPage() {
     if (!user?.uid || !isFirebaseConfigured) {
       setMemberships([]);
       setLastActiveTeam(null);
+      setManagedClubs([]);
       setLoadingTeams(false);
       return;
     }
@@ -71,9 +74,10 @@ export default function TeamChooserPage() {
 
     listMemberships(user.uid)
       .then(async (items) => {
-        const [clubs, userProfile] = await Promise.all([
+        const [clubs, userProfile, managedClubData] = await Promise.all([
           listClubs({ includeIndependent: true }).catch(() => []),
           getUserProfileData(user.uid).catch(() => null),
+          listManagedClubs(user.uid, user.email).catch(() => []),
         ]);
         const clubNameBySlug = new Map(
           clubs.map((club) => [club.slug, club.slug === 'independent' ? 'Independent' : club.name]),
@@ -114,6 +118,7 @@ export default function TeamChooserPage() {
 
         if (!cancelled) {
           setMemberships(enrichedItems);
+          setManagedClubs(managedClubData);
           setLastActiveTeam(
             enrichedItems.find(
               (membership) =>
@@ -157,7 +162,7 @@ export default function TeamChooserPage() {
     };
   }, [mobileMenuOpen]);
 
-  if (!loadingTeams && memberships.length === 0) {
+  if (!loadingTeams && memberships.length === 0 && managedClubs.length === 0) {
     return <Navigate replace to="/onboarding" />;
   }
 
@@ -180,7 +185,7 @@ export default function TeamChooserPage() {
           <img alt="" aria-hidden="true" className="hub-topbar__logo" src={defaultTeamLogo} />
           <div>
             <p className="hub-topbar__eyebrow">PKL Universe</p>
-            <strong>My Teams</strong>
+            <strong>{memberships.length > 0 ? 'My Teams' : 'Club Manager'}</strong>
           </div>
         </div>
       </header>
@@ -210,6 +215,16 @@ export default function TeamChooserPage() {
                 App Admin
               </Link>
             ) : null}
+            {managedClubs.map((club) => (
+              <Link
+                key={club.slug}
+                className="nav-link"
+                onClick={() => setMobileMenuOpen(false)}
+                to={`/clubs/${club.slug}/events`}
+              >
+                {club.name} Events
+              </Link>
+            ))}
             <Link className="nav-link" onClick={() => setMobileMenuOpen(false)} to="/">
               Return to Home
             </Link>
@@ -220,9 +235,13 @@ export default function TeamChooserPage() {
       <section className="card auth-card team-chooser">
         <div className="team-chooser__header">
           <div className="team-chooser__intro">
-            <p className="eyebrow">Your teams</p>
-            <h1>Choose a team</h1>
-            <p>Welcome back. Click on the team below you wish to access.</p>
+            <p className="eyebrow">{memberships.length > 0 ? 'Your teams' : 'Club manager'}</p>
+            <h1>{memberships.length > 0 ? 'Choose a team' : 'Manage club events'}</h1>
+            <p>
+              {memberships.length > 0
+                ? 'Welcome back. Click on the team below you wish to access.'
+                : 'Welcome back. Choose a club to manage event listings.'}
+            </p>
           </div>
 
           <Link className="team-chooser__create-card" to="/create">
@@ -240,7 +259,7 @@ export default function TeamChooserPage() {
           <div className="state-panel">
             <p>Loading your teams...</p>
           </div>
-        ) : (
+        ) : memberships.length > 0 ? (
           <div className="membership-list">
             {memberships.map((membership) => (
               <Link
@@ -263,6 +282,25 @@ export default function TeamChooserPage() {
                   {getVisibleTeamDivisionLabel(membership) ? (
                     <TeamDivisionLabel className="membership-card__division" value={membership.teamDivision} />
                   ) : null}
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="membership-list">
+            {managedClubs.map((club) => (
+              <Link key={club.slug} className="membership-card" to={`/clubs/${club.slug}/events`}>
+                <img
+                  alt={`${club.name} logo`}
+                  className="membership-card__logo"
+                  decoding="async"
+                  loading="lazy"
+                  src={club.logoUrl || defaultTeamLogo}
+                />
+                <div className="membership-card__content">
+                  <strong>{club.name}</strong>
+                  <span>Club manager tools</span>
+                  <span>Create and manage event listings</span>
                 </div>
               </Link>
             ))}

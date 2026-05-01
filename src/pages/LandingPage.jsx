@@ -77,7 +77,7 @@ export default function LandingPage() {
 
         <div className="hero__top-nav">
           <Link className="hero__top-link" to="/teams">
-            Account
+            Log In
           </Link>
           <span className="hero__top-separator">|</span>
           <Link className="hero__top-link" to="/join">

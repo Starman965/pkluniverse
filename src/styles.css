@@ -1721,6 +1721,217 @@ ul {
   font-weight: 900;
 }
 
+.club-events-panel {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  max-width: calc((360px * 3) + (0.9rem * 2));
+}
+
+.club-events-manager-card {
+  margin-bottom: 0.25rem;
+}
+
+.club-events-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.club-event-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.club-event-card--no-flyer {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.club-event-card__flyer {
+  width: 100%;
+  height: auto;
+  max-height: 520px;
+  object-fit: contain;
+}
+
+.club-event-card__flyer-button {
+  position: relative;
+  display: grid;
+  align-items: stretch;
+  min-width: 0;
+  border: none;
+  background:
+    radial-gradient(circle at top, rgba(126, 161, 255, 0.12), transparent 42%),
+    rgba(3, 8, 20, 0.5);
+  color: #ffffff;
+  cursor: zoom-in;
+  padding: 0;
+}
+
+.club-event-card__flyer-button span {
+  position: absolute;
+  right: 0.65rem;
+  bottom: 0.65rem;
+  border-radius: 999px;
+  background: rgba(3, 8, 20, 0.78);
+  color: #f5f8ff;
+  font-size: 0.78rem;
+  font-weight: 900;
+  padding: 0.35rem 0.55rem;
+}
+
+.club-event-card__flyer-button:hover span,
+.club-event-card__flyer-button:focus-visible span {
+  background: rgba(77, 124, 255, 0.9);
+}
+
+.club-event-flyer-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.club-event-flyer-preview__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(3, 8, 20, 0.78);
+}
+
+.club-event-flyer-preview__panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.85rem;
+  width: min(100%, 560px);
+  max-height: 88vh;
+  border: 1px solid rgba(126, 161, 255, 0.24);
+  border-radius: 22px;
+  background: #0c1626;
+  padding: 1rem;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.club-event-flyer-preview__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.club-event-flyer-preview__header h2 {
+  margin: 0;
+}
+
+.club-event-flyer-preview__panel img {
+  width: 100%;
+  max-height: 68vh;
+  object-fit: contain;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.club-event-card__body {
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem;
+}
+
+.club-event-card__body h2,
+.club-event-card__body h3,
+.club-event-card__body p {
+  margin: 0;
+}
+
+.club-event-card__header,
+.club-event-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.club-event-card__header h2 {
+  font-size: clamp(1.35rem, 2vw, 2rem);
+  letter-spacing: 0.01em;
+}
+
+.club-event-card__description {
+  max-width: 72ch;
+  color: #dbe7f8;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.club-event-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.club-event-card__meta span {
+  border: 1px solid rgba(240, 193, 75, 0.18);
+  border-radius: 999px;
+  background: rgba(240, 193, 75, 0.08);
+  color: #f3d58a;
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 0.35rem 0.6rem;
+}
+
+.club-event-card__details {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 76ch;
+}
+
+.club-event-card ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.club-event-card__registration {
+  max-width: 72ch;
+  color: #dbe7f8;
+  font-weight: 700;
+}
+
+.club-manager-tool,
+.club-manager-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.club-manager-list__item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(126, 161, 255, 0.14);
+  border-radius: 14px;
+  padding: 0.65rem;
+}
+
+.club-manager-list__item span {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.club-manager-list__item small {
+  color: #9fb6d8;
+}
+
 .club-player-card__teams {
   display: grid;
   gap: 0.4rem;

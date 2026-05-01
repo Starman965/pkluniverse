@@ -18,6 +18,7 @@ import {
   ChallengesPage,
   ClubAffiliationAdminPage,
   ClubCentralPage,
+  ClubEventsStandalonePage,
   ClubTeamsPage,
   GameRostersPage,
   HelpFeedbackPage,
@@ -105,6 +106,14 @@ export default function App() {
         <Route
           element={<ClubAffiliationAdminPage />}
           path="/club-admin"
+        />
+        <Route
+          element={
+            <ProtectedRoute>
+              <ClubEventsStandalonePage />
+            </ProtectedRoute>
+          }
+          path="/clubs/:clubSlug/events"
         />
 
         <Route

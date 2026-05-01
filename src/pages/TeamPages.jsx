@@ -9,12 +9,15 @@ import {
   PLAYER_SKILL_LEVELS,
   acceptChallenge,
   addNewsComment,
+  addClubManager,
+  archiveClubEvent,
   assignPlayersToTeamAsAdmin,
   buildPairingSummary,
   buildStandingsSummary,
   archiveTeam,
   backfillUserProfileFromPlayer,
   cancelChallenge,
+  canManageClub,
   createClub,
   createChallenge,
   deleteClub,
@@ -35,6 +38,8 @@ import {
   listApprovedClubTeams,
   listClubChallenges,
   listClubAffiliationRequests,
+  listClubEvents,
+  listClubManagers,
   listClubs,
   listGames,
   listNewsPosts,
@@ -43,12 +48,14 @@ import {
   listTeamMembers,
   requestClubAffiliation,
   renameClub,
+  removeClubManager,
   reviewClubAffiliationRequest,
   rotateTeamJoinCode,
   saveGame,
   saveGamePairings,
   saveNewsPost,
   savePlayer,
+  saveClubEvent,
   saveUserPlayerProfile,
   setAvailability,
   toggleNewsReaction,
@@ -717,6 +724,38 @@ function createEmptyClubForm(club = {}) {
   };
 }
 
+function createEmptyClubEventForm(event = null) {
+  return {
+    bulletPointsText: event?.bulletPoints?.join('\n') ?? '',
+    costLabel: event?.costLabel ?? '',
+    description: event?.description ?? '',
+    detailsHeading: event?.detailsHeading ?? 'What to expect',
+    endDate: event?.endDate ?? '',
+    eventId: event?.id ?? '',
+    eventType: event?.eventType ?? 'singleDay',
+    flyerFile: null,
+    locationLabel: event?.locationLabel ?? '',
+    registrationInfo: event?.registrationInfo ?? '',
+    registrationUrl: event?.registrationUrl ?? '',
+    startDate: event?.startDate ?? '',
+    status: event?.status ?? 'draft',
+    timeLabel: event?.timeLabel ?? '',
+    title: event?.title ?? '',
+  };
+}
+
+function formatEventDateRange(event) {
+  if (event.startDate && event.endDate && event.endDate !== event.startDate) {
+    return `${event.startDate} - ${event.endDate}`;
+  }
+
+  return event.startDate || 'Date TBD';
+}
+
+function formatEventCost(costLabel) {
+  return costLabel?.trim() || 'Cost TBD';
+}
+
 function createEmptyPlayerCopyForm() {
   return {
     playerKeys: [],
@@ -1339,6 +1378,362 @@ function buildClubTeamCaptainNames(members, players) {
     .filter(Boolean);
 }
 
+function ClubEventsPanel({ clubName = '', clubSlug, managerView = false, user }) {
+  const [events, setEvents] = useState([]);
+  const [form, setForm] = useState(createEmptyClubEventForm());
+  const [editingEventId, setEditingEventId] = useState('');
+  const [savingEvent, setSavingEvent] = useState(false);
+  const [archivingEventId, setArchivingEventId] = useState('');
+  const [eventMessage, setEventMessage] = useState('');
+  const [eventError, setEventError] = useState('');
+  const [showEventForm, setShowEventForm] = useState(false);
+  const [loadingEvents, setLoadingEvents] = useState(true);
+  const [previewFlyerEvent, setPreviewFlyerEvent] = useState(null);
+
+  async function loadEvents() {
+    if (!clubSlug) {
+      setEvents([]);
+      return;
+    }
+
+    setEvents(await listClubEvents({ clubSlug, includeDrafts: managerView, user }));
+  }
+
+  useEffect(() => {
+    let ignore = false;
+
+    setLoadingEvents(true);
+    setEventError('');
+    loadEvents()
+      .catch((loadError) => {
+        if (!ignore) {
+          setEvents([]);
+          setEventError(loadError.message ?? 'Unable to load club events.');
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoadingEvents(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [clubSlug, managerView, user?.uid]);
+
+  function updateEventForm(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+    setEventMessage('');
+    setEventError('');
+  }
+
+  function startNewEvent() {
+    setEditingEventId('');
+    setForm(createEmptyClubEventForm());
+    setShowEventForm(true);
+    setEventMessage('');
+    setEventError('');
+  }
+
+  function startEditEvent(event) {
+    setEditingEventId(event.id);
+    setForm(createEmptyClubEventForm(event));
+    setShowEventForm(true);
+    setEventMessage('');
+    setEventError('');
+  }
+
+  function cancelEventEdit() {
+    setEditingEventId('');
+    setForm(createEmptyClubEventForm());
+    setShowEventForm(false);
+    setEventError('');
+  }
+
+  async function handleEventSubmit(event) {
+    event.preventDefault();
+    setSavingEvent(true);
+    setEventMessage('');
+    setEventError('');
+
+    try {
+      await saveClubEvent({
+        bulletPoints: form.bulletPointsText,
+        clubSlug,
+        costLabel: form.costLabel,
+        description: form.description,
+        detailsHeading: form.detailsHeading,
+        endDate: form.endDate,
+        eventId: editingEventId,
+        eventType: form.eventType,
+        flyerFile: form.flyerFile,
+        locationLabel: form.locationLabel,
+        registrationInfo: form.registrationInfo,
+        registrationUrl: form.registrationUrl,
+        startDate: form.startDate,
+        status: form.status,
+        timeLabel: form.timeLabel,
+        title: form.title,
+        user,
+      });
+      setEventMessage(editingEventId ? 'Event updated.' : 'Event created.');
+      setEditingEventId('');
+      setForm(createEmptyClubEventForm());
+      setShowEventForm(false);
+      await loadEvents();
+    } catch (submitError) {
+      setEventError(submitError.message ?? 'Unable to save that event.');
+    } finally {
+      setSavingEvent(false);
+    }
+  }
+
+  async function handleArchiveEvent(event) {
+    if (!window.confirm(`Archive ${event.title}?`)) {
+      return;
+    }
+
+    setArchivingEventId(event.id);
+    setEventMessage('');
+    setEventError('');
+
+    try {
+      await archiveClubEvent({ clubSlug, eventId: event.id, user });
+      setEventMessage('Event archived.');
+      await loadEvents();
+    } catch (archiveError) {
+      setEventError(archiveError.message ?? 'Unable to archive that event.');
+    } finally {
+      setArchivingEventId('');
+    }
+  }
+
+  return (
+    <div className="club-events-panel">
+      {eventError ? <div className="notice notice--error">{eventError}</div> : null}
+      {eventMessage ? <div className="notice notice--success">{eventMessage}</div> : null}
+
+      {managerView ? (
+        <section className="schedule-admin-card club-events-manager-card">
+          <div className="schedule-admin-card__header">
+            <div>
+              <p className="eyebrow">Club manager tools</p>
+              <h2>Events</h2>
+              <p>Create event listings for {clubName || 'this club'}.</p>
+            </div>
+            <button className="button" onClick={startNewEvent} type="button">
+              New Event
+            </button>
+          </div>
+
+          {showEventForm ? (
+            <form className="schedule-admin-form club-event-form" onSubmit={handleEventSubmit}>
+              <div className="player-admin-form__row">
+                <label className="field">
+                  <span>Title</span>
+                  <input onChange={(event) => updateEventForm('title', event.target.value)} value={form.title} />
+                </label>
+                <label className="field">
+                  <span>Status</span>
+                  <select onChange={(event) => updateEventForm('status', event.target.value)} value={form.status}>
+                    <option value="draft">Draft</option>
+                    <option value="published">Published</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </label>
+              </div>
+              <label className="field field--wide">
+                <span>Description</span>
+                <textarea onChange={(event) => updateEventForm('description', event.target.value)} rows={4} value={form.description} />
+              </label>
+              <div className="player-admin-form__row">
+                <label className="field">
+                  <span>Details heading</span>
+                  <input onChange={(event) => updateEventForm('detailsHeading', event.target.value)} value={form.detailsHeading} />
+                </label>
+                <label className="field">
+                  <span>Event type</span>
+                  <select onChange={(event) => updateEventForm('eventType', event.target.value)} value={form.eventType}>
+                    <option value="singleDay">Single-day event</option>
+                    <option value="multiDay">Multi-day event</option>
+                    <option value="boxLeague">Box league</option>
+                  </select>
+                </label>
+              </div>
+              <label className="field field--wide">
+                <span>Bullet points</span>
+                <textarea
+                  onChange={(event) => updateEventForm('bulletPointsText', event.target.value)}
+                  placeholder="One bullet per line"
+                  rows={5}
+                  value={form.bulletPointsText}
+                />
+              </label>
+              <div className="player-admin-form__row">
+                <label className="field">
+                  <span>Start date</span>
+                  <input onChange={(event) => updateEventForm('startDate', event.target.value)} type="date" value={form.startDate} />
+                </label>
+                <label className="field">
+                  <span>End date</span>
+                  <input onChange={(event) => updateEventForm('endDate', event.target.value)} type="date" value={form.endDate} />
+                </label>
+              </div>
+              <div className="player-admin-form__row">
+                <label className="field">
+                  <span>Time</span>
+                  <input onChange={(event) => updateEventForm('timeLabel', event.target.value)} placeholder="5PM - 7PM" value={form.timeLabel} />
+                </label>
+                <label className="field">
+                  <span>Location</span>
+                  <input
+                    onChange={(event) => updateEventForm('locationLabel', event.target.value)}
+                    placeholder="Sports Complex Pickleball Courts"
+                    value={form.locationLabel}
+                  />
+                </label>
+              </div>
+              <div className="player-admin-form__row">
+                <label className="field">
+                  <span>Cost</span>
+                  <input onChange={(event) => updateEventForm('costLabel', event.target.value)} placeholder="$25 per person" value={form.costLabel} />
+                </label>
+                <label className="field">
+                  <span>Signup URL</span>
+                  <input
+                    onChange={(event) => updateEventForm('registrationUrl', event.target.value)}
+                    placeholder="https://..."
+                    type="url"
+                    value={form.registrationUrl}
+                  />
+                </label>
+              </div>
+              <label className="field field--wide">
+                <span>Registration information</span>
+                <textarea
+                  onChange={(event) => updateEventForm('registrationInfo', event.target.value)}
+                  placeholder="Scan the QR code or use the signup link."
+                  rows={3}
+                  value={form.registrationInfo}
+                />
+              </label>
+              <label className="field">
+                <span>Flyer image</span>
+                <input accept="image/*" onChange={(event) => updateEventForm('flyerFile', event.target.files?.[0] ?? null)} type="file" />
+              </label>
+              <div className="player-admin-form__primary-actions">
+                <button className="button" disabled={savingEvent} type="submit">
+                  {savingEvent ? 'Saving...' : editingEventId ? 'Save Event' : 'Create Event'}
+                </button>
+                <button className="button button--ghost" onClick={cancelEventEdit} type="button">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : null}
+        </section>
+      ) : null}
+
+      {loadingEvents ? (
+        <div className="state-panel">
+          <p>Loading club events...</p>
+        </div>
+      ) : events.length > 0 ? (
+        <div className="club-events-grid">
+          {events.map((event) => (
+            <article key={event.id} className={`club-event-card ${event.flyerImageUrl ? '' : 'club-event-card--no-flyer'}`}>
+              {event.flyerImageUrl ? (
+                <button
+                  className="club-event-card__flyer-button"
+                  onClick={() => setPreviewFlyerEvent(event)}
+                  type="button"
+                >
+                  <img alt={`${event.title} flyer`} className="club-event-card__flyer" src={event.flyerImageUrl} />
+                  <span>View flyer</span>
+                </button>
+              ) : null}
+              <div className="club-event-card__body">
+                <div className="club-event-card__header">
+                  <div>
+                    <p className="eyebrow">{event.eventType === 'boxLeague' ? 'Box league' : 'Club event'}</p>
+                    <h2>{event.title}</h2>
+                  </div>
+                  {managerView ? <span className="status-badge">{event.status}</span> : null}
+                </div>
+                {event.description ? <p className="club-event-card__description">{event.description}</p> : null}
+                <div className="club-event-card__meta">
+                  <span>{formatEventDateRange(event)}</span>
+                  <span>{event.timeLabel || 'Time TBD'}</span>
+                  <span>{event.locationLabel || 'Location TBD'}</span>
+                  <span>{formatEventCost(event.costLabel)}</span>
+                </div>
+                {event.detailsHeading || event.bulletPoints.length > 0 ? (
+                  <div className="club-event-card__details">
+                    <h3>{event.detailsHeading || 'Details'}</h3>
+                    {event.bulletPoints.length > 0 ? (
+                      <ul>
+                        {event.bulletPoints.map((point) => (
+                          <li key={point}>{point}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
+                {event.registrationInfo ? <p className="club-event-card__registration">{event.registrationInfo}</p> : null}
+                <div className="club-event-card__actions">
+                  {event.registrationUrl ? (
+                    <a className="button" href={event.registrationUrl} rel="noreferrer" target="_blank">
+                      Register
+                    </a>
+                  ) : null}
+                  {managerView ? (
+                    <>
+                      <button className="button button--ghost" onClick={() => startEditEvent(event)} type="button">
+                        Edit
+                      </button>
+                      <button
+                        className="button button--danger"
+                        disabled={archivingEventId === event.id}
+                        onClick={() => handleArchiveEvent(event)}
+                        type="button"
+                      >
+                        {archivingEventId === event.id ? 'Archiving...' : 'Archive'}
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="notice notice--info">No club events are posted yet.</div>
+      )}
+
+      {previewFlyerEvent ? (
+        <div className="club-event-flyer-preview" role="dialog" aria-modal="true" aria-label={`${previewFlyerEvent.title} flyer`}>
+          <button
+            aria-label="Close flyer preview"
+            className="club-event-flyer-preview__backdrop"
+            onClick={() => setPreviewFlyerEvent(null)}
+            type="button"
+          />
+          <div className="club-event-flyer-preview__panel">
+            <div className="club-event-flyer-preview__header">
+              <h2>{previewFlyerEvent.title}</h2>
+              <button className="button button--ghost" onClick={() => setPreviewFlyerEvent(null)} type="button">
+                Close
+              </button>
+            </div>
+            <img alt={`${previewFlyerEvent.title} flyer`} src={previewFlyerEvent.flyerImageUrl} />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ClubTeamsPage() {
   const { clubSlug, teamSlug } = useParams();
   const navigate = useNavigate();
@@ -1353,6 +1748,8 @@ export function ClubTeamsPage() {
   const [challengeNoticeTeam, setChallengeNoticeTeam] = useState(null);
   const [activeClubTab, setActiveClubTab] = useState('teams');
   const [clubPlayerSearch, setClubPlayerSearch] = useState('');
+  const [canManageClubEvents, setCanManageClubEvents] = useState(false);
+  const [publishedEventCount, setPublishedEventCount] = useState(0);
 
   useEffect(() => {
     let ignore = false;
@@ -1369,12 +1766,16 @@ export function ClubTeamsPage() {
         setMembership(membershipData);
         setApprovedClub(null);
         setClubTeams([]);
+        setCanManageClubEvents(false);
+        setPublishedEventCount(0);
         return;
       }
 
-      const [approvedTeams, clubs] = await Promise.all([
+      const [approvedTeams, clubs, managerAccess, publishedEvents] = await Promise.all([
         listApprovedClubTeams(approvedClubSlug),
         listClubs().catch(() => []),
+        canManageClub({ clubSlug: approvedClubSlug, user }).catch(() => false),
+        listClubEvents({ clubSlug: approvedClubSlug }).catch(() => []),
       ]);
       const enrichedTeams = await Promise.all(
         approvedTeams.map(async (clubTeam) => {
@@ -1400,6 +1801,8 @@ export function ClubTeamsPage() {
         setMembership(membershipData);
         setApprovedClub(clubs.find((club) => club.slug === approvedClubSlug) ?? null);
         setClubTeams(enrichedTeams);
+        setCanManageClubEvents(managerAccess);
+        setPublishedEventCount(publishedEvents.filter((event) => event.status === 'published').length);
       }
     }
 
@@ -1412,6 +1815,8 @@ export function ClubTeamsPage() {
           setMembership(null);
           setApprovedClub(null);
           setClubTeams([]);
+          setCanManageClubEvents(false);
+          setPublishedEventCount(0);
           setError(loadError.message ?? 'Unable to load club teams yet.');
         }
       })
@@ -1630,6 +2035,10 @@ export function ClubTeamsPage() {
                     <strong>{clubMemberCount}</strong>
                     <small>{clubMemberCount === 1 ? 'Player' : 'Players'}</small>
                   </span>
+                  <span>
+                    <strong>{publishedEventCount}</strong>
+                    <small>{publishedEventCount === 1 ? 'Event' : 'Events'}</small>
+                  </span>
                 </span>
               </Link>
             ) : null}
@@ -1655,6 +2064,16 @@ export function ClubTeamsPage() {
                   type="button"
                 >
                   Players
+                </button>
+                <button
+                  aria-controls="club-hub-events-panel"
+                  aria-selected={activeClubTab === 'events'}
+                  className={activeClubTab === 'events' ? 'club-teams-page__tab--active' : ''}
+                  onClick={() => setActiveClubTab('events')}
+                  role="tab"
+                  type="button"
+                >
+                  Events
                 </button>
               </div>
 
@@ -1730,7 +2149,7 @@ export function ClubTeamsPage() {
                   );
                 })}
               </div>
-            ) : (
+            ) : activeClubTab === 'players' ? (
               <div id="club-hub-players-panel" className="club-teams-page__players-grid" role="tabpanel">
                 {filteredClubPlayers.length > 0 ? (
                   filteredClubPlayers.map((clubPlayer) => (
@@ -1785,6 +2204,15 @@ export function ClubTeamsPage() {
                   </p>
                 )}
               </div>
+            ) : (
+              <div id="club-hub-events-panel" role="tabpanel">
+                <ClubEventsPanel
+                  clubName={clubName}
+                  clubSlug={approvedClubSlug}
+                  managerView={canManageClubEvents}
+                  user={user}
+                />
+              </div>
             )}
           </>
         ) : (
@@ -1834,6 +2262,79 @@ export function ClubTeamsPage() {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+export function ClubEventsStandalonePage() {
+  const { clubSlug } = useParams();
+  const { user } = useAuth();
+  const [club, setClub] = useState(null);
+  const [managerAccess, setManagerAccess] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadClubEventAccess() {
+      const [clubs, access] = await Promise.all([
+        listClubs().catch(() => []),
+        canManageClub({ clubSlug, user }).catch(() => false),
+      ]);
+
+      if (!ignore) {
+        setClub(clubs.find((item) => item.slug === clubSlug) ?? null);
+        setManagerAccess(access);
+      }
+    }
+
+    setLoading(true);
+    setError('');
+    loadClubEventAccess()
+      .catch((loadError) => {
+        if (!ignore) {
+          setError(loadError.message ?? 'Unable to load club events.');
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [clubSlug, user?.uid]);
+
+  return (
+    <div className="auth-page standalone-mobile-page">
+      <section className="card">
+        <p className="eyebrow">Club manager</p>
+        <h1>{club?.name ? `${club.name} Events` : 'Club Events'}</h1>
+        <p>Manage event listings for club members and players.</p>
+        <div className="choice-row">
+          <Link className="button button--ghost" to="/teams">
+            My Teams
+          </Link>
+          <Link className="button button--ghost" to="/admin">
+            App Admin
+          </Link>
+        </div>
+
+        {loading ? (
+          <div className="state-panel">
+            <p>Loading club events...</p>
+          </div>
+        ) : error ? (
+          <div className="notice notice--error">{error}</div>
+        ) : managerAccess ? (
+          <ClubEventsPanel clubName={club?.name ?? ''} clubSlug={clubSlug} managerView user={user} />
+        ) : (
+          <div className="notice notice--error">You do not have club manager access for this club.</div>
+        )}
+      </section>
     </div>
   );
 }
@@ -7299,6 +7800,9 @@ export function ClubAffiliationAdminPage() {
   const [clubCropPixels, setClubCropPixels] = useState(null);
   const [creatingClubCrop, setCreatingClubCrop] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+  const [clubManagersBySlug, setClubManagersBySlug] = useState({});
+  const [clubManagerEmailDrafts, setClubManagerEmailDrafts] = useState({});
+  const [updatingClubManagerKey, setUpdatingClubManagerKey] = useState('');
 
   async function loadAdminData() {
     if (authLoading) {
@@ -7327,6 +7831,7 @@ export function ClubAffiliationAdminPage() {
         setRequests([]);
         setAdminTeams([]);
         setAdminChallenges([]);
+        setClubManagersBySlug({});
         setError('');
         return;
       }
@@ -7338,8 +7843,21 @@ export function ClubAffiliationAdminPage() {
         listAdminTeamSummaries(user),
         listAdminChallenges(user),
       ]);
+      const managerGroups = await Promise.all(
+        clubData.map(async (club) => [
+          club.slug,
+          await listClubManagers({ clubSlug: club.slug, user }).catch(() => []),
+        ]),
+      );
 
       setClubs(clubData);
+      setClubManagersBySlug(Object.fromEntries(managerGroups));
+      setClubManagerEmailDrafts(
+        clubData.reduce((drafts, club) => {
+          drafts[club.slug] = '';
+          return drafts;
+        }, {}),
+      );
       setClubDrafts(
         clubData.reduce((drafts, club) => {
           drafts[club.slug] = createEmptyClubForm(club);
@@ -7799,6 +8317,46 @@ export function ClubAffiliationAdminPage() {
       setError(deleteError.message ?? 'Unable to delete that club.');
     } finally {
       setUpdatingClubSlug('');
+    }
+  }
+
+  async function handleAddClubManager(club) {
+    const email = clubManagerEmailDrafts[club.slug] ?? '';
+    setUpdatingClubManagerKey(`${club.slug}:add`);
+    setError('');
+    setMessage('');
+
+    try {
+      await addClubManager({ clubSlug: club.slug, email, user });
+      setClubManagerEmailDrafts((current) => ({ ...current, [club.slug]: '' }));
+      setMessage(`Club manager added to ${club.name}.`);
+      await loadAdminData();
+    } catch (managerError) {
+      setError(managerError.message ?? 'Unable to add that club manager.');
+    } finally {
+      setUpdatingClubManagerKey('');
+    }
+  }
+
+  async function handleRemoveClubManager(club, manager) {
+    const confirmed = window.confirm(`Remove ${manager.email || manager.displayName || manager.uid} as a manager for ${club.name}?`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    setUpdatingClubManagerKey(`${club.slug}:${manager.uid}`);
+    setError('');
+    setMessage('');
+
+    try {
+      await removeClubManager({ clubSlug: club.slug, managerUid: manager.uid, user });
+      setMessage('Club manager removed.');
+      await loadAdminData();
+    } catch (managerError) {
+      setError(managerError.message ?? 'Unable to remove that club manager.');
+    } finally {
+      setUpdatingClubManagerKey('');
     }
   }
 
@@ -8333,6 +8891,52 @@ export function ClubAffiliationAdminPage() {
                         <span>Slug: {club.slug}</span>
                         <span>Approved teams: {club.approvedTeamCount}</span>
                         <span>Pending requests: {club.pendingRequestCount}</span>
+                        <div className="club-manager-tool">
+                          <strong>Club managers</strong>
+                          <div className="settings-admin-invite-control">
+                            <input
+                              onChange={(event) =>
+                                setClubManagerEmailDrafts((current) => ({
+                                  ...current,
+                                  [club.slug]: event.target.value,
+                                }))
+                              }
+                              placeholder="manager@example.com"
+                              type="email"
+                              value={clubManagerEmailDrafts[club.slug] ?? ''}
+                            />
+                            <button
+                              className="button button--ghost"
+                              disabled={updatingClubManagerKey === `${club.slug}:add`}
+                              onClick={() => handleAddClubManager(club)}
+                              type="button"
+                            >
+                              {updatingClubManagerKey === `${club.slug}:add` ? 'Adding...' : 'Add manager'}
+                            </button>
+                          </div>
+                          {(clubManagersBySlug[club.slug] ?? []).length > 0 ? (
+                            <div className="club-manager-list">
+                              {(clubManagersBySlug[club.slug] ?? []).map((manager) => (
+                                <div key={manager.uid} className="club-manager-list__item">
+                                  <span>
+                                    {manager.displayName || manager.email || manager.uid}
+                                    {manager.email ? <small>{manager.email}</small> : null}
+                                  </span>
+                                  <button
+                                    className="button button--danger"
+                                    disabled={updatingClubManagerKey === `${club.slug}:${manager.uid}`}
+                                    onClick={() => handleRemoveClubManager(club, manager)}
+                                    type="button"
+                                  >
+                                    {updatingClubManagerKey === `${club.slug}:${manager.uid}` ? 'Removing...' : 'Remove'}
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span>No club managers assigned yet.</span>
+                          )}
+                        </div>
                         <div className="choice-row">
                           <button
                             className="button"

@@ -19,6 +19,11 @@ service firebase.storage {
         && firestore.get(memberPath(clubId, teamId)).data.role in roles;
     }
 
+    function isClubManager(clubId) {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/clubs/$(clubId)/admins/$(request.auth.uid));
+    }
+
     function isPlatformAdmin() {
       return signedIn() && request.auth.token.email in ['demandgendave@gmail.com'];
     }
@@ -49,6 +54,11 @@ service firebase.storage {
     match /clubs/{clubId}/branding/{fileName} {
       allow read: if true;
       allow write: if isPlatformAdmin();
+    }
+
+    match /clubs/{clubId}/events/{eventId}/flyer/{fileName} {
+      allow read: if signedIn();
+      allow write: if isClubManager(clubId) || isPlatformAdmin();
     }
 
     match /{allPaths=**} {

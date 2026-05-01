@@ -110,6 +110,12 @@ function buildClubLogoPath({ clubSlug, fileName }) {
   return `clubs/${clubSlug}/branding/${Date.now()}-${safeBaseName}${extension}`;
 }
 
+function buildClubEventFlyerPath({ clubSlug, eventId, fileName }) {
+  const safeBaseName = sanitizeFileBaseName(fileName);
+  const extension = getFileExtension(fileName);
+  return `clubs/${clubSlug}/events/${eventId}/flyer/${Date.now()}-${safeBaseName}${extension}`;
+}
+
 async function uploadNewsImage({ clubSlug, file, postId, teamSlug }) {
   if (!storage) {
     throw new Error('Firebase Storage is not configured yet.');
@@ -207,6 +213,26 @@ async function uploadClubLogo({ clubSlug, file }) {
   return {
     logoPath,
     logoUrl: await getDownloadURL(logoRef),
+  };
+}
+
+async function uploadClubEventFlyer({ clubSlug, eventId, file }) {
+  if (!storage) {
+    throw new Error('Firebase Storage is not configured yet.');
+  }
+
+  const flyerImagePath = buildClubEventFlyerPath({
+    clubSlug,
+    eventId,
+    fileName: file?.name,
+  });
+  const flyerRef = ref(storage, flyerImagePath);
+
+  await uploadBytes(flyerRef, file);
+
+  return {
+    flyerImagePath,
+    flyerImageUrl: await getDownloadURL(flyerRef),
   };
 }
 
@@ -1314,6 +1340,103 @@ export async function listManagedClubs(uid, email = '') {
   );
 
   return adminChecks.filter(Boolean);
+}
+
+export async function canManageClub({ clubSlug, user }) {
+  requireDb();
+
+  if (!clubSlug || !user?.uid) {
+    return false;
+  }
+
+  if (await isPlatformAdmin(user.uid, user.email)) {
+    return true;
+  }
+
+  const managerSnapshot = await getDoc(doc(db, 'clubs', clubSlug, 'admins', user.uid));
+  return managerSnapshot.exists();
+}
+
+export async function listClubManagers({ clubSlug, user }) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only app admins can manage club managers.');
+  }
+
+  const snapshot = await getDocs(collection(db, 'clubs', clubSlug, 'admins'));
+  const managers = snapshot.docs.map((entry) => {
+    const data = entry.data();
+
+    return {
+      addedAtMs: normalizeTimestampMs(data.addedAt),
+      addedBy: data.addedBy ?? '',
+      displayName: data.displayName ?? '',
+      email: data.email ?? '',
+      id: entry.id,
+      role: data.role ?? 'manager',
+      uid: data.uid ?? entry.id,
+    };
+  });
+
+  managers.sort((left, right) =>
+    (left.displayName || left.email || left.uid).localeCompare(right.displayName || right.email || right.uid),
+  );
+
+  return managers;
+}
+
+export async function addClubManager({ clubSlug, email, user }) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only app admins can add club managers.');
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!normalizedEmail) {
+    throw new Error('Enter the club manager email.');
+  }
+
+  const usersQuery = query(collection(db, 'users'), where('email', '==', normalizedEmail));
+  const usersSnapshot = await getDocs(usersQuery);
+  const userDoc = usersSnapshot.docs[0];
+
+  if (!userDoc) {
+    throw new Error('That user has not signed in yet. Ask them to log in once, then add them here.');
+  }
+
+  const profile = userDoc.data();
+
+  await setDoc(
+    doc(db, 'clubs', clubSlug, 'admins', userDoc.id),
+    {
+      addedAt: serverTimestamp(),
+      addedBy: user.uid,
+      displayName: profile.displayName ?? profile.fullName ?? '',
+      email: profile.email ?? normalizedEmail,
+      role: 'manager',
+      uid: userDoc.id,
+    },
+    { merge: true },
+  );
+
+  return userDoc.id;
+}
+
+export async function removeClubManager({ clubSlug, managerUid, user }) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only app admins can remove club managers.');
+  }
+
+  if (!managerUid) {
+    throw new Error('Choose a club manager to remove.');
+  }
+
+  await deleteDoc(doc(db, 'clubs', clubSlug, 'admins', managerUid));
 }
 
 export async function listAdminTeamSummaries(user) {
@@ -3988,6 +4111,173 @@ export async function toggleNewsReaction({ clubSlug, post, teamSlug, type = 'lik
   });
 
   return true;
+}
+
+function normalizeEventStatus(status) {
+  return ['draft', 'published', 'archived'].includes(status) ? status : 'draft';
+}
+
+function normalizeEventType(eventType) {
+  return ['singleDay', 'multiDay', 'boxLeague'].includes(eventType) ? eventType : 'singleDay';
+}
+
+function normalizeEventBulletPoints(bulletPoints) {
+  if (Array.isArray(bulletPoints)) {
+    return bulletPoints.map((point) => String(point ?? '').trim()).filter(Boolean);
+  }
+
+  return String(bulletPoints ?? '')
+    .split('\n')
+    .map((point) => point.trim())
+    .filter(Boolean);
+}
+
+function normalizeClubEvent(entry) {
+  const data = entry.data();
+
+  return {
+    bulletPoints: normalizeEventBulletPoints(data.bulletPoints),
+    costLabel: data.costLabel ?? '',
+    createdAtMs: normalizeTimestampMs(data.createdAt),
+    createdBy: data.createdBy ?? '',
+    description: data.description ?? '',
+    detailsHeading: data.detailsHeading ?? '',
+    endDate: data.endDate ?? '',
+    eventType: normalizeEventType(data.eventType),
+    flyerImagePath: data.flyerImagePath ?? '',
+    flyerImageUrl: data.flyerImageUrl ?? '',
+    id: entry.id,
+    locationLabel: data.locationLabel ?? '',
+    registrationInfo: data.registrationInfo ?? '',
+    registrationUrl: data.registrationUrl ?? '',
+    startDate: data.startDate ?? '',
+    status: normalizeEventStatus(data.status),
+    timeLabel: data.timeLabel ?? '',
+    title: data.title ?? entry.id,
+    updatedAtMs: normalizeTimestampMs(data.updatedAt),
+    updatedBy: data.updatedBy ?? '',
+  };
+}
+
+export async function listClubEvents({ clubSlug, includeDrafts = false, user = null }) {
+  requireDb();
+
+  if (!clubSlug || clubSlug === INDEPENDENT_CLUB.slug) {
+    return [];
+  }
+
+  const canManage = includeDrafts ? await canManageClub({ clubSlug, user }) : false;
+  const eventsRef = collection(db, 'clubs', clubSlug, 'events');
+  const snapshot = await getDocs(canManage ? eventsRef : query(eventsRef, where('status', '==', 'published')));
+  const events = snapshot.docs
+    .map(normalizeClubEvent)
+    .filter((event) => event.status === 'published' || (includeDrafts && canManage));
+
+  events.sort((left, right) => {
+    const leftDate = left.startDate || '9999-12-31';
+    const rightDate = right.startDate || '9999-12-31';
+    const dateCompare = leftDate.localeCompare(rightDate);
+
+    return dateCompare || left.title.localeCompare(right.title);
+  });
+
+  return events;
+}
+
+export async function saveClubEvent({
+  bulletPoints = [],
+  clubSlug,
+  costLabel = '',
+  description = '',
+  detailsHeading = '',
+  endDate = '',
+  eventId = '',
+  eventType = 'singleDay',
+  flyerFile = null,
+  locationLabel = '',
+  registrationInfo = '',
+  registrationUrl = '',
+  startDate = '',
+  status = 'draft',
+  timeLabel = '',
+  title = '',
+  user,
+}) {
+  requireDb();
+
+  if (!(await canManageClub({ clubSlug, user }))) {
+    throw new Error('Only club managers can save events.');
+  }
+
+  const normalizedTitle = title.trim();
+
+  if (!normalizedTitle) {
+    throw new Error('Enter an event title.');
+  }
+
+  const normalizedStatus = normalizeEventStatus(status);
+  const normalizedEventType = normalizeEventType(eventType);
+  const normalizedBulletPoints = normalizeEventBulletPoints(bulletPoints);
+  const eventRef = eventId
+    ? doc(db, 'clubs', clubSlug, 'events', eventId)
+    : doc(collection(db, 'clubs', clubSlug, 'events'));
+  const eventSnapshot = eventId ? await getDoc(eventRef) : null;
+  const existingEvent = eventSnapshot?.exists() ? eventSnapshot.data() : {};
+  const uploadedFlyer = flyerFile ? await uploadClubEventFlyer({ clubSlug, eventId: eventRef.id, file: flyerFile }) : null;
+  const payload = {
+    bulletPoints: normalizedBulletPoints,
+    costLabel: costLabel.trim(),
+    description: description.trim(),
+    detailsHeading: detailsHeading.trim(),
+    endDate: endDate.trim(),
+    eventType: normalizedEventType,
+    flyerImagePath: uploadedFlyer?.flyerImagePath ?? existingEvent.flyerImagePath ?? '',
+    flyerImageUrl: uploadedFlyer?.flyerImageUrl ?? existingEvent.flyerImageUrl ?? '',
+    locationLabel: locationLabel.trim(),
+    registrationInfo: registrationInfo.trim(),
+    registrationUrl: registrationUrl.trim(),
+    startDate: startDate.trim(),
+    status: normalizedStatus,
+    timeLabel: timeLabel.trim(),
+    title: normalizedTitle,
+    updatedAt: serverTimestamp(),
+    updatedBy: user.uid,
+  };
+
+  if (!eventId) {
+    payload.createdAt = serverTimestamp();
+    payload.createdBy = user.uid;
+  }
+
+  await setDoc(eventRef, payload, { merge: true });
+
+  if (
+    uploadedFlyer?.flyerImagePath &&
+    existingEvent.flyerImagePath &&
+    existingEvent.flyerImagePath !== uploadedFlyer.flyerImagePath
+  ) {
+    await deleteStoragePath(existingEvent.flyerImagePath);
+  }
+
+  return eventRef.id;
+}
+
+export async function archiveClubEvent({ clubSlug, eventId, user }) {
+  requireDb();
+
+  if (!(await canManageClub({ clubSlug, user }))) {
+    throw new Error('Only club managers can archive events.');
+  }
+
+  if (!eventId) {
+    throw new Error('Choose an event to archive.');
+  }
+
+  await updateDoc(doc(db, 'clubs', clubSlug, 'events', eventId), {
+    status: 'archived',
+    updatedAt: serverTimestamp(),
+    updatedBy: user.uid,
+  });
 }
 
 export function buildStandingsSummary(games) {

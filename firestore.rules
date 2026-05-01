@@ -186,6 +186,51 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(userProfileKeys());
     }
 
+    function eventKeys() {
+      return [
+        'bulletPoints',
+        'costLabel',
+        'createdAt',
+        'createdBy',
+        'description',
+        'detailsHeading',
+        'endDate',
+        'eventType',
+        'flyerImagePath',
+        'flyerImageUrl',
+        'locationLabel',
+        'registrationInfo',
+        'registrationUrl',
+        'startDate',
+        'status',
+        'timeLabel',
+        'title',
+        'updatedAt',
+        'updatedBy',
+      ];
+    }
+
+    function safeClubEventWrite(clubId) {
+      return isClubApprover(clubId)
+        && request.resource.data.keys().hasOnly(eventKeys())
+        && request.resource.data.title is string
+        && request.resource.data.description is string
+        && request.resource.data.detailsHeading is string
+        && request.resource.data.bulletPoints is list
+        && request.resource.data.registrationInfo is string
+        && request.resource.data.registrationUrl is string
+        && request.resource.data.costLabel is string
+        && request.resource.data.startDate is string
+        && request.resource.data.endDate is string
+        && request.resource.data.timeLabel is string
+        && request.resource.data.locationLabel is string
+        && request.resource.data.eventType in ['singleDay', 'multiDay', 'boxLeague']
+        && request.resource.data.status in ['draft', 'published', 'archived']
+        && request.resource.data.flyerImagePath is string
+        && request.resource.data.flyerImageUrl is string
+        && request.resource.data.updatedBy == request.auth.uid;
+    }
+
     function safeSelfPlayerWrite(playerId, teamId) {
       return isSelf(playerId)
         && request.resource.data.uid == request.auth.uid
@@ -506,7 +551,7 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if isSelf(uid);
+      allow read: if isSelf(uid) || isPlatformAdmin();
       allow create: if safeSelfUserProfileCreate(uid);
       allow update: if safeSelfUserProfileUpdate(uid);
 
@@ -539,6 +584,16 @@ service cloud.firestore {
       match /admins/{uid} {
         allow read: if signedIn();
         allow write: if isPlatformAdmin();
+      }
+
+      match /events/{eventId} {
+        allow read: if signedIn()
+          && (resource.data.status == 'published' || isClubApprover(clubId));
+        allow create: if safeClubEventWrite(clubId)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if safeClubEventWrite(clubId)
+          && request.resource.data.createdBy == resource.data.createdBy;
+        allow delete: if isPlatformAdmin();
       }
 
       match /affiliationRequests/{requestId} {
