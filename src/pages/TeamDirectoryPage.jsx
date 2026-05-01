@@ -87,7 +87,6 @@ export default function TeamDirectoryPage() {
                             <TeamDivisionLabel className="membership-card__division" value={team.teamDivision} />
                           ) : null}
                           <span>Club: {group.clubName}</span>
-                          <span>Location: {team.primaryLocation || 'Not set'}</span>
                         </div>
                       </article>
                     ))}

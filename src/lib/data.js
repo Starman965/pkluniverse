@@ -98,6 +98,12 @@ function buildPlayerHeadshotPath({ clubSlug, teamSlug, playerId, fileName }) {
   return `clubs/${clubSlug}/teams/${teamSlug}/players/${playerId}/headshots/${Date.now()}-${safeBaseName}${extension}`;
 }
 
+function buildUserHeadshotPath({ fileName, uid }) {
+  const safeBaseName = sanitizeFileBaseName(fileName);
+  const extension = getFileExtension(fileName);
+  return `users/${uid}/profile/headshots/${Date.now()}-${safeBaseName}${extension}`;
+}
+
 function buildClubLogoPath({ clubSlug, fileName }) {
   const safeBaseName = sanitizeFileBaseName(fileName);
   const extension = getFileExtension(fileName);
@@ -155,6 +161,25 @@ async function uploadPlayerHeadshot({ clubSlug, file, playerId, teamSlug }) {
     fileName: file?.name,
     playerId,
     teamSlug,
+  });
+  const headshotRef = ref(storage, headshotPath);
+
+  await uploadBytes(headshotRef, file);
+
+  return {
+    headshotPath,
+    headshotUrl: await getDownloadURL(headshotRef),
+  };
+}
+
+async function uploadUserHeadshot({ file, uid }) {
+  if (!storage) {
+    throw new Error('Firebase Storage is not configured yet.');
+  }
+
+  const headshotPath = buildUserHeadshotPath({
+    fileName: file?.name,
+    uid,
   });
   const headshotRef = ref(storage, headshotPath);
 
@@ -240,6 +265,47 @@ function splitDisplayName(displayName, email = '') {
     firstName,
     fullName: buildFullName(firstName, lastName) || trimmedDisplayName,
     lastName,
+  };
+}
+
+function buildGlobalProfileFields({ fallback = {}, user = null, userProfile = {} } = {}) {
+  const authNames = splitDisplayName(user?.displayName ?? userProfile.displayName, user?.email ?? userProfile.email);
+  const firstName = authNames.firstName || userProfile.firstName || fallback.firstName || '';
+  const lastName = authNames.lastName || userProfile.lastName || fallback.lastName || '';
+  const fullName =
+    authNames.fullName ||
+    userProfile.fullName ||
+    buildFullName(firstName, lastName) ||
+    fallback.fullName ||
+    fallback.displayName ||
+    'New player';
+
+  return {
+    displayName: user?.displayName ?? userProfile.displayName ?? fallback.displayName ?? fullName,
+    email: user?.email ?? userProfile.email ?? fallback.email ?? '',
+    firstName,
+    fullName,
+    headshotPath: userProfile.headshotPath ?? fallback.headshotPath ?? '',
+    headshotUrl: userProfile.headshotUrl ?? fallback.headshotUrl ?? userProfile.photoURL ?? user?.photoURL ?? '',
+    lastName,
+    phone: userProfile.phone ?? fallback.phone ?? '',
+    photoURL: user?.photoURL ?? userProfile.photoURL ?? '',
+    skillLevel: normalizeSkillLevel(userProfile.skillLevel ?? fallback.skillLevel ?? ''),
+    uid: user?.uid ?? userProfile.uid ?? fallback.uid ?? '',
+  };
+}
+
+function buildPlayerSnapshotFromGlobalProfile(profile) {
+  return {
+    displayName: profile.displayName ?? profile.fullName ?? '',
+    email: profile.email ?? '',
+    firstName: profile.firstName ?? '',
+    fullName: profile.fullName ?? buildFullName(profile.firstName, profile.lastName),
+    headshotPath: profile.headshotPath ?? '',
+    headshotUrl: profile.headshotUrl || profile.photoURL || '',
+    lastName: profile.lastName ?? '',
+    phone: profile.phone ?? '',
+    skillLevel: normalizeSkillLevel(profile.skillLevel ?? ''),
   };
 }
 
@@ -358,14 +424,24 @@ export async function syncUserProfile(user) {
   requireDb();
 
   const userRef = doc(db, 'users', user.uid);
+  const userSnapshot = await getDoc(userRef);
+  const profile = buildGlobalProfileFields({
+    user,
+    userProfile: userSnapshot.exists() ? userSnapshot.data() : {},
+  });
 
   await setDoc(
     userRef,
     {
+      displayName: profile.displayName,
+      email: profile.email,
+      firstName: profile.firstName,
+      fullName: profile.fullName,
+      headshotPath: profile.headshotPath,
+      headshotUrl: profile.headshotUrl,
+      lastName: profile.lastName,
+      photoURL: profile.photoURL,
       uid: user.uid,
-      displayName: user.displayName ?? '',
-      email: user.email ?? '',
-      photoURL: user.photoURL ?? '',
       lastSeenAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     },
@@ -383,7 +459,130 @@ export async function getUserProfileData(uid) {
   const userRef = doc(db, 'users', uid);
   const snapshot = await getDoc(userRef);
 
-  return snapshot.exists() ? snapshot.data() : null;
+  return snapshot.exists() ? buildGlobalProfileFields({ userProfile: snapshot.data() }) : null;
+}
+
+async function syncUserProfileToTeamPlayerSnapshots(uid, profile) {
+  const memberships = await listMemberships(uid);
+  const snapshot = buildPlayerSnapshotFromGlobalProfile(profile);
+
+  await Promise.all(
+    memberships.map(async (membership) => {
+      if (!membership.clubSlug || !membership.teamSlug) {
+        return;
+      }
+
+      const playerRef = doc(db, 'clubs', membership.clubSlug, 'teams', membership.teamSlug, 'players', uid);
+
+      try {
+        const playerSnapshot = await getDoc(playerRef);
+
+        if (!playerSnapshot.exists()) {
+          return;
+        }
+
+        await updateDoc(playerRef, {
+          ...snapshot,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        if (error?.code !== 'permission-denied' && error?.code !== 'not-found') {
+          throw error;
+        }
+      }
+    }),
+  );
+}
+
+export async function backfillUserProfileFromPlayer({ player, user }) {
+  requireDb();
+
+  if (!user?.uid || !player) {
+    return null;
+  }
+
+  const userRef = doc(db, 'users', user.uid);
+  const userSnapshot = await getDoc(userRef);
+  const currentProfile = userSnapshot.exists() ? userSnapshot.data() : {};
+  const profile = buildGlobalProfileFields({
+    fallback: player,
+    user,
+    userProfile: currentProfile,
+  });
+
+  await setDoc(
+    userRef,
+    {
+      ...buildPlayerSnapshotFromGlobalProfile(profile),
+      photoURL: profile.photoURL,
+      uid: user.uid,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  return profile;
+}
+
+export async function saveUserPlayerProfile({ headshotFile = null, phone = '', skillLevel = '', user }) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to update your profile.');
+  }
+
+  const normalizedSkillLevel = normalizeSkillLevel(skillLevel);
+
+  if (skillLevel?.trim() && !normalizedSkillLevel) {
+    throw new Error('Choose a valid skill level from the list.');
+  }
+
+  const userRef = doc(db, 'users', user.uid);
+  const userSnapshot = await getDoc(userRef);
+  const currentProfile = userSnapshot.exists() ? userSnapshot.data() : {};
+  const uploadedHeadshot = headshotFile ? await uploadUserHeadshot({ file: headshotFile, uid: user.uid }) : null;
+  const authProfile = buildGlobalProfileFields({ user, userProfile: currentProfile });
+  const payload = {
+    displayName: authProfile.displayName,
+    email: authProfile.email,
+    firstName: authProfile.firstName,
+    fullName: authProfile.fullName,
+    headshotPath: currentProfile.headshotPath ?? '',
+    headshotUrl: currentProfile.headshotUrl ?? authProfile.photoURL ?? '',
+    lastName: authProfile.lastName,
+    phone: phone.trim(),
+    photoURL: authProfile.photoURL,
+    skillLevel: normalizedSkillLevel,
+    uid: user.uid,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (uploadedHeadshot) {
+    payload.headshotPath = uploadedHeadshot.headshotPath;
+    payload.headshotUrl = uploadedHeadshot.headshotUrl;
+  }
+
+  await setDoc(userRef, payload, { merge: true });
+
+  const nextProfile = buildGlobalProfileFields({
+    user,
+    userProfile: {
+      ...currentProfile,
+      ...payload,
+    },
+  });
+
+  await syncUserProfileToTeamPlayerSnapshots(user.uid, nextProfile);
+
+  if (
+    uploadedHeadshot?.headshotPath &&
+    currentProfile.headshotPath?.startsWith(`users/${user.uid}/profile/headshots/`) &&
+    currentProfile.headshotPath !== uploadedHeadshot.headshotPath
+  ) {
+    await deleteStoragePath(currentProfile.headshotPath);
+  }
+
+  return nextProfile;
 }
 
 export async function setLastActiveTeam({ clubSlug, teamSlug, uid }) {
@@ -398,6 +597,7 @@ export async function setLastActiveTeam({ clubSlug, teamSlug, uid }) {
     {
       lastActiveClubId: clubSlug,
       lastActiveTeamId: teamSlug,
+      uid,
       updatedAt: serverTimestamp(),
     },
     { merge: true },
@@ -1156,7 +1356,6 @@ export async function listAdminTeamSummaries(user) {
             logoUrl: team.logoUrl ?? '',
             memberCount: members.length,
             name: team.name ?? teamSlug,
-            primaryLocation: team.primaryLocation ?? '',
             requestedClubSlug: team.requestedClubSlug ?? '',
             teamDivision: normalizeTeamDivision(team.teamDivision),
             teamSlug: sourceTeamSlug,
@@ -1241,7 +1440,6 @@ export async function listTeamDirectory() {
           logoUrl: team.logoUrl ?? '',
           memberCount: members.length,
           name: team.name ?? teamSlug,
-          primaryLocation: team.primaryLocation ?? '',
           sourceClubSlug: club.slug,
           teamDivision: normalizeTeamDivision(team.teamDivision),
           teamSlug: sourceTeamSlug,
@@ -1321,9 +1519,10 @@ async function findTeamByJoinCode(normalizedCode) {
 async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
   const playerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'players', user.uid);
   const membershipPlayerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'playerLinks', user.uid);
-  const { firstName, fullName, lastName } = splitDisplayName(user.displayName, user.email);
+  const userRef = doc(db, 'users', user.uid);
   let playerSnapshot = null;
   let existingPlayer = null;
+  let userProfile = null;
 
   try {
     playerSnapshot = await getDoc(playerRef);
@@ -1336,18 +1535,34 @@ async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
     }
   }
 
-  const existingFirstName = (existingPlayer?.firstName ?? '').trim();
-  const existingLastName = (existingPlayer?.lastName ?? '').trim();
-  const existingFullName = (existingPlayer?.fullName ?? '').trim();
+  try {
+    const userSnapshot = await getDoc(userRef);
+    userProfile = userSnapshot.exists() ? userSnapshot.data() : null;
+  } catch (error) {
+    if (error?.code !== 'permission-denied') {
+      throw error;
+    }
+  }
+
+  const globalProfile = buildGlobalProfileFields({
+    fallback: existingPlayer ?? {},
+    user,
+    userProfile: userProfile ?? {},
+  });
+
+  await setDoc(
+    userRef,
+    {
+      ...buildPlayerSnapshotFromGlobalProfile(globalProfile),
+      photoURL: globalProfile.photoURL,
+      uid: user.uid,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+
   const payload = {
-    displayName: user.displayName ?? user.email ?? existingPlayer?.displayName ?? 'New player',
-    email: user.email ?? existingPlayer?.email ?? '',
-    firstName: existingFirstName || firstName,
-    fullName:
-      existingFullName ||
-      buildFullName(existingFirstName || firstName, existingLastName || lastName) ||
-      fullName,
-    lastName: existingLastName || lastName,
+    ...buildPlayerSnapshotFromGlobalProfile(globalProfile),
     teamId,
     teamName,
     uid: user.uid,
@@ -1358,8 +1573,6 @@ async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
     payload.active = existingPlayer?.active !== false;
     payload.availableDays = normalizeAvailableDays(existingPlayer?.availableDays);
     payload.notes = existingPlayer?.notes ?? '';
-    payload.phone = existingPlayer?.phone ?? '';
-    payload.skillLevel = normalizeSkillLevel(existingPlayer?.skillLevel ?? '');
 
     if (!playerSnapshot.exists()) {
       payload.createdAt = serverTimestamp();
@@ -1431,7 +1644,6 @@ export async function createTeam({ teamName, user }) {
     logoPath: '',
     logoUrl: '',
     name: trimmedName,
-    primaryLocation: '',
     publicSlug,
     requestedClubSlug: '',
     slug: teamSlug,
@@ -1746,7 +1958,6 @@ async function syncTeamNameReferences({ clubSlug, teamName, teamSlug, user }) {
 export async function updateTeamSettings({
   clubSlug,
   logoFile,
-  primaryLocation = '',
   status = 'active',
   teamDivision = '',
   teamName,
@@ -1769,7 +1980,6 @@ export async function updateTeamSettings({
   }
 
   const currentTeam = teamSnapshot.data();
-  const normalizedPrimaryLocation = primaryLocation.trim();
   const normalizedTeamDivision = normalizeTeamDivision(teamDivision);
   let uploadedLogo = null;
 
@@ -1785,7 +1995,6 @@ export async function updateTeamSettings({
     logoPath: uploadedLogo?.logoPath ?? currentTeam.logoPath ?? '',
     logoUrl: uploadedLogo?.logoUrl ?? currentTeam.logoUrl ?? '',
     name: normalizedName,
-    primaryLocation: normalizedPrimaryLocation,
     publicSlug: slugify(normalizedName),
     status,
     teamDivision: normalizedTeamDivision,
@@ -2123,7 +2332,6 @@ export async function listApprovedClubTeams(clubSlug) {
           id: entry.id,
           logoUrl: data.logoUrl ?? '',
           name: data.name ?? entry.id,
-          primaryLocation: data.primaryLocation ?? '',
           status: data.status ?? 'active',
           teamDivision: normalizeTeamDivision(data.teamDivision),
           teamSlug,
@@ -2222,7 +2430,6 @@ async function getApprovedChallengeTeam({ challengeClubSlug, teamClubSlug, teamS
     clubSlug: teamClubSlug,
     logoUrl: team.logoUrl ?? '',
     name: team.name ?? teamSlug,
-    primaryLocation: team.primaryLocation ?? '',
     teamSlug,
   };
 }
@@ -2370,7 +2577,7 @@ export async function createChallenge({
     declinedAt: null,
     homeGameId: '',
     isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
-    location: trimmedLocation || sourceTeam.primaryLocation || 'Location TBD',
+    location: trimmedLocation || 'Location TBD',
     notes: trimmedNotes,
     playersNeeded: normalizedPlayersNeeded,
     status: 'open',
@@ -2386,7 +2593,7 @@ export async function createChallenge({
     const captainNotificationFields = await getTeamCaptainNotificationFields(target.clubSlug, target.teamSlug);
     const challengeDateLabel = normalizedDateTbd ? 'Date TBD' : trimmedIsoDate;
     const challengeTimeLabel = normalizedDateTbd ? 'Time TBD' : trimmedTimeLabel || 'Time TBD';
-    const challengeLocation = trimmedLocation || sourceTeam.primaryLocation || 'Location TBD';
+    const challengeLocation = trimmedLocation || 'Location TBD';
 
     await createAdminNotification({
       ...captainNotificationFields,
@@ -3004,33 +3211,14 @@ export async function savePlayer({
   active = true,
   availableDays = [],
   clubSlug,
-  firstName,
-  headshotFile = null,
-  lastName,
   notes = '',
   playerId,
-  phone = '',
-  skillLevel,
   teamSlug,
 }) {
   requireDb();
 
   if (!playerId) {
     throw new Error('Players must join the team before their profile can be edited.');
-  }
-
-  const trimmedFirstName = firstName.trim();
-  const trimmedLastName = lastName.trim();
-  const fullName = buildFullName(trimmedFirstName, trimmedLastName);
-
-  if (!fullName) {
-    throw new Error('Enter at least a first or last name for the player.');
-  }
-
-  const normalizedSkillLevel = normalizeSkillLevel(skillLevel);
-
-  if (skillLevel?.trim() && !normalizedSkillLevel) {
-    throw new Error('Choose a valid skill level from the list.');
   }
 
   const playerRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'players', playerId);
@@ -3040,42 +3228,12 @@ export async function savePlayer({
     throw new Error('That player could not be found.');
   }
 
-  const currentPlayer = playerSnapshot.data() ?? {};
-  const uploadedHeadshot = headshotFile
-    ? await uploadPlayerHeadshot({
-        clubSlug,
-        file: headshotFile,
-        playerId,
-        teamSlug,
-      })
-    : null;
-
-  const payload = {
+  await updateDoc(playerRef, {
     active,
     availableDays: normalizeAvailableDays(availableDays),
-    firstName: trimmedFirstName,
-    fullName,
-    lastName: trimmedLastName,
     notes: notes.trim(),
-    phone: phone.trim(),
-    skillLevel: normalizedSkillLevel,
     updatedAt: serverTimestamp(),
-  };
-
-  if (uploadedHeadshot) {
-    payload.headshotPath = uploadedHeadshot.headshotPath;
-    payload.headshotUrl = uploadedHeadshot.headshotUrl;
-  }
-
-  await updateDoc(playerRef, payload);
-
-  if (
-    uploadedHeadshot?.headshotPath &&
-    currentPlayer.headshotPath &&
-    currentPlayer.headshotPath !== uploadedHeadshot.headshotPath
-  ) {
-    await deleteStoragePath(currentPlayer.headshotPath);
-  }
+  });
 
   return playerId;
 }

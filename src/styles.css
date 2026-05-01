@@ -706,6 +706,16 @@ textarea {
   padding: 0.9rem 1rem;
 }
 
+.readonly-field {
+  min-width: 0;
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  color: #c9d6e8;
+  padding: 0.9rem 1rem;
+}
+
 .field select option {
   color: #0b1525;
   background: #f5f8ff;
@@ -4692,6 +4702,11 @@ ul {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.player-admin-form__readonly-profile {
+  display: grid;
+  gap: 0.85rem;
+}
+
 .player-admin-form__phone-field {
   max-width: 260px;
 }
@@ -5338,7 +5353,9 @@ ul {
 .team-members-invite-strip {
   display: grid;
   gap: 0.75rem;
+  justify-self: start;
   margin-top: 1rem;
+  width: min(100%, 780px);
   padding: 0.85rem;
   border: 1px solid rgba(240, 193, 75, 0.2);
   border-radius: 18px;
@@ -5355,9 +5372,13 @@ ul {
 
 .team-members-invite-strip__details {
   display: grid;
-  grid-template-columns: minmax(120px, max-content) minmax(220px, 1fr) minmax(150px, max-content);
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) minmax(150px, max-content);
   gap: 0.75rem;
   align-items: end;
+}
+
+.team-members-invite-strip__item--link {
+  max-width: 420px;
 }
 
 .team-members-invite-strip__item {
@@ -5394,7 +5415,9 @@ ul {
 }
 
 .team-members-invite-strip__item code {
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: inherit;
   font-size: 0.86rem;
 }

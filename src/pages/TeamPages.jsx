@@ -13,6 +13,7 @@ import {
   buildPairingSummary,
   buildStandingsSummary,
   archiveTeam,
+  backfillUserProfileFromPlayer,
   cancelChallenge,
   createClub,
   createChallenge,
@@ -26,6 +27,7 @@ import {
   declineChallenge,
   getMembership,
   getTeam,
+  getUserProfileData,
   isPlatformAdmin,
   listAdminPlayers,
   listAdminTeamSummaries,
@@ -47,6 +49,7 @@ import {
   saveGamePairings,
   saveNewsPost,
   savePlayer,
+  saveUserPlayerProfile,
   setAvailability,
   toggleNewsReaction,
   updateChallenge,
@@ -123,12 +126,12 @@ function createEmptyScheduleAdminForm() {
   };
 }
 
-function createEmptyChallengeForm(primaryLocation = '') {
+function createEmptyChallengeForm() {
   return {
     dateTbd: true,
     hour: '',
     isoDate: '',
-    location: primaryLocation,
+    location: '',
     minute: '00',
     notes: '',
     period: 'AM',
@@ -696,7 +699,6 @@ function MemberStatIcon({ type }) {
 function createEmptyTeamSettingsForm(team = {}) {
   return {
     logoFile: null,
-    primaryLocation: team.primaryLocation ?? '',
     teamDivision: team.teamDivision ?? '',
     teamName: team.name ?? '',
   };
@@ -1710,7 +1712,6 @@ export function ClubTeamsPage() {
                         {getVisibleTeamDivisionLabel(clubTeam) ? (
                           <TeamDivisionLabel className="membership-card__division" value={clubTeam.teamDivision} />
                         ) : null}
-                        <span>Location: {clubTeam.primaryLocation || 'Not set'}</span>
                         {canOpenChallengeAction ? (
                           <span className="membership-card__action">
                             <svg className="membership-card__action-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24">
@@ -2231,7 +2232,7 @@ export function TeamMembersPage() {
             </div>
             <div className="team-members-invite-strip__item team-members-invite-strip__item--link">
               <span>Invite link</span>
-              <code>{inviteLink || 'Not available yet'}</code>
+              <code title={inviteLink || undefined}>{inviteLink || 'Not available yet'}</code>
             </div>
             <button
               className="button team-members-invite-strip__button"
@@ -2255,6 +2256,7 @@ export function ProfilePage() {
   const { user } = useAuth();
   const [membership, setMembership] = useState(null);
   const [player, setPlayer] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
   const [form, setForm] = useState(createEmptyRosterForm());
   const [saving, setSaving] = useState(false);
   const [dropping, setDropping] = useState(false);
@@ -2292,23 +2294,33 @@ export function ProfilePage() {
     if (!user?.uid) {
       setMembership(null);
       setPlayer(null);
+      setUserProfile(null);
       setForm(createEmptyRosterForm());
       replaceHeadshotPreview('');
       return;
     }
 
-    const [membershipData, playerData] = await Promise.all([
+    const [membershipData, playerData, profileData] = await Promise.all([
       getMembership(clubSlug, teamSlug, user.uid, user),
       listPlayers(clubSlug, teamSlug),
+      getUserProfileData(user.uid).catch(() => null),
     ]);
     const currentPlayer =
       playerData.find((item) => item.id === membershipData?.playerId) ??
       playerData.find((item) => item.uid === user.uid) ??
       null;
+    const syncedProfile = currentPlayer
+      ? await backfillUserProfileFromPlayer({ player: currentPlayer, user }).catch(() => profileData)
+      : profileData;
+    const formProfile = {
+      ...(currentPlayer ?? {}),
+      ...(syncedProfile ?? {}),
+    };
 
     setMembership(membershipData);
     setPlayer(currentPlayer);
-    setForm(currentPlayer ? createRosterFormFromPlayer(currentPlayer) : createEmptyRosterForm());
+    setUserProfile(syncedProfile);
+    setForm(currentPlayer ? createRosterFormFromPlayer(formProfile) : createEmptyRosterForm());
     replaceHeadshotPreview('');
   }
 
@@ -2399,13 +2411,19 @@ export function ProfilePage() {
     setMessage('');
 
     try {
+      await saveUserPlayerProfile({
+        headshotFile: form.headshotFile,
+        phone: form.phone,
+        skillLevel: form.skillLevel,
+        user,
+      });
       await savePlayer({
-        ...form,
         active: player.active !== false,
+        availableDays: form.availableDays,
         clubSlug,
+        notes: form.notes,
         playerId: player.id,
         teamSlug,
-        user,
       });
       setMessage('Profile saved.');
       await loadProfileData();
@@ -2449,6 +2467,11 @@ export function ProfilePage() {
     }
   }
 
+  const profileName = userProfile?.fullName || player?.fullName || user?.displayName || user?.email || 'Your profile';
+  const profileHeadshotUrl = userProfile?.headshotUrl || userProfile?.photoURL || player?.headshotUrl || '';
+  const profileFirstName = userProfile?.firstName || player?.firstName || 'Not set';
+  const profileLastName = userProfile?.lastName || player?.lastName || 'Not set';
+
   return (
     <div className="page-grid schedule-admin-page">
       <section className="card">
@@ -2466,15 +2489,15 @@ export function ProfilePage() {
         {!loading && player ? (
           <form className="schedule-admin-form" onSubmit={handleSubmit}>
             <div className="profile-headshot-field">
-              {headshotPreviewUrl || player.headshotUrl ? (
+              {headshotPreviewUrl || profileHeadshotUrl ? (
                 <img
-                  alt={`${player.fullName || 'Player'} headshot preview`}
+                  alt={`${profileName} headshot preview`}
                   className="profile-headshot-field__preview"
-                  src={headshotPreviewUrl || player.headshotUrl}
+                  src={headshotPreviewUrl || profileHeadshotUrl}
                 />
               ) : (
                 <div className="profile-headshot-field__initials">
-                  {buildPlayerInitials(player.fullName || `${form.firstName} ${form.lastName}`)}
+                  {buildPlayerInitials(profileName)}
                 </div>
               )}
               <div className="profile-headshot-field__copy">
@@ -2487,21 +2510,17 @@ export function ProfilePage() {
               </div>
             </div>
 
-            <div className="player-admin-form__row">
-              <label className="field">
-                <span>First name</span>
-                <input
-                  onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))}
-                  value={form.firstName}
-                />
-              </label>
-              <label className="field">
-                <span>Last name</span>
-                <input
-                  onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))}
-                  value={form.lastName}
-                />
-              </label>
+            <div className="player-admin-form__readonly-profile">
+              <div className="player-admin-form__row">
+                <div className="field">
+                  <span>First name</span>
+                  <div className="readonly-field">{profileFirstName}</div>
+                </div>
+                <div className="field">
+                  <span>Last name</span>
+                  <div className="readonly-field">{profileLastName}</div>
+                </div>
+              </div>
             </div>
             <label className="field player-admin-form__phone-field">
               <span>Mobile phone</span>
@@ -2532,7 +2551,7 @@ export function ProfilePage() {
               </label>
             </div>
             <fieldset className="field checkbox-fieldset weekly-availability">
-              <legend>My Best Available Days</legend>
+              <legend>My Best Days to Play (on this team)</legend>
               <div className="checkbox-grid">
                 {PLAYER_AVAILABLE_DAYS.map((day) => (
                   <label
@@ -2554,14 +2573,6 @@ export function ProfilePage() {
                 ))}
               </div>
             </fieldset>
-            <label className="field field--wide">
-              <span>Notes (Read by Captains Only)</span>
-              <textarea
-                onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-                rows={4}
-                value={form.notes}
-              />
-            </label>
             <div className="player-admin-form__primary-actions">
               <button className="button" disabled={saving} type="submit">
                 {saving ? 'Saving...' : 'Save Profile'}
@@ -2643,12 +2654,10 @@ export function RosterPage() {
   const [players, setPlayers] = useState([]);
   const [membership, setMembership] = useState(null);
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
-  const [editSaving, setEditSaving] = useState(false);
   const [updatingPlayerId, setUpdatingPlayerId] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [editForm, setEditForm] = useState(createEmptyRosterForm());
 
   const canManage = canManageRole(membership?.role);
   const selectedPlayerIndex = Math.max(
@@ -2687,14 +2696,6 @@ export function RosterPage() {
       });
   }, [clubSlug, teamSlug, user?.uid]);
 
-  useEffect(() => {
-    if (selectedPlayer) {
-      setEditForm(createRosterFormFromPlayer(selectedPlayer));
-    } else {
-      setEditForm(createEmptyRosterForm());
-    }
-  }, [selectedPlayer]);
-
   function moveSelection(direction) {
     if (!players.length) {
       return;
@@ -2704,33 +2705,6 @@ export function RosterPage() {
     setSelectedPlayerId(players[nextIndex]?.id ?? '');
     setError('');
     setMessage('');
-  }
-
-  async function handleEditSubmit(event) {
-    event.preventDefault();
-
-    if (!selectedPlayer) {
-      return;
-    }
-
-    setEditSaving(true);
-    setError('');
-    setMessage('');
-
-    try {
-      await savePlayer({
-        ...editForm,
-        clubSlug,
-        teamSlug,
-        user,
-      });
-      setMessage('Player changes saved.');
-      await loadRosterData();
-    } catch (submitError) {
-      setError(submitError.message ?? 'Unable to save that player.');
-    } finally {
-      setEditSaving(false);
-    }
   }
 
   async function handleDropPlayer(player) {
@@ -2771,10 +2745,6 @@ export function RosterPage() {
       <section className="card">
         <p className="eyebrow">Roster admin</p>
         <h1>Manage Players</h1>
-        <p>
-          Captains and co-captains manage player profile details here. New players join the team
-          with the team join code.
-        </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
         {message ? <div className="notice notice--success">{message}</div> : null}
@@ -2809,112 +2779,35 @@ export function RosterPage() {
               <div className="schedule-admin-card__header">
                 <div>
                   <h2>{selectedPlayer?.fullName || 'No player selected'}</h2>
-                  <p>
-                    {selectedPlayer
-                        ? "Update a player's profile details or drop them from the team."
-                        : 'Share the team join code to add the first player.'}
-                  </p>
+                  {!selectedPlayer ? <p>Share the team join code to add the first player.</p> : null}
                 </div>
-                {selectedPlayer ? (
-                  <span
-                    className={`status-badge ${selectedPlayer.active ? 'status-badge--active' : 'status-badge--inactive'}`}
-                  >
-                    {selectedPlayer.active ? 'ACTIVE' : 'INACTIVE'}
-                  </span>
-                ) : null}
               </div>
 
               {selectedPlayer ? (
-                <form className="schedule-admin-form" onSubmit={handleEditSubmit}>
-                  <div className="player-admin-form__row">
-                    <label className="field">
-                      <span>First name</span>
-                      <input
-                        onChange={(event) =>
-                          setEditForm((current) => ({ ...current, firstName: event.target.value }))
-                        }
-                        value={editForm.firstName}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Last name</span>
-                      <input
-                        onChange={(event) =>
-                          setEditForm((current) => ({ ...current, lastName: event.target.value }))
-                        }
-                        value={editForm.lastName}
-                      />
-                    </label>
-                  </div>
-                  <label className="field player-admin-form__phone-field">
-                    <span>Mobile phone</span>
-                    <input
-                      autoComplete="tel"
-                      inputMode="tel"
-                      onChange={(event) =>
-                        setEditForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
-                      }
-                      type="tel"
-                      value={editForm.phone}
-                    />
-                  </label>
-                  <div className="player-admin-form__row">
-                    <label className="field">
-                      <span>Skill level</span>
-                      <select
-                        onChange={(event) =>
-                          setEditForm((current) => ({ ...current, skillLevel: event.target.value }))
-                        }
-                        value={editForm.skillLevel}
-                      >
-                        <option value="">Not set</option>
-                        {PLAYER_SKILL_LEVELS.map((skillLevel) => (
-                          <option key={skillLevel} value={skillLevel}>
-                            {skillLevel}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <fieldset className="field checkbox-fieldset weekly-availability">
-                    <legend>My Best Available Days</legend>
-                    <div className="checkbox-grid">
-                      {PLAYER_AVAILABLE_DAYS.map((day) => (
-                        <label
-                          key={day.id}
-                          className={`checkbox-option ${editForm.availableDays.includes(day.id) ? 'checkbox-option--selected' : ''}`}
-                        >
-                          <input
-                            checked={editForm.availableDays.includes(day.id)}
-                            onChange={(event) =>
-                              setEditForm((current) => ({
-                                ...current,
-                                availableDays: updateAvailableDays(
-                                  current.availableDays,
-                                  day.id,
-                                  event.target.checked,
-                                ),
-                              }))
-                            }
-                            type="checkbox"
-                          />
-                          <span>{day.label}</span>
-                        </label>
-                      ))}
+                <div className="schedule-admin-form">
+                  <div className="player-admin-form__readonly-profile">
+                    <div className="player-admin-form__row">
+                      <div className="field">
+                        <span>First name</span>
+                        <div className="readonly-field">{selectedPlayer.firstName || 'Not set'}</div>
+                      </div>
+                      <div className="field">
+                        <span>Last name</span>
+                        <div className="readonly-field">{selectedPlayer.lastName || 'Not set'}</div>
+                      </div>
                     </div>
-                  </fieldset>
-                  <label className="field field--wide">
-                    <span>Notes (Read by Captains Only)</span>
-                    <textarea
-                      onChange={(event) => setEditForm((current) => ({ ...current, notes: event.target.value }))}
-                      rows={4}
-                      value={editForm.notes}
-                    />
-                  </label>
+                    <div className="player-admin-form__row">
+                      <div className="field player-admin-form__phone-field">
+                        <span>Mobile phone</span>
+                        <div className="readonly-field">{selectedPlayer.phone || 'Not set'}</div>
+                      </div>
+                      <div className="field">
+                        <span>Skill level</span>
+                        <div className="readonly-field">{selectedPlayer.skillLevel || 'Not set'}</div>
+                      </div>
+                    </div>
+                  </div>
                   <div className="player-admin-form__primary-actions">
-                    <button className="button" disabled={editSaving} type="submit">
-                      {editSaving ? 'Saving...' : 'Save'}
-                    </button>
                     <button
                       className="button button--danger"
                       disabled={updatingPlayerId === selectedPlayer.id}
@@ -2924,7 +2817,7 @@ export function RosterPage() {
                       {updatingPlayerId === selectedPlayer.id ? 'Dropping...' : 'Drop from Team'}
                     </button>
                   </div>
-                </form>
+                </div>
               ) : (
                 <p>No players have joined yet.</p>
               )}
@@ -3414,10 +3307,10 @@ export function ScheduleScoresPage() {
                       value={form.opponent}
                     />
                     <label className="field">
-                      <span>Location</span>
+                      <span>Location / Court(s)</span>
                       <input
                         onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
-                        placeholder="Club, court(s), address, or notes"
+                        placeholder="Optional, e.g. Blackhawk CC Courts 1-4 or TBD"
                         value={form.location}
                       />
                     </label>
@@ -5921,14 +5814,14 @@ function buildChallengeTimeLabel(form) {
   return `${form.hour}:${form.minute} ${form.period}`;
 }
 
-function createChallengeFormFromChallenge(challenge, primaryLocation = '') {
+function createChallengeFormFromChallenge(challenge) {
   const match = String(challenge.timeLabel ?? '').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
 
   return {
     dateTbd: challenge.dateTbd === true,
     hour: challenge.dateTbd === true ? '' : match?.[1] ?? '',
     isoDate: challenge.dateTbd === true ? '' : challenge.isoDate ?? '',
-    location: challenge.location && challenge.location !== 'Location TBD' ? challenge.location : primaryLocation,
+    location: challenge.location && challenge.location !== 'Location TBD' ? challenge.location : '',
     minute: challenge.dateTbd === true ? '00' : match?.[2] ?? '00',
     notes: challenge.notes ?? '',
     period: challenge.dateTbd === true ? 'AM' : match?.[3]?.toUpperCase() ?? 'AM',
@@ -5998,10 +5891,7 @@ export function ChallengesPage() {
     setMembership(membershipData);
     setForm((current) => ({
       ...current,
-      location:
-        !current.location || current.location === 'Location TBD'
-          ? teamData?.primaryLocation || ''
-          : current.location,
+      location: current.location === 'Location TBD' ? '' : current.location,
     }));
 
     if (!approvedClubSlug) {
@@ -6112,7 +6002,7 @@ export function ChallengesPage() {
         await createChallenge(challengePayload);
       }
 
-      setForm(createEmptyChallengeForm(team?.primaryLocation ?? ''));
+      setForm(createEmptyChallengeForm());
       setEditingChallengeId('');
       setMessage(editingChallengeId ? 'Challenge updated.' : 'Challenge sent.');
       await loadChallengeData();
@@ -6124,14 +6014,14 @@ export function ChallengesPage() {
   }
 
   function handleEditChallenge(challenge) {
-    setForm(createChallengeFormFromChallenge(challenge, team?.primaryLocation ?? ''));
+    setForm(createChallengeFormFromChallenge(challenge));
     setEditingChallengeId(challenge.id);
     setError('');
     setMessage('');
   }
 
   function handleCancelEditChallenge() {
-    setForm(createEmptyChallengeForm(team?.primaryLocation ?? ''));
+    setForm(createEmptyChallengeForm());
     setEditingChallengeId('');
     setError('');
   }
@@ -6228,7 +6118,7 @@ export function ChallengesPage() {
             <span>Date: {formatChallengeDate(challenge)}</span>
             <span>Time: {formatChallengeTime(challenge)}</span>
             <span>Players needed: {challenge.playersNeeded ?? 8}</span>
-            <span>Location: {challenge.location || 'Location TBD'}</span>
+            <span>Court(s): {challenge.location || 'TBD'}</span>
             {challenge.status === 'accepted' && scheduleGameId ? (
               <span>Scheduled match created</span>
             ) : null}
@@ -6455,10 +6345,10 @@ export function ChallengesPage() {
                       </label>
                     </div>
                     <label className="field challenge-form__location">
-                      <span>Location</span>
+                      <span>Court(s)</span>
                       <input
                         onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
-                        placeholder="Club, court(s), address, or TBD"
+                        placeholder="Optional, e.g. Courts 1-4 or TBD"
                         value={form.location}
                       />
                     </label>
@@ -6468,7 +6358,7 @@ export function ChallengesPage() {
                     <span>Message to other captain</span>
                     <textarea
                       onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-                      placeholder="Optional details, preferred format, courts, or scheduling notes"
+                      placeholder="Optional details, preferred format, or scheduling notes"
                       value={form.notes}
                     />
                   </label>
@@ -6823,7 +6713,6 @@ export function SettingsPage() {
       await updateTeamSettings({
         clubSlug,
         logoFile: form.logoFile,
-        primaryLocation: form.primaryLocation,
         teamDivision: form.teamDivision,
         teamName: form.teamName,
         teamSlug,
@@ -7033,7 +6922,7 @@ export function SettingsPage() {
             <div>
               <p className="eyebrow">Profile</p>
               <h2>{team?.name ? `${team.name} Profile` : 'Team Profile'}</h2>
-              <p>Upload your own custom logo, add your primary match location, and set your team division.</p>
+              <p>Upload your own custom logo and set your team division.</p>
             </div>
           </div>
 
@@ -7061,16 +6950,6 @@ export function SettingsPage() {
                     <input
                       onChange={(event) => setForm((current) => ({ ...current, teamName: event.target.value }))}
                       value={form.teamName}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Primary location</span>
-                    <input
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, primaryLocation: event.target.value }))
-                      }
-                      placeholder="Optional, e.g. Blackhawk Country Club"
-                      value={form.primaryLocation}
                     />
                   </label>
                   <label className="field">
@@ -8213,9 +8092,6 @@ export function ClubAffiliationAdminPage() {
                       {getVisibleTeamDivisionLabel(teamSummary) ? (
                         <TeamDivisionLabel className="membership-card__division" value={teamSummary.teamDivision} />
                       ) : null}
-                      {teamSummary.primaryLocation ? (
-                        <span>Primary location: {teamSummary.primaryLocation}</span>
-                      ) : null}
                       <div className="admin-team-card__actions">
                         <label className="button button--ghost">
                           {updatingTeamLogoId === `${teamSummary.clubSlug}-${teamSummary.teamSlug}`
@@ -8684,7 +8560,7 @@ export function ClubAffiliationAdminPage() {
                       <div className="challenge-card__details">
                         <span>Date: {formatChallengeDate(challenge)}</span>
                         <span>Time: {formatChallengeTime(challenge)}</span>
-                        <span>Location: {challenge.location || 'Location TBD'}</span>
+                        <span>Court(s): {challenge.location || 'TBD'}</span>
                         <span>ID: {challenge.id}</span>
                       </div>
                       {challenge.notes ? <p className="challenge-card__notes">{challenge.notes}</p> : null}

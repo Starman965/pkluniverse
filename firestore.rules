@@ -18,6 +18,10 @@ service cloud.firestore {
       return get(memberPath(clubId, teamId));
     }
 
+    function userProfileDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid));
+    }
+
     function isTeamMember(clubId, teamId) {
       return signedIn() && exists(memberPath(clubId, teamId));
     }
@@ -121,7 +125,7 @@ service cloud.firestore {
         && request.resource.data.joinedAt == resource.data.joinedAt;
     }
 
-    function safeManagerMembershipSync(uid, clubId, teamId) {
+    function safeManagerMembershipSync(clubId, teamId) {
       return isManager(clubId, teamId)
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.clubId == resource.data.clubId
@@ -134,7 +138,7 @@ service cloud.firestore {
         && request.resource.data.joinedAt == resource.data.joinedAt;
     }
 
-    function safeCaptainRoleUpdate(uid, clubId, teamId) {
+    function safeCaptainRoleUpdate(clubId, teamId) {
       return isCaptain(clubId, teamId)
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.clubId == resource.data.clubId
@@ -147,6 +151,39 @@ service cloud.firestore {
         && request.resource.data.joinedAt == resource.data.joinedAt
         && resource.data.role in ['member', 'coCaptain']
         && request.resource.data.role in ['member', 'coCaptain'];
+    }
+
+    function userProfileKeys() {
+      return [
+        'displayName',
+        'email',
+        'firstName',
+        'fullName',
+        'headshotPath',
+        'headshotUrl',
+        'lastActiveClubId',
+        'lastActiveTeamId',
+        'lastName',
+        'lastSeenAt',
+        'phone',
+        'photoURL',
+        'skillLevel',
+        'uid',
+        'updatedAt',
+      ];
+    }
+
+    function safeSelfUserProfileCreate(uid) {
+      return isSelf(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.keys().hasOnly(userProfileKeys());
+    }
+
+    function safeSelfUserProfileUpdate(uid) {
+      return isSelf(uid)
+        && resource.data.uid == uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(userProfileKeys());
     }
 
     function safeSelfPlayerWrite(playerId, teamId) {
@@ -163,14 +200,47 @@ service cloud.firestore {
         && request.resource.data.teamId == resource.data.teamId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'availableDays',
+          'notes',
+          'updatedAt',
+        ]);
+    }
+
+    function safeSelfPlayerSnapshotSync(playerId, clubId, teamId) {
+      return isTeamMember(clubId, teamId)
+        && memberDoc(clubId, teamId).data.playerId == playerId
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.teamId == resource.data.teamId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName',
+          'email',
           'firstName',
           'fullName',
           'headshotPath',
           'headshotUrl',
           'lastName',
-          'notes',
           'phone',
           'skillLevel',
+          'updatedAt',
+        ])
+        && request.resource.data.displayName == userProfileDoc(request.auth.uid).data.displayName
+        && request.resource.data.email == userProfileDoc(request.auth.uid).data.email
+        && request.resource.data.firstName == userProfileDoc(request.auth.uid).data.firstName
+        && request.resource.data.fullName == userProfileDoc(request.auth.uid).data.fullName
+        && request.resource.data.headshotPath == userProfileDoc(request.auth.uid).data.headshotPath
+        && request.resource.data.headshotUrl == userProfileDoc(request.auth.uid).data.headshotUrl
+        && request.resource.data.lastName == userProfileDoc(request.auth.uid).data.lastName
+        && request.resource.data.phone == userProfileDoc(request.auth.uid).data.phone
+        && request.resource.data.skillLevel == userProfileDoc(request.auth.uid).data.skillLevel;
+    }
+
+    function safeManagerPlayerTeamUpdate(clubId, teamId) {
+      return isManager(clubId, teamId)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.teamId == resource.data.teamId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'active',
+          'notes',
           'updatedAt',
         ]);
     }
@@ -229,7 +299,7 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/clubs/$(teamClubId)/teams/$(teamId));
     }
 
-    function isApprovedClubTeam(challengeClubId, teamClubId, teamId) {
+    function isApprovedChallengeClubTeam(challengeClubId, teamClubId, teamId) {
       return teamDoc(teamClubId, teamId).data.affiliationStatus == 'approved'
         && teamDoc(teamClubId, teamId).data.status == 'active'
         && teamDoc(teamClubId, teamId).data.approvedClubSlug == challengeClubId;
@@ -249,13 +319,13 @@ service cloud.firestore {
         && request.resource.data.createdByTeamClubSlug is string
         && request.resource.data.createdByTeamSlug is string
         && isManager(request.resource.data.createdByTeamClubSlug, request.resource.data.createdByTeamSlug)
-        && isApprovedClubTeam(clubId, request.resource.data.createdByTeamClubSlug, request.resource.data.createdByTeamSlug)
+        && isApprovedChallengeClubTeam(clubId, request.resource.data.createdByTeamClubSlug, request.resource.data.createdByTeamSlug)
         && (
           request.resource.data.visibility == 'open'
           || (
             request.resource.data.targetTeamClubSlug is string
             && request.resource.data.targetTeamSlug is string
-            && isApprovedClubTeam(clubId, request.resource.data.targetTeamClubSlug, request.resource.data.targetTeamSlug)
+            && isApprovedChallengeClubTeam(clubId, request.resource.data.targetTeamClubSlug, request.resource.data.targetTeamSlug)
             && !(
               request.resource.data.targetTeamClubSlug == request.resource.data.createdByTeamClubSlug
               && request.resource.data.targetTeamSlug == request.resource.data.createdByTeamSlug
@@ -299,7 +369,7 @@ service cloud.firestore {
       return resource.data.status == 'open'
         && request.resource.data.status == 'open'
         && isManager(resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
-        && isApprovedClubTeam(clubId, resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
+        && isApprovedChallengeClubTeam(clubId, resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
         && request.resource.data.createdByTeamClubSlug == resource.data.createdByTeamClubSlug
         && request.resource.data.createdByTeamSlug == resource.data.createdByTeamSlug
         && request.resource.data.createdByUid == resource.data.createdByUid
@@ -311,7 +381,7 @@ service cloud.firestore {
           || (
             request.resource.data.targetTeamClubSlug is string
             && request.resource.data.targetTeamSlug is string
-            && isApprovedClubTeam(clubId, request.resource.data.targetTeamClubSlug, request.resource.data.targetTeamSlug)
+            && isApprovedChallengeClubTeam(clubId, request.resource.data.targetTeamClubSlug, request.resource.data.targetTeamSlug)
             && !(
               request.resource.data.targetTeamClubSlug == resource.data.createdByTeamClubSlug
               && request.resource.data.targetTeamSlug == resource.data.createdByTeamSlug
@@ -354,8 +424,8 @@ service cloud.firestore {
         && request.resource.data.acceptedByTeamClubSlug is string
         && request.resource.data.acceptedByTeamSlug is string
         && isManager(request.resource.data.acceptedByTeamClubSlug, request.resource.data.acceptedByTeamSlug)
-        && isApprovedClubTeam(clubId, resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
-        && isApprovedClubTeam(clubId, request.resource.data.acceptedByTeamClubSlug, request.resource.data.acceptedByTeamSlug)
+        && isApprovedChallengeClubTeam(clubId, resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
+        && isApprovedChallengeClubTeam(clubId, request.resource.data.acceptedByTeamClubSlug, request.resource.data.acceptedByTeamSlug)
         && request.resource.data.createdByTeamClubSlug == resource.data.createdByTeamClubSlug
         && request.resource.data.createdByTeamSlug == resource.data.createdByTeamSlug
         && !(
@@ -436,8 +506,9 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read, create: if isSelf(uid);
-      allow update: if isSelf(uid) && request.resource.data.uid == resource.data.uid;
+      allow read: if isSelf(uid);
+      allow create: if safeSelfUserProfileCreate(uid);
+      allow update: if safeSelfUserProfileUpdate(uid);
 
       match /memberships/{membershipId} {
         allow read: if isSelf(uid);
@@ -527,7 +598,6 @@ service cloud.firestore {
               'logoPath',
               'logoUrl',
               'name',
-              'primaryLocation',
               'publicSlug',
               'requestedClubName',
               'requestedClubSlug',
@@ -603,8 +673,8 @@ service cloud.firestore {
               && request.resource.data.status == 'active'
             );
           allow update: if safeSelfMembershipUpdate(uid)
-            || safeManagerMembershipSync(uid, clubId, teamId)
-            || safeCaptainRoleUpdate(uid, clubId, teamId)
+            || safeManagerMembershipSync(clubId, teamId)
+            || safeCaptainRoleUpdate(clubId, teamId)
             || isPlatformAdmin();
           allow delete: if isSelf(uid) || isManager(clubId, teamId) || isPlatformAdmin();
         }
@@ -612,7 +682,10 @@ service cloud.firestore {
         match /players/{playerId} {
           allow read: if isTeamMember(clubId, teamId) || isAdminContext();
           allow create: if safeSelfPlayerWrite(playerId, teamId) || isPlatformAdmin();
-          allow update: if isManager(clubId, teamId) || safeSelfPlayerProfileUpdate(playerId, clubId, teamId) || isPlatformAdmin();
+          allow update: if safeManagerPlayerTeamUpdate(clubId, teamId)
+            || safeSelfPlayerProfileUpdate(playerId, clubId, teamId)
+            || safeSelfPlayerSnapshotSync(playerId, clubId, teamId)
+            || isPlatformAdmin();
           allow delete: if isManager(clubId, teamId) || safeSelfPlayerDelete(playerId, clubId, teamId) || isPlatformAdmin();
         }
 
