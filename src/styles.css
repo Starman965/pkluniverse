@@ -6032,6 +6032,18 @@ code {
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   }
 
+  .club-event-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .club-event-card__flyer {
+    max-height: 460px;
+  }
+
+  .club-event-card__body {
+    padding: 1rem;
+  }
+
   .app-shell {
     display: block;
   }
