@@ -6,6 +6,8 @@ import {
   deleteDoc,
   getDoc,
   getDocs,
+  limit as limitDocs,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -44,6 +46,22 @@ export const PLAYER_AVAILABLE_DAYS = [
   { id: 'fri', label: 'Friday' },
   { id: 'sat', label: 'Saturday' },
 ];
+
+export const ACTIVITY_TYPES = {
+  CHALLENGE_ACCEPTED: 'challenge_accepted',
+  CHALLENGE_CREATED: 'challenge_created',
+  CHALLENGE_DECLINED: 'challenge_declined',
+  EVENT_CREATED: 'event_created',
+  EVENT_REGISTERED: 'event_registered',
+  MATCH_COMPLETED: 'match_completed',
+  MATCH_SCHEDULED: 'match_scheduled',
+  PLAYER_JOINED_TEAM: 'player_joined_team',
+  SCORE_REPORTED: 'score_reported',
+  STANDINGS_UPDATED: 'standings_updated',
+  TEAM_CREATED: 'team_created',
+};
+
+const ACTIVITY_TYPE_VALUES = Object.values(ACTIVITY_TYPES);
 
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
@@ -1694,7 +1712,9 @@ async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
 
   if (playerSnapshot) {
     payload.active = existingPlayer?.active !== false;
-    payload.availableDays = normalizeAvailableDays(existingPlayer?.availableDays);
+    payload.availableDays = playerSnapshot.exists()
+      ? normalizeAvailableDays(existingPlayer?.availableDays)
+      : PLAYER_AVAILABLE_DAYS.map((day) => day.id);
     payload.notes = existingPlayer?.notes ?? '';
 
     if (!playerSnapshot.exists()) {
@@ -1828,6 +1848,22 @@ export async function createTeam({ teamName, user }) {
     },
   });
 
+  await logActivityBestEffort({
+    actorId: user.uid,
+    clubId: club.slug,
+    metadata: {
+      captainName: user.displayName || user.email || '',
+      clubName: club.name,
+      joinCode,
+      publicSlug,
+      teamId: teamSlug,
+      teamName: trimmedName,
+    },
+    targetId: teamSlug,
+    teamId: teamSlug,
+    type: ACTIVITY_TYPES.TEAM_CREATED,
+  });
+
   return { clubSlug: club.slug, joinCode, teamSlug };
 }
 
@@ -1925,6 +1961,21 @@ export async function joinTeamByCode({ code, user }) {
       metadata: {
         role: nextRole,
       },
+    });
+
+    await logActivityBestEffort({
+      actorId: user.uid,
+      clubId: teamClubSlug,
+      metadata: {
+        playerId,
+        playerName: user.displayName || user.email || 'A player',
+        role: nextRole,
+        teamId: teamSlug,
+        teamName: team.name ?? teamSlug,
+      },
+      targetId: playerId,
+      teamId: teamSlug,
+      type: ACTIVITY_TYPES.PLAYER_JOINED_TEAM,
     });
   }
 
@@ -2712,6 +2763,31 @@ export async function createChallenge({
     visibility: normalizedVisibility,
   });
 
+  await logActivityBestEffort({
+    actorId: user.uid,
+    clubId: challengeClubSlug,
+    metadata: {
+      challengeClubSlug,
+      challengeId,
+      challengedTeamClubSlug: target?.clubSlug ?? '',
+      challengedTeamName: target?.name ?? '',
+      challengedTeamSlug: target?.teamSlug ?? '',
+      challengerTeamClubSlug: clubSlug,
+      challengerTeamId: teamSlug,
+      challengerTeamName: sourceTeam.name ?? teamSlug,
+      challengerTeamSlug: teamSlug,
+      matchType: 'club_challenge',
+      opponentTeamId: target?.teamSlug ?? '',
+      opponentTeamName: target?.name ?? (normalizedVisibility === 'open' ? 'Open challenge' : ''),
+      proposedDate: normalizedDateTbd ? 'Date TBD' : trimmedIsoDate,
+      timeLabel: normalizedDateTbd ? 'Time TBD' : trimmedTimeLabel || 'Time TBD',
+      visibility: normalizedVisibility,
+    },
+    targetId: challengeId,
+    teamId: teamSlug,
+    type: ACTIVITY_TYPES.CHALLENGE_CREATED,
+  });
+
   if (normalizedVisibility === 'targeted' && target) {
     const captainNotificationFields = await getTeamCaptainNotificationFields(target.clubSlug, target.teamSlug);
     const challengeDateLabel = normalizedDateTbd ? 'Date TBD' : trimmedIsoDate;
@@ -3069,6 +3145,47 @@ export async function acceptChallenge({ challengeId, challengeClubSlug, clubSlug
       timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
     },
   });
+
+  await logActivityBestEffort({
+    actorId: user.uid,
+    clubId: challengeClubSlug,
+    metadata: {
+      acceptedByTeamClubSlug: acceptedByTeam.clubSlug,
+      acceptedByTeamId: acceptedByTeam.teamSlug,
+      acceptedByTeamName: acceptedByTeam.name || acceptedByTeam.teamSlug,
+      acceptedByTeamSlug: acceptedByTeam.teamSlug,
+      awayGameId,
+      challengeId,
+      challengerTeamClubSlug: createdByTeam.clubSlug,
+      challengerTeamId: createdByTeam.teamSlug,
+      challengerTeamName: createdByTeam.name || createdByTeam.teamSlug,
+      challengerTeamSlug: createdByTeam.teamSlug,
+      homeGameId,
+      matchType: 'club_challenge',
+      proposedDate: challenge.dateTbd ? 'Date TBD' : challenge.isoDate || 'Date TBD',
+      timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
+    },
+    targetId: challengeId,
+    teamId: acceptedByTeam.teamSlug,
+    type: ACTIVITY_TYPES.CHALLENGE_ACCEPTED,
+  });
+
+  await logActivityBestEffort({
+    actorId: user.uid,
+    clubId: challengeClubSlug,
+    metadata: {
+      challengeId,
+      dateLabel: challenge.dateTbd ? 'Date TBD' : challenge.isoDate || 'Date TBD',
+      homeGameId,
+      location: challenge.location || 'Location TBD',
+      opponentName: acceptedByTeam.name || acceptedByTeam.teamSlug,
+      teamName: createdByTeam.name || createdByTeam.teamSlug,
+      timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
+    },
+    targetId: homeGameId,
+    teamId: createdByTeam.teamSlug,
+    type: ACTIVITY_TYPES.MATCH_SCHEDULED,
+  });
 }
 
 export async function declineChallenge({ challengeId, challengeClubSlug, clubSlug, teamSlug, user }) {
@@ -3098,6 +3215,25 @@ export async function declineChallenge({ challengeId, challengeClubSlug, clubSlu
     declinedAt: serverTimestamp(),
     status: 'declined',
     updatedAt: serverTimestamp(),
+  });
+
+  await logActivityBestEffort({
+    actorId: user.uid,
+    clubId: challengeClubSlug,
+    metadata: {
+      challengeId,
+      challengerTeamClubSlug: challenge.createdByTeamClubSlug,
+      challengerTeamId: challenge.createdByTeamSlug,
+      challengerTeamName: challenge.createdByTeamName || challenge.createdByTeamSlug,
+      declinedByTeamClubSlug: clubSlug,
+      declinedByTeamId: teamSlug,
+      declinedByTeamName: challenge.targetTeamName || teamSlug,
+      declinedByTeamSlug: teamSlug,
+      matchType: 'club_challenge',
+    },
+    targetId: challengeId,
+    teamId: teamSlug,
+    type: ACTIVITY_TYPES.CHALLENGE_DECLINED,
   });
 }
 
@@ -3296,6 +3432,150 @@ function normalizeTimestampMs(value) {
   }
 
   return 0;
+}
+
+function cleanActivityMetadata(metadata = {}) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(metadata).filter(([, value]) => value !== undefined),
+  );
+}
+
+function normalizeActivity(entry) {
+  const data = entry.data();
+
+  return {
+    actorId: data.actorId ?? '',
+    clubId: data.clubId ?? '',
+    id: entry.id,
+    metadata: data.metadata ?? {},
+    targetId: data.targetId ?? '',
+    teamId: data.teamId ?? '',
+    timestampMs: normalizeTimestampMs(data.timestamp),
+    type: data.type ?? '',
+  };
+}
+
+function teamLabel(value, fallback = 'Unknown team') {
+  return value || fallback;
+}
+
+export function formatActivity(activity) {
+  const metadata = activity?.metadata ?? {};
+
+  switch (activity?.type) {
+    case ACTIVITY_TYPES.CHALLENGE_CREATED:
+      return `${teamLabel(metadata.challengerTeamName)} challenged ${teamLabel(metadata.opponentTeamName)}`;
+    case ACTIVITY_TYPES.CHALLENGE_ACCEPTED:
+      return `${teamLabel(metadata.acceptedByTeamName)} accepted ${teamLabel(metadata.challengerTeamName)}'s challenge`;
+    case ACTIVITY_TYPES.CHALLENGE_DECLINED:
+      return `${teamLabel(metadata.declinedByTeamName)} declined ${teamLabel(metadata.challengerTeamName)}'s challenge`;
+    case ACTIVITY_TYPES.MATCH_SCHEDULED:
+      return `${teamLabel(metadata.teamName)} scheduled a match against ${teamLabel(metadata.opponentName, metadata.opponent || 'TBD')}`;
+    case ACTIVITY_TYPES.MATCH_COMPLETED:
+      if (metadata.winnerTeamName) {
+        return `${metadata.winnerTeamName} defeated ${metadata.loserTeamName || metadata.opponentName || 'their opponent'} ${metadata.scoreLabel || ''}`.trim();
+      }
+
+      return `${teamLabel(metadata.teamName)} completed a match against ${teamLabel(metadata.opponentName, metadata.opponent || 'TBD')} ${metadata.scoreLabel || ''}`.trim();
+    case ACTIVITY_TYPES.SCORE_REPORTED:
+      return `${teamLabel(metadata.teamName)} reported a score against ${teamLabel(metadata.opponentName, metadata.opponent || 'TBD')}`;
+    case ACTIVITY_TYPES.TEAM_CREATED:
+      return `${teamLabel(metadata.teamName)} was created`;
+    case ACTIVITY_TYPES.PLAYER_JOINED_TEAM:
+      return `${metadata.playerName || 'A player'} joined ${teamLabel(metadata.teamName)}`;
+    case ACTIVITY_TYPES.EVENT_CREATED:
+      return `${metadata.eventTitle || 'An event'} was created`;
+    case ACTIVITY_TYPES.EVENT_REGISTERED:
+      return `${metadata.registrantName || 'A player'} registered for ${metadata.eventTitle || 'an event'}`;
+    case ACTIVITY_TYPES.STANDINGS_UPDATED:
+      return `${metadata.clubName || activity?.clubId || 'Club'} standings were updated`;
+    default:
+      return 'Activity logged';
+  }
+}
+
+export async function logActivity({
+  actorId,
+  clubId,
+  metadata = {},
+  targetId = '',
+  teamId = '',
+  type,
+}) {
+  requireDb();
+
+  if (!ACTIVITY_TYPE_VALUES.includes(type)) {
+    throw new Error('Choose a valid activity type.');
+  }
+
+  if (!clubId?.trim()) {
+    throw new Error('Activity logs require a club.');
+  }
+
+  if (!actorId?.trim()) {
+    throw new Error('Activity logs require an actor.');
+  }
+
+  const activityRef = doc(collection(db, 'activityLogs'));
+
+  await setDoc(activityRef, {
+    actorId: actorId.trim(),
+    clubId: clubId.trim(),
+    metadata: cleanActivityMetadata(metadata),
+    targetId: targetId?.trim?.() ?? '',
+    teamId: teamId?.trim?.() ?? '',
+    timestamp: serverTimestamp(),
+    type,
+  });
+
+  return activityRef.id;
+}
+
+async function logActivityBestEffort(payload) {
+  try {
+    await logActivity(payload);
+  } catch (activityError) {
+    console.warn('Unable to log activity.', activityError);
+  }
+}
+
+export async function listAdminActivity({
+  clubId = '',
+  endDate = '',
+  limitCount = 100,
+  startDate = '',
+  teamId = '',
+  type = '',
+  user,
+} = {}) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only the app admin can view activity.');
+  }
+
+  const cappedLimit = Math.min(Math.max(Number(limitCount) || 100, 1), 100);
+  const snapshot = await getDocs(
+    query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), limitDocs(cappedLimit)),
+  );
+  const startMs = startDate ? new Date(`${startDate}T00:00:00`).getTime() : 0;
+  const endMs = endDate ? new Date(`${endDate}T23:59:59`).getTime() : 0;
+
+  return snapshot.docs
+    .map(normalizeActivity)
+    .filter((activity) => !type || activity.type === type)
+    .filter((activity) => !clubId || activity.clubId === clubId)
+    .filter((activity) => !teamId || activity.teamId === teamId)
+    .filter((activity) => !startMs || activity.timestampMs >= startMs)
+    .filter((activity) => !endMs || activity.timestampMs <= endMs)
+    .map((activity) => ({
+      ...activity,
+      description: formatActivity(activity),
+    }));
 }
 
 export async function listPlayers(clubSlug, teamSlug) {
@@ -3624,6 +3904,8 @@ export async function saveGame({
   );
   const nextGameId = gameId || baseId || `game-${Date.now()}`;
   const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', nextGameId);
+  const existingGameSnapshot = gameId ? await getDoc(gameRef) : null;
+  const existingGame = existingGameSnapshot?.exists() ? existingGameSnapshot.data() : null;
   const normalizedTeamScore = normalizeNullableNumber(teamScore);
   const normalizedOpponentScore = normalizeNullableNumber(opponentScore);
   const normalizedPlayersNeeded = [1, 2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
@@ -3661,6 +3943,91 @@ export async function saveGame({
     payload,
     { merge: true },
   );
+
+  const existingTeamScore = normalizeNullableNumber(existingGame?.teamScore);
+  const existingOpponentScore = normalizeNullableNumber(existingGame?.opponentScore);
+  const wasCompleted =
+    existingGame?.matchStatus === 'completed' ||
+    (existingTeamScore !== null && existingOpponentScore !== null);
+  const scoreChanged = existingTeamScore !== normalizedTeamScore || existingOpponentScore !== normalizedOpponentScore;
+  const shouldLogScheduled = !gameId && finalStatus === 'scheduled';
+  const shouldLogCompleted = finalStatus === 'completed' && (!wasCompleted || scoreChanged);
+
+  if (shouldLogScheduled || shouldLogCompleted) {
+    const teamSnapshot = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug));
+    const teamName = teamSnapshot.exists() ? teamSnapshot.data().name ?? teamSlug : teamSlug;
+    const scoreLabel =
+      normalizedTeamScore !== null && normalizedOpponentScore !== null
+        ? `${normalizedTeamScore}-${normalizedOpponentScore}`
+        : '';
+    const winnerTeamName =
+      result === 'win'
+        ? teamName
+        : result === 'loss'
+          ? trimmedOpponent
+          : '';
+    const loserTeamName =
+      result === 'win'
+        ? trimmedOpponent
+        : result === 'loss'
+          ? teamName
+          : '';
+
+    if (shouldLogScheduled) {
+      await logActivityBestEffort({
+        actorId: user?.uid ?? '',
+        clubId: clubSlug,
+        metadata: {
+          dateLabel: normalizedDateTbd ? 'Date TBD' : trimmedIsoDate,
+          gameId: nextGameId,
+          location: trimmedLocation || 'Location TBD',
+          opponentName: trimmedOpponent,
+          playersNeeded: normalizedPlayersNeeded,
+          teamName,
+          timeLabel: normalizedDateTbd ? 'Time TBD' : trimmedTimeLabel || 'Time TBD',
+        },
+        targetId: nextGameId,
+        teamId: teamSlug,
+        type: ACTIVITY_TYPES.MATCH_SCHEDULED,
+      });
+    }
+
+    if (shouldLogCompleted) {
+      const matchMetadata = {
+        gameId: nextGameId,
+        loserTeamName,
+        opponentName: trimmedOpponent,
+        scoreA: normalizedTeamScore,
+        scoreB: normalizedOpponentScore,
+        scoreLabel,
+        teamAId: teamSlug,
+        teamAName: teamName,
+        teamBId: existingGame?.linkedTeamSlug ?? '',
+        teamBName: trimmedOpponent,
+        teamName,
+        winnerTeamId: result === 'win' ? teamSlug : existingGame?.linkedTeamSlug ?? '',
+        winnerTeamName,
+      };
+
+      await logActivityBestEffort({
+        actorId: user?.uid ?? '',
+        clubId: clubSlug,
+        metadata: matchMetadata,
+        targetId: nextGameId,
+        teamId: teamSlug,
+        type: ACTIVITY_TYPES.SCORE_REPORTED,
+      });
+
+      await logActivityBestEffort({
+        actorId: user?.uid ?? '',
+        clubId: clubSlug,
+        metadata: matchMetadata,
+        targetId: nextGameId,
+        teamId: teamSlug,
+        type: ACTIVITY_TYPES.MATCH_COMPLETED,
+      });
+    }
+  }
 
   return nextGameId;
 }
@@ -4250,6 +4617,25 @@ export async function saveClubEvent({
   }
 
   await setDoc(eventRef, payload, { merge: true });
+
+  if (!eventId) {
+    await logActivityBestEffort({
+      actorId: user.uid,
+      clubId: clubSlug,
+      metadata: {
+        costLabel: payload.costLabel,
+        eventId: eventRef.id,
+        eventTitle: normalizedTitle,
+        eventType: normalizedEventType,
+        locationLabel: payload.locationLabel,
+        startDate: payload.startDate,
+        status: normalizedStatus,
+        timeLabel: payload.timeLabel,
+      },
+      targetId: eventRef.id,
+      type: ACTIVITY_TYPES.EVENT_CREATED,
+    });
+  }
 
   if (
     uploadedFlyer?.flyerImagePath &&

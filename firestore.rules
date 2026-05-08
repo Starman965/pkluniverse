@@ -112,6 +112,39 @@ service cloud.firestore {
         && request.resource.data.metadata is map;
     }
 
+    function safeActivityLogCreate() {
+      return signedIn()
+        && request.resource.data.keys().hasOnly([
+          'actorId',
+          'clubId',
+          'metadata',
+          'targetId',
+          'teamId',
+          'timestamp',
+          'type',
+        ])
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.actorId is string
+        && request.resource.data.clubId is string
+        && request.resource.data.metadata is map
+        && request.resource.data.targetId is string
+        && request.resource.data.teamId is string
+        && request.resource.data.timestamp == request.time
+        && request.resource.data.type in [
+          'challenge_created',
+          'challenge_accepted',
+          'challenge_declined',
+          'match_scheduled',
+          'match_completed',
+          'score_reported',
+          'team_created',
+          'player_joined_team',
+          'event_created',
+          'event_registered',
+          'standings_updated',
+        ];
+    }
+
     function safeSelfMembershipUpdate(uid) {
       return isSelf(uid)
         && request.resource.data.uid == resource.data.uid
@@ -547,6 +580,12 @@ service cloud.firestore {
     match /adminNotifications/{notificationId} {
       allow read, delete: if isPlatformAdmin();
       allow create: if safeAdminNotificationCreate();
+      allow update: if false;
+    }
+
+    match /activityLogs/{logId} {
+      allow read, delete: if isPlatformAdmin();
+      allow create: if safeActivityLogCreate();
       allow update: if false;
     }
 

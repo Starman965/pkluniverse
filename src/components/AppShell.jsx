@@ -14,7 +14,7 @@ import defaultTeamLogo from '../../default_team_logo.webp';
 import pklUniverseWideLogo from '../../pkl_universe_wide_logo.webp';
 
 const primaryRoutes = [
-  { icon: 'news', label: 'News Feed', to: 'news' },
+  { icon: 'news', label: 'Home', to: 'news' },
   { icon: 'members', label: 'Team Members', to: 'team' },
   { icon: 'matches', label: 'Team Matches', to: 'schedule' },
   { icon: 'standings', label: 'Team Standing', to: 'team-standing' },
@@ -38,8 +38,9 @@ function PlayerMenuIcon({ type }) {
   if (type === 'news') {
     return (
       <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
-        <path d="M5 5.5h14v13H5z" />
-        <path d="M8 9h8M8 12h8M8 15h5" />
+        <path d="m4 11 8-7 8 7" />
+        <path d="M6.5 10.5V20h11v-9.5" />
+        <path d="M10 20v-5h4v5" />
       </svg>
     );
   }

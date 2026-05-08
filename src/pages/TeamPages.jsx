@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import TeamDivisionLabel from '../components/TeamDivisionLabel';
 import { useAuth } from '../context/AuthContext';
 import {
+  ACTIVITY_TYPES,
   PLAYER_AVAILABLE_DAYS,
   PLAYER_SKILL_LEVELS,
   acceptChallenge,
@@ -33,6 +34,7 @@ import {
   getTeam,
   getUserProfileData,
   isPlatformAdmin,
+  listAdminActivity,
   listAdminPlayers,
   listAdminTeamSummaries,
   listAdminChallenges,
@@ -769,6 +771,57 @@ function createEmptyPlayerCopyForm() {
   };
 }
 
+function getInitialAdminSection(pathname) {
+  if (pathname === '/admin/activity') {
+    return 'activity';
+  }
+
+  if (pathname === '/admin/events') {
+    return 'events';
+  }
+
+  return 'teams';
+}
+
+function createEmptyActivityFilters() {
+  return {
+    clubId: '',
+    endDate: '',
+    teamId: '',
+    type: '',
+    startDate: '',
+  };
+}
+
+const ACTIVITY_TYPE_META = {
+  [ACTIVITY_TYPES.CHALLENGE_CREATED]: { icon: 'CH', label: 'Challenge Created' },
+  [ACTIVITY_TYPES.CHALLENGE_ACCEPTED]: { icon: 'OK', label: 'Challenge Accepted' },
+  [ACTIVITY_TYPES.CHALLENGE_DECLINED]: { icon: 'NO', label: 'Challenge Declined' },
+  [ACTIVITY_TYPES.MATCH_SCHEDULED]: { icon: 'Cal', label: 'Match Scheduled' },
+  [ACTIVITY_TYPES.MATCH_COMPLETED]: { icon: 'W', label: 'Match Completed' },
+  [ACTIVITY_TYPES.SCORE_REPORTED]: { icon: '11', label: 'Score Reported' },
+  [ACTIVITY_TYPES.TEAM_CREATED]: { icon: 'T', label: 'Team Created' },
+  [ACTIVITY_TYPES.PLAYER_JOINED_TEAM]: { icon: '+', label: 'Player Joined' },
+  [ACTIVITY_TYPES.EVENT_CREATED]: { icon: 'Evt', label: 'Event Created' },
+  [ACTIVITY_TYPES.EVENT_REGISTERED]: { icon: 'Reg', label: 'Event Registered' },
+  [ACTIVITY_TYPES.STANDINGS_UPDATED]: { icon: 'Up', label: 'Standings Updated' },
+};
+
+function getActivityTypeMeta(type) {
+  return ACTIVITY_TYPE_META[type] ?? { icon: '•', label: type || 'Activity' };
+}
+
+function formatActivityTimestamp(timestampMs) {
+  if (!timestampMs) {
+    return 'Just now';
+  }
+
+  return new Date(timestampMs).toLocaleString([], {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
 function createEmptyRosterForm() {
   return {
     active: true,
@@ -1383,7 +1436,7 @@ function buildClubTeamCaptainNames(members, players) {
     .filter(Boolean);
 }
 
-function ClubEventsPanel({ clubName = '', clubSlug, managerView = false, user }) {
+function ClubEventsPanel({ clubName = '', clubSlug, managerToolsLabel = 'Club manager tools', managerView = false, user }) {
   const [events, setEvents] = useState([]);
   const [form, setForm] = useState(createEmptyClubEventForm());
   const [editingEventId, setEditingEventId] = useState('');
@@ -1551,7 +1604,7 @@ function ClubEventsPanel({ clubName = '', clubSlug, managerView = false, user })
         <section className="schedule-admin-card club-events-manager-card">
           <div className="schedule-admin-card__header">
             <div>
-              <p className="eyebrow">Club manager tools</p>
+              <p className="eyebrow">{managerToolsLabel}</p>
               <h2>Events</h2>
               <p>Create event listings for {clubName || 'this club'}.</p>
             </div>
@@ -1791,7 +1844,6 @@ export function ClubTeamsPage() {
   const [challengeNoticeTeam, setChallengeNoticeTeam] = useState(null);
   const [activeClubTab, setActiveClubTab] = useState('events');
   const [clubPlayerSearch, setClubPlayerSearch] = useState('');
-  const [canManageClubEvents, setCanManageClubEvents] = useState(false);
   const [publishedEventCount, setPublishedEventCount] = useState(0);
 
   useEffect(() => {
@@ -1809,15 +1861,13 @@ export function ClubTeamsPage() {
         setMembership(membershipData);
         setApprovedClub(null);
         setClubTeams([]);
-        setCanManageClubEvents(false);
         setPublishedEventCount(0);
         return;
       }
 
-      const [approvedTeams, clubs, managerAccess, publishedEvents] = await Promise.all([
+      const [approvedTeams, clubs, publishedEvents] = await Promise.all([
         listApprovedClubTeams(approvedClubSlug),
         listClubs().catch(() => []),
-        canManageClub({ clubSlug: approvedClubSlug, user }).catch(() => false),
         listClubEvents({ clubSlug: approvedClubSlug }).catch(() => []),
       ]);
       const enrichedTeams = await Promise.all(
@@ -1844,7 +1894,6 @@ export function ClubTeamsPage() {
         setMembership(membershipData);
         setApprovedClub(clubs.find((club) => club.slug === approvedClubSlug) ?? null);
         setClubTeams(enrichedTeams);
-        setCanManageClubEvents(managerAccess);
         setPublishedEventCount(publishedEvents.filter((event) => event.status === 'published').length);
       }
     }
@@ -1858,7 +1907,6 @@ export function ClubTeamsPage() {
           setMembership(null);
           setApprovedClub(null);
           setClubTeams([]);
-          setCanManageClubEvents(false);
           setPublishedEventCount(0);
           setError(loadError.message ?? 'Unable to load club teams yet.');
         }
@@ -2139,7 +2187,7 @@ export function ClubTeamsPage() {
                 <ClubEventsPanel
                   clubName={clubName}
                   clubSlug={approvedClubSlug}
-                  managerView={canManageClubEvents}
+                  managerView={false}
                   user={user}
                 />
               </div>
@@ -7821,10 +7869,14 @@ export function ClubAffiliationAdminPage() {
   const [updatingRequestId, setUpdatingRequestId] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [adminSection, setAdminSection] = useState('teams');
+  const [adminSection, setAdminSection] = useState(getInitialAdminSection(location.pathname));
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [playerCopyForm, setPlayerCopyForm] = useState(createEmptyPlayerCopyForm());
   const [adminPlayers, setAdminPlayers] = useState([]);
+  const [adminActivity, setAdminActivity] = useState([]);
+  const [activityFilters, setActivityFilters] = useState(createEmptyActivityFilters());
+  const [loadingAdminActivity, setLoadingAdminActivity] = useState(false);
+  const [selectedAdminEventsClubSlug, setSelectedAdminEventsClubSlug] = useState('');
   const [loadingAdminPlayers, setLoadingAdminPlayers] = useState(false);
   const [copyingPlayers, setCopyingPlayers] = useState(false);
   const [updatingTeamLogoId, setUpdatingTeamLogoId] = useState('');
@@ -7894,6 +7946,11 @@ export function ClubAffiliationAdminPage() {
       );
 
       setClubs(clubData);
+      setSelectedAdminEventsClubSlug((current) =>
+        current && clubData.some((club) => club.slug === current)
+          ? current
+          : clubData[0]?.slug ?? '',
+      );
       setClubManagersBySlug(Object.fromEntries(managerGroups));
       setClubManagerEmailDrafts(
         clubData.reduce((drafts, club) => {
@@ -7920,6 +7977,10 @@ export function ClubAffiliationAdminPage() {
   useEffect(() => {
     loadAdminData();
   }, [authLoading, user?.uid]);
+
+  useEffect(() => {
+    setAdminSection(getInitialAdminSection(location.pathname));
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!adminMenuOpen) {
@@ -7968,6 +8029,29 @@ export function ClubAffiliationAdminPage() {
         }))
         .sort((first, second) => first.label.localeCompare(second.label)),
     [adminTeams],
+  );
+  const activityTypeOptions = useMemo(
+    () =>
+      Object.values(ACTIVITY_TYPES).map((type) => ({
+        label: getActivityTypeMeta(type).label,
+        value: type,
+      })),
+    [],
+  );
+  const activityTeamOptions = useMemo(
+    () =>
+      adminTeams
+        .map((team) => ({
+          clubSlug: team.clubSlug,
+          label: `${team.name} (${team.clubName})`,
+          teamSlug: team.teamSlug,
+        }))
+        .sort((first, second) => first.label.localeCompare(second.label)),
+    [adminTeams],
+  );
+  const selectedAdminEventsClub = useMemo(
+    () => clubs.find((club) => club.slug === selectedAdminEventsClubSlug) ?? null,
+    [clubs, selectedAdminEventsClubSlug],
   );
 
   const filteredAdminPlayers = useMemo(() => {
@@ -8048,6 +8132,82 @@ export function ClubAffiliationAdminPage() {
       ignore = true;
     };
   }, [isAuthorized, user?.uid]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadActivity() {
+      if (!user?.uid || !isAuthorized) {
+        setAdminActivity([]);
+        return;
+      }
+
+      setLoadingAdminActivity(true);
+      setError('');
+
+      try {
+        const activity = await listAdminActivity({
+          ...activityFilters,
+          limitCount: 100,
+          user,
+        });
+
+        if (!ignore) {
+          setAdminActivity(activity);
+        }
+      } catch (loadActivityError) {
+        if (!ignore) {
+          setAdminActivity([]);
+          setError(loadActivityError.message ?? 'Unable to load activity.');
+        }
+      } finally {
+        if (!ignore) {
+          setLoadingAdminActivity(false);
+        }
+      }
+    }
+
+    loadActivity();
+
+    return () => {
+      ignore = true;
+    };
+  }, [
+    activityFilters.clubId,
+    activityFilters.endDate,
+    activityFilters.startDate,
+    activityFilters.teamId,
+    activityFilters.type,
+    isAuthorized,
+    user?.uid,
+  ]);
+
+  function openAdminSection(section) {
+    setAdminSection(section);
+    setAdminMenuOpen(false);
+
+    if (section === 'activity') {
+      navigate('/admin/activity');
+    } else if (section === 'events') {
+      navigate('/admin/events');
+    } else if (location.pathname === '/admin/activity' || location.pathname === '/admin/events') {
+      navigate('/admin');
+    }
+  }
+
+  function updateActivityFilter(field, value) {
+    setActivityFilters((current) => {
+      const nextFilters = { ...current, [field]: value };
+
+      if (field === 'clubId') {
+        nextFilters.teamId = '';
+      }
+
+      return nextFilters;
+    });
+    setMessage('');
+    setError('');
+  }
 
   function parsePlayerCopyTeamKey(teamKey) {
     const [clubSlug = '', teamSlug = ''] = teamKey.split('::');
@@ -8563,40 +8723,42 @@ export function ClubAffiliationAdminPage() {
           <div className="sidebar__nav-group">
             <button
               className={`nav-link admin-nav-button ${adminSection === 'teams' ? 'nav-link--active' : ''}`}
-              onClick={() => {
-                setAdminSection('teams');
-                setAdminMenuOpen(false);
-              }}
+              onClick={() => openAdminSection('teams')}
               type="button"
             >
               Teams
             </button>
             <button
               className={`nav-link admin-nav-button ${adminSection === 'clubs' ? 'nav-link--active' : ''}`}
-              onClick={() => {
-                setAdminSection('clubs');
-                setAdminMenuOpen(false);
-              }}
+              onClick={() => openAdminSection('clubs')}
               type="button"
             >
               Clubs
             </button>
             <button
               className={`nav-link admin-nav-button ${adminSection === 'players' ? 'nav-link--active' : ''}`}
-              onClick={() => {
-                setAdminSection('players');
-                setAdminMenuOpen(false);
-              }}
+              onClick={() => openAdminSection('players')}
               type="button"
             >
               Players
             </button>
             <button
+              className={`nav-link admin-nav-button ${adminSection === 'activity' ? 'nav-link--active' : ''}`}
+              onClick={() => openAdminSection('activity')}
+              type="button"
+            >
+              Activity
+            </button>
+            <button
+              className={`nav-link admin-nav-button ${adminSection === 'events' ? 'nav-link--active' : ''}`}
+              onClick={() => openAdminSection('events')}
+              type="button"
+            >
+              Events
+            </button>
+            <button
               className={`nav-link admin-nav-button ${adminSection === 'tools' ? 'nav-link--active' : ''}`}
-              onClick={() => {
-                setAdminSection('tools');
-                setAdminMenuOpen(false);
-              }}
+              onClick={() => openAdminSection('tools')}
               type="button"
             >
               Challenges
@@ -8625,7 +8787,11 @@ export function ClubAffiliationAdminPage() {
               ? 'Clubs'
               : adminSection === 'players'
                 ? 'Player Tools'
-                : 'Challenges'}
+                : adminSection === 'activity'
+                  ? 'Activity'
+                  : adminSection === 'events'
+                    ? 'Events'
+                    : 'Challenges'}
         </h1>
         <p>
           {adminSection === 'teams'
@@ -8634,7 +8800,11 @@ export function ClubAffiliationAdminPage() {
               ? 'Create clubs, manage club names, and review teams requesting club affiliation.'
               : adminSection === 'players'
                 ? 'Copy existing players from one team into another without asking them to rejoin.'
-                : 'Review and clean up challenge records.'}
+                : adminSection === 'activity'
+                  ? 'Monitor recent platform activity across clubs, teams, challenges, matches, and events.'
+                  : adminSection === 'events'
+                    ? 'Create and manage club event listings from the admin toolset.'
+                    : 'Review and clean up challenge records.'}
         </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -9171,6 +9341,167 @@ export function ClubAffiliationAdminPage() {
                 </button>
               </div>
             </form>
+          </section>
+        ) : adminSection === 'events' ? (
+          <section className="schedule-admin-card admin-events-card">
+            <div className="schedule-admin-card__header">
+              <div>
+                <p className="eyebrow">Events</p>
+                <h2>Club event management</h2>
+                <p>Create, publish, archive, and delete club events from the admin toolset.</p>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="state-panel">
+                <p>Loading clubs...</p>
+              </div>
+            ) : clubs.length > 0 ? (
+              <>
+                <label className="field admin-events-club-picker">
+                  <span>Club</span>
+                  <select
+                    onChange={(event) => setSelectedAdminEventsClubSlug(event.target.value)}
+                    value={selectedAdminEventsClubSlug}
+                  >
+                    {clubs.map((club) => (
+                      <option key={club.slug} value={club.slug}>
+                        {club.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {selectedAdminEventsClub ? (
+                  <ClubEventsPanel
+                    clubName={selectedAdminEventsClub.name}
+                    clubSlug={selectedAdminEventsClub.slug}
+                    managerToolsLabel="Admin event tools"
+                    managerView
+                    user={user}
+                  />
+                ) : (
+                  <div className="notice notice--info">Choose a club to manage events.</div>
+                )}
+              </>
+            ) : (
+              <div className="notice notice--info">Create a club before adding events.</div>
+            )}
+          </section>
+        ) : adminSection === 'activity' ? (
+          <section className="schedule-admin-card admin-activity-card">
+            <div className="schedule-admin-card__header">
+              <div>
+                <p className="eyebrow">Activity</p>
+                <h2>Recent platform activity</h2>
+                <p>A structured feed of important actions across clubs, teams, challenges, matches, and events.</p>
+              </div>
+              <button
+                className="button button--ghost"
+                onClick={() => setActivityFilters(createEmptyActivityFilters())}
+                type="button"
+              >
+                Reset filters
+              </button>
+            </div>
+
+            <div className="schedule-admin-form admin-activity-filters">
+              <label className="field">
+                <span>Type</span>
+                <select onChange={(event) => updateActivityFilter('type', event.target.value)} value={activityFilters.type}>
+                  <option value="">All activity</option>
+                  {activityTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Club</span>
+                <select onChange={(event) => updateActivityFilter('clubId', event.target.value)} value={activityFilters.clubId}>
+                  <option value="">All clubs</option>
+                  {clubs.map((club) => (
+                    <option key={club.slug} value={club.slug}>
+                      {club.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Team</span>
+                <select onChange={(event) => updateActivityFilter('teamId', event.target.value)} value={activityFilters.teamId}>
+                  <option value="">All teams</option>
+                  {activityTeamOptions
+                    .filter((team) => !activityFilters.clubId || team.clubSlug === activityFilters.clubId)
+                    .map((team) => (
+                      <option key={`${team.clubSlug}-${team.teamSlug}`} value={team.teamSlug}>
+                        {team.label}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Start date</span>
+                <input
+                  onChange={(event) => updateActivityFilter('startDate', event.target.value)}
+                  type="date"
+                  value={activityFilters.startDate}
+                />
+              </label>
+              <label className="field">
+                <span>End date</span>
+                <input
+                  onChange={(event) => updateActivityFilter('endDate', event.target.value)}
+                  type="date"
+                  value={activityFilters.endDate}
+                />
+              </label>
+            </div>
+
+            {loadingAdminActivity ? (
+              <div className="state-panel">
+                <p>Loading activity...</p>
+              </div>
+            ) : adminActivity.length > 0 ? (
+              <div className="admin-activity-feed">
+                {adminActivity.map((activity) => {
+                  const typeMeta = getActivityTypeMeta(activity.type);
+                  const metadata = activity.metadata ?? {};
+
+                  return (
+                    <article key={activity.id} className="admin-activity-item">
+                      <div className="admin-activity-item__icon">{typeMeta.icon}</div>
+                      <div className="admin-activity-item__body">
+                        <div className="admin-activity-item__header">
+                          <div>
+                            <span className="status-badge">{typeMeta.label}</span>
+                            <h3>{activity.description}</h3>
+                          </div>
+                          <time dateTime={activity.timestampMs ? new Date(activity.timestampMs).toISOString() : undefined}>
+                            {formatActivityTimestamp(activity.timestampMs)}
+                          </time>
+                        </div>
+                        <div className="admin-activity-item__meta">
+                          <span>Club: {metadata.clubName || activity.clubId || 'Unknown'}</span>
+                          {metadata.teamName || activity.teamId ? (
+                            <span>Team: {metadata.teamName || activity.teamId}</span>
+                          ) : null}
+                          {metadata.opponentTeamName || metadata.opponentName ? (
+                            <span>Opponent: {metadata.opponentTeamName || metadata.opponentName}</span>
+                          ) : null}
+                          {metadata.eventTitle ? <span>Event: {metadata.eventTitle}</span> : null}
+                          {metadata.scoreLabel ? <span>Score: {metadata.scoreLabel}</span> : null}
+                          {activity.targetId ? <span>Target: {activity.targetId}</span> : null}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="notice notice--info">No activity matches those filters yet.</div>
+            )}
           </section>
         ) : (
           <section className="schedule-admin-card">

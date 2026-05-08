@@ -101,6 +101,14 @@ export default function App() {
         />
         <Route
           element={<ClubAffiliationAdminPage />}
+          path="/admin/activity"
+        />
+        <Route
+          element={<ClubAffiliationAdminPage />}
+          path="/admin/events"
+        />
+        <Route
+          element={<ClubAffiliationAdminPage />}
           path="/admin"
         />
         <Route

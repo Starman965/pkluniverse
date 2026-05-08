@@ -4,18 +4,20 @@ Use this as a running checklist for improvements that are worth doing later, but
 
 ## Player Profiles
 
-- [ ] Add a shared global player profile per user for personal details.
-  - Headshot
-  - Mobile phone
-  - Skill level
-  - First and last name
-- [ ] Prefill each new team-specific player profile from the user’s shared profile.
-- [ ] Keep team-specific player fields separate from shared profile fields.
-  - Weekly availability
-  - Captain-only notes
-  - Active/inactive status on that team
-  - Team role
-- [ ] Consider a “sync profile across teams” option for players who update their shared profile.
+- [ ] Use the shared profile headshot as the default photo anywhere a player appears across teams or club-wide views.
+  - Allow team-specific profile photos only as an intentional override if needed.
+- [ ] Add a profile completeness prompt for players missing mobile, skill level, or photo.
+- [ ] Consider whether players should be able to hide mobile numbers from broader club-wide views.
+
+## Club Events
+
+- [ ] Add a public no-login club events page that shows only published events and shareable registration links.
+- [ ] Add event cancellation messaging or a cancelled status if clubs want to preserve an event record instead of deleting it.
+- [ ] Add in-app event registration for individual players.
+- [ ] Add team-based event registration for captains who bring an entire team.
+- [ ] Add registration caps, waitlists, and roster exports for club staff.
+- [ ] Add event notification emails for newly published, updated, or cancelled events.
+- [ ] Consider payment collection or links once clubs decide whether registration stays external.
 
 ## Teams And Joining
 
