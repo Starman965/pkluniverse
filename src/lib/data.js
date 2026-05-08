@@ -4526,6 +4526,13 @@ function normalizeClubEvent(entry) {
   };
 }
 
+function isClubEventUpcoming(event) {
+  const today = new Date().toISOString().slice(0, 10);
+  const eventEndDate = event.endDate || event.startDate;
+
+  return !eventEndDate || eventEndDate >= today;
+}
+
 export async function listClubEvents({ clubSlug, includeDrafts = false, user = null }) {
   requireDb();
 
@@ -4538,7 +4545,8 @@ export async function listClubEvents({ clubSlug, includeDrafts = false, user = n
   const snapshot = await getDocs(canManage ? eventsRef : query(eventsRef, where('status', '==', 'published')));
   const events = snapshot.docs
     .map(normalizeClubEvent)
-    .filter((event) => event.status === 'published' || (includeDrafts && canManage));
+    .filter((event) => event.status === 'published' || (includeDrafts && canManage))
+    .filter((event) => canManage || isClubEventUpcoming(event));
 
   events.sort((left, right) => {
     const leftDate = left.startDate || '9999-12-31';
