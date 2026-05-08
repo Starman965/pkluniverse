@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
+  buildStandingsSummary,
   getMembership,
   getTeam,
   isPlatformAdmin,
+  listGames,
   listMemberships,
   listPlayers,
   listTeamMembers,
@@ -19,7 +21,6 @@ const primaryRoutes = [
   { icon: 'matches', label: 'Team Matches', to: 'schedule' },
   { icon: 'standings', label: 'Team Standing', to: 'team-standing' },
   { icon: 'club', label: 'Club Hub', requiresApprovedClub: true, to: 'club-teams' },
-  { icon: 'profile', label: 'My Profile', to: 'profile' },
 ];
 
 const adminRoutes = [
@@ -91,6 +92,46 @@ function PlayerMenuIcon({ type }) {
     );
   }
 
+  if (type === 'help') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M9.8 9.3a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.2.9-1.2 1.8" />
+        <path d="M12 17h.01" />
+      </svg>
+    );
+  }
+
+  if (type === 'signout') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M10 17 15 12 10 7" />
+        <path d="M15 12H3" />
+        <path d="M14 4h5v16h-5" />
+      </svg>
+    );
+  }
+
+  if (type === 'switch') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M7 7h11" />
+        <path d="m15 4 3 3-3 3" />
+        <path d="M17 17H6" />
+        <path d="m9 14-3 3 3 3" />
+      </svg>
+    );
+  }
+
+  if (type === 'admin') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M12 3 19 6v5c0 4.4-2.8 8.1-7 10-4.2-1.9-7-5.6-7-10V6l7-3Z" />
+        <path d="M9.5 12.2 11.2 14l3.5-4" />
+      </svg>
+    );
+  }
+
   return null;
 }
 
@@ -139,8 +180,8 @@ function CaptainMenuIcon({ type }) {
   if (type === 'settings') {
     return (
       <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="3.2" />
-        <path d="M12 2.8v3M12 18.2v3M4.9 4.9 7 7M17 17l2.1 2.1M2.8 12h3M18.2 12h3M4.9 19.1 7 17M17 7l2.1-2.1" />
+        <path d="M9.5 3.5h5l.7 2.4 2.2.9 2.2-1.2 2.5 4.3-1.9 1.6v2.5l1.9 1.6-2.5 4.3-2.2-1.2-2.2.9-.7 2.4h-5l-.7-2.4-2.2-.9-2.2 1.2-2.5-4.3 1.9-1.6v-2.5L2 9.9l2.5-4.3 2.2 1.2 2.2-.9.6-2.4Z" />
+        <circle cx="12" cy="12" r="3" />
       </svg>
     );
   }
@@ -156,41 +197,18 @@ function formatClubLabel(clubSlug) {
   return clubSlug.replace(/-/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function buildCaptainLabel(members, players, currentUser) {
-  const playerMap = new Map(players.map((player) => [player.id, player]));
-  const leaderNames = members
-    .filter((member) => member.role === 'captain' || member.role === 'coCaptain')
-    .sort((left, right) => {
-      if (left.role === right.role) {
-        return 0;
-      }
+function buildTeamNavSummary(members, games) {
+  const activeMemberCount = members.filter((member) => member.status === 'active').length;
+  const standings = buildStandingsSummary(games);
+  const completedCount = standings.completedGames.length;
 
-      return left.role === 'captain' ? -1 : 1;
-    })
-    .map((member) => {
-      const player = member.playerId ? playerMap.get(member.playerId) : null;
-
-      if (player?.fullName) {
-        return player.fullName;
-      }
-
-      return member.uid === currentUser?.uid ? currentUser?.displayName || currentUser?.email : '';
-    })
-    .filter(Boolean);
-  const uniqueLeaderNames = Array.from(new Set(leaderNames));
-
-  if (!uniqueLeaderNames.length) {
-    return 'Captain: TBD';
-  }
-
-  if (uniqueLeaderNames.length === 1) {
-    return `Captain: ${uniqueLeaderNames[0]}`;
-  }
-
-  const visibleNames = uniqueLeaderNames.slice(0, 2);
-  const remainingCount = uniqueLeaderNames.length - visibleNames.length;
-
-  return `Captains: ${visibleNames.join(', ')}${remainingCount > 0 ? ` +${remainingCount}` : ''}`;
+  return {
+    activeMemberCount,
+    losses: standings.losses,
+    ties: standings.ties,
+    winPct: completedCount ? Math.round(Number(standings.winPct) * 100) : 0,
+    wins: standings.wins,
+  };
 }
 
 export default function AppShell() {
@@ -202,8 +220,15 @@ export default function AppShell() {
   const [membershipError, setMembershipError] = useState('');
   const [activeTeam, setActiveTeam] = useState(null);
   const [activeMembership, setActiveMembership] = useState(null);
+  const [currentPlayer, setCurrentPlayer] = useState(null);
   const [isAppAdmin, setIsAppAdmin] = useState(false);
-  const [captainLabel, setCaptainLabel] = useState('Captain: TBD');
+  const [teamNavSummary, setTeamNavSummary] = useState({
+    activeMemberCount: 0,
+    losses: 0,
+    ties: 0,
+    winPct: 0,
+    wins: 0,
+  });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [teamRefreshKey, setTeamRefreshKey] = useState(0);
 
@@ -289,7 +314,14 @@ export default function AppShell() {
     if (!clubSlug || !teamSlug) {
       setActiveTeam(null);
       setActiveMembership(null);
-      setCaptainLabel('Captain: TBD');
+      setCurrentPlayer(null);
+      setTeamNavSummary({
+        activeMemberCount: 0,
+        losses: 0,
+        ties: 0,
+        winPct: 0,
+        wins: 0,
+      });
       return;
     }
 
@@ -298,16 +330,25 @@ export default function AppShell() {
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
       listTeamMembers(clubSlug, teamSlug),
       listPlayers(clubSlug, teamSlug),
+      listGames(clubSlug, teamSlug),
     ])
-      .then(([team, membership, members, players]) => {
+      .then(([team, membership, members, players, games]) => {
         setActiveTeam(team);
         setActiveMembership(membership);
-        setCaptainLabel(buildCaptainLabel(members, players, user));
+        setCurrentPlayer(players.find((player) => player.uid === user?.uid || player.id === user?.uid) ?? null);
+        setTeamNavSummary(buildTeamNavSummary(members, games));
       })
       .catch(() => {
         setActiveTeam(null);
         setActiveMembership(null);
-        setCaptainLabel('Captain: TBD');
+        setCurrentPlayer(null);
+        setTeamNavSummary({
+          activeMemberCount: 0,
+          losses: 0,
+          ties: 0,
+          winPct: 0,
+          wins: 0,
+        });
       });
   }, [clubSlug, teamRefreshKey, teamSlug, user]);
 
@@ -328,12 +369,16 @@ export default function AppShell() {
     activeTeam?.approvedClubSlug &&
     activeTeam.approvedClubSlug !== 'independent';
   const visiblePrimaryRoutes = primaryRoutes.filter((route) => !route.requiresApprovedClub || isApprovedClubTeam);
-  const signedInLabel =
+  const userRoleLabel =
     currentMembership?.role === 'coCaptain'
-      ? 'Signed In: Co-captain'
+      ? 'Co-captain'
       : canManage
-        ? 'Signed In: Captain'
-        : 'Signed In: Player';
+        ? 'Captain'
+        : 'Player';
+  const userDisplayName = currentPlayer?.fullName || user?.displayName || user?.email || 'Player';
+  const userAvatarUrl = currentPlayer?.headshotUrl || user?.photoURL || '';
+  const userInitial = userDisplayName.trim().charAt(0).toUpperCase() || 'P';
+  const manageMenuOpen = adminRoutes.some((route) => location.pathname.endsWith(`/${route.to}`));
 
   useEffect(() => {
     if (!user?.uid || !clubSlug || !teamSlug || !currentMembership) {
@@ -421,7 +466,19 @@ export default function AppShell() {
             <img alt={`${teamTitle} logo`} className="sidebar__team-logo" src={teamLogo} />
             <div className="sidebar__team-copy">
               <h1 className="sidebar__team-title">{teamTitle}</h1>
-              <p className="sidebar__team-captain">{captainLabel}</p>
+              <div className="sidebar__team-stats" aria-label="Team snapshot">
+                <span className="sidebar__team-stat sidebar__team-stat--members">
+                  Team Members: <strong>{teamNavSummary.activeMemberCount}</strong>
+                </span>
+                <span className="sidebar__team-stat">
+                  <strong>{teamNavSummary.wins}-{teamNavSummary.losses}{teamNavSummary.ties ? `-${teamNavSummary.ties}` : ''}</strong>
+                  W-L{teamNavSummary.ties ? '-T' : ''}
+                </span>
+                <span className="sidebar__team-stat">
+                  <strong>{teamNavSummary.winPct}%</strong>
+                  Win %
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -444,20 +501,43 @@ export default function AppShell() {
 
           {canManage ? (
             <div className="sidebar__nav-group">
-              <p className="sidebar__nav-heading">Captain</p>
-              {adminRoutes.map((route) => (
-                <NavLink
-                  key={route.label}
-                  className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`}
-                  onClick={() => setMobileNavOpen(false)}
-                  to={route.to}
-                >
-                  <CaptainMenuIcon type={route.icon} />
-                  <span>{route.label}</span>
-                </NavLink>
-              ))}
+              <p className="sidebar__nav-heading">Team Management</p>
+              <details className="sidebar__manage-menu" open={manageMenuOpen}>
+                <summary className={`nav-link sidebar__manage-summary ${manageMenuOpen ? 'nav-link--active' : ''}`}>
+                  <CaptainMenuIcon type="settings" />
+                  <span>Manage</span>
+                </summary>
+                <div className="sidebar__manage-list">
+                  {adminRoutes.map((route) => (
+                    <NavLink
+                      key={route.label}
+                      className={({ isActive }) => `nav-link sidebar__manage-link ${isActive ? 'nav-link--active' : ''}`}
+                      onClick={() => setMobileNavOpen(false)}
+                      to={route.to}
+                    >
+                      <CaptainMenuIcon type={route.icon} />
+                      <span>{route.label}</span>
+                    </NavLink>
+                  ))}
+                </div>
+              </details>
             </div>
           ) : null}
+
+          <div className="sidebar__nav-group">
+            <NavLink className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} onClick={() => setMobileNavOpen(false)} to="profile">
+              <PlayerMenuIcon type="profile" />
+              <span>Profile</span>
+            </NavLink>
+            <NavLink className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} onClick={() => setMobileNavOpen(false)} to="help">
+              <PlayerMenuIcon type="help" />
+              <span>Help &amp; Feedback</span>
+            </NavLink>
+            <button className="nav-link sidebar__nav-button" onClick={handleSignOut} type="button">
+              <PlayerMenuIcon type="signout" />
+              <span>Sign out</span>
+            </button>
+          </div>
         </nav>
 
         {membershipError ? (
@@ -467,17 +547,24 @@ export default function AppShell() {
         ) : null}
 
         <div className="sidebar__footer">
-          <p className="sidebar__footer-title">{signedInLabel}</p>
-          <strong>{user?.displayName ?? user?.email}</strong>
+          <div className="sidebar__user-card">
+            {userAvatarUrl ? (
+              <img alt={`${userDisplayName} profile`} className="sidebar__user-avatar" src={userAvatarUrl} />
+            ) : (
+              <div className="sidebar__user-avatar sidebar__user-avatar--initial">{userInitial}</div>
+            )}
+            <div className="sidebar__user-copy">
+              <strong>{userDisplayName}</strong>
+              <span>{userRoleLabel}</span>
+            </div>
+          </div>
           <div className="sidebar__footer-actions">
             {memberships.length > 0 ? (
               <NavLink className="sidebar__footer-link" onClick={() => setMobileNavOpen(false)} to="/teams">
-                My Teams
+                <PlayerMenuIcon type="switch" />
+                <span>Switch Team</span>
               </NavLink>
             ) : null}
-            <NavLink className="sidebar__footer-link" onClick={() => setMobileNavOpen(false)} to="help">
-              Help & Feedback
-            </NavLink>
             {isAppAdmin ? (
               <NavLink
                 className="sidebar__footer-link"
@@ -486,13 +573,11 @@ export default function AppShell() {
                 target="_blank"
                 to="/admin"
               >
-                App Admin
+                <PlayerMenuIcon type="admin" />
+                <span>App Admin</span>
               </NavLink>
             ) : null}
           </div>
-          <button className="sidebar__signout" onClick={handleSignOut} type="button">
-            Sign out
-          </button>
           <Link className="sidebar__app-brand sidebar__footer-brand" to="/">
             <img alt="PKL Universe" className="sidebar__app-logo" src={pklUniverseWideLogo} />
           </Link>
