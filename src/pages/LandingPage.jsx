@@ -8,7 +8,6 @@ import loginNowImage from '../../login_now.webp';
 import pklUniverseWideLogo from '../../pkl_universe_wide_logo.webp';
 import buildRosterImage from '../../build_roster_6.webp';
 import clubChallengesImage from '../../club_challenges_4.webp';
-import manageMatchesImage from '../../manage_matches_5.webp';
 import managePlayersImage from '../../manage_players_7.webp';
 import newsFeedImage from '../../news_feed_1.webp';
 import teamMembersImage from '../../team_members_2.webp';
@@ -34,11 +33,6 @@ const TEAM_HUB_PREVIEWS = [
     alt: 'PKL Universe club challenge preview',
     image: clubChallengesImage,
     label: 'Club Challenges',
-  },
-  {
-    alt: 'PKL Universe manage matches preview',
-    image: manageMatchesImage,
-    label: 'Manage Matches',
   },
   {
     alt: 'PKL Universe build roster preview',

@@ -3215,9 +3215,19 @@ export async function acceptChallenge({ challengeId, challengeClubSlug, clubSlug
     metadata: {
       challengeId,
       dateLabel: challenge.dateTbd ? 'Date TBD' : challenge.isoDate || 'Date TBD',
+      awayGameId,
       homeGameId,
       location: challenge.location || 'Location TBD',
+      matchType: 'club_challenge',
       opponentName: acceptedByTeam.name || acceptedByTeam.teamSlug,
+      teamAClubSlug: createdByTeam.clubSlug,
+      teamAId: createdByTeam.teamSlug,
+      teamAName: createdByTeam.name || createdByTeam.teamSlug,
+      teamASlug: createdByTeam.teamSlug,
+      teamBClubSlug: acceptedByTeam.clubSlug,
+      teamBId: acceptedByTeam.teamSlug,
+      teamBName: acceptedByTeam.name || acceptedByTeam.teamSlug,
+      teamBSlug: acceptedByTeam.teamSlug,
       teamName: createdByTeam.name || createdByTeam.teamSlug,
       timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
     },
@@ -3513,6 +3523,10 @@ export function formatActivity(activity) {
     case ACTIVITY_TYPES.CHALLENGE_DECLINED:
       return `${teamLabel(metadata.declinedByTeamName)} declined ${teamLabel(metadata.challengerTeamName)}'s challenge`;
     case ACTIVITY_TYPES.MATCH_SCHEDULED:
+      if (metadata.matchType === 'club_challenge' && metadata.teamAName && metadata.teamBName) {
+        return `${metadata.teamAName} scheduled a match against ${metadata.teamBName}`;
+      }
+
       return `${teamLabel(metadata.teamName)} scheduled a match against ${teamLabel(metadata.opponentName, metadata.opponent || 'TBD')}`;
     case ACTIVITY_TYPES.MATCH_COMPLETED:
       if (metadata.winnerTeamName) {

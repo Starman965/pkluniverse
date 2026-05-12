@@ -30,7 +30,6 @@ import {
   RosterMgmtPage,
   RosterPage,
   SchedulePage,
-  ScheduleScoresPage,
   SettingsPage,
   StandingsPage,
   TeamMembersPage,
@@ -145,7 +144,6 @@ export default function App() {
           <Route element={<ChallengesPage />} path="challenges" />
           <Route element={<ClubEventsPage />} path="events" />
           <Route element={<ActivityPage />} path="activity" />
-          <Route element={<ScheduleScoresPage />} path="schedule-scores" />
           <Route element={<StandingsPage />} path="standings" />
           <Route element={<StandingsPage />} path="team-standing" />
           <Route element={<GameRostersPage />} path="pairings" />

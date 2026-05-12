@@ -9,6 +9,7 @@ import {
   listGames,
   listMemberships,
   listPlayers,
+  listTeamChallenges,
   listTeamMembers,
   setLastActiveTeam,
 } from '../lib/data';
@@ -26,7 +27,6 @@ const primaryRoutes = [
 ];
 
 const adminRoutes = [
-  { icon: 'manageMatches', label: 'Manage Matches', to: 'schedule-scores' },
   { icon: 'rosters', label: 'Build Rosters', to: 'roster-mgmt' },
   { icon: 'managePlayers', label: 'Manage Players', to: 'player-mgmt' },
   { icon: 'settings', label: 'Team Settings', to: 'settings' },
@@ -242,6 +242,31 @@ function buildTeamNavSummary(members, games) {
   };
 }
 
+function getTodayDateKey() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function countPendingAvailabilityGames(games, playerId) {
+  if (!playerId) {
+    return 0;
+  }
+
+  const todayDateKey = getTodayDateKey();
+
+  return games.filter((game) => {
+    const isScheduled = game.matchStatus === 'scheduled';
+    const isPast = game.isoDate ? game.isoDate < todayDateKey : false;
+    const attendanceStatus = game.attendance?.[playerId] ?? 'unknown';
+
+    return isScheduled && !isPast && attendanceStatus === 'unknown';
+  }).length;
+}
+
 export default function AppShell() {
   const { signOutUser, user } = useAuth();
   const location = useLocation();
@@ -260,6 +285,8 @@ export default function AppShell() {
     winPct: 0,
     wins: 0,
   });
+  const [incomingChallengeCount, setIncomingChallengeCount] = useState(0);
+  const [pendingAvailabilityCount, setPendingAvailabilityCount] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [teamRefreshKey, setTeamRefreshKey] = useState(0);
 
@@ -346,6 +373,8 @@ export default function AppShell() {
       setActiveTeam(null);
       setActiveMembership(null);
       setCurrentPlayer(null);
+      setIncomingChallengeCount(0);
+      setPendingAvailabilityCount(0);
       setTeamNavSummary({
         activeMemberCount: 0,
         losses: 0,
@@ -364,15 +393,49 @@ export default function AppShell() {
       listGames(clubSlug, teamSlug),
     ])
       .then(([team, membership, members, players, games]) => {
+        const currentPlayerRecord =
+          players.find((player) => player.id === membership?.playerId) ??
+          players.find((player) => player.uid === user?.uid || player.id === user?.uid) ??
+          null;
+        const currentPlayerId = membership?.playerId ?? currentPlayerRecord?.id ?? '';
+
         setActiveTeam(team);
         setActiveMembership(membership);
-        setCurrentPlayer(players.find((player) => player.uid === user?.uid || player.id === user?.uid) ?? null);
+        setCurrentPlayer(currentPlayerRecord);
+        setPendingAvailabilityCount(countPendingAvailabilityGames(games, currentPlayerId));
         setTeamNavSummary(buildTeamNavSummary(members, games));
+
+        const challengeClubSlug =
+          team?.affiliationStatus === 'approved' && team?.approvedClubSlug && team.approvedClubSlug !== 'independent'
+            ? team.approvedClubSlug
+            : '';
+
+        if (!challengeClubSlug) {
+          setIncomingChallengeCount(0);
+          return;
+        }
+
+        listTeamChallenges({ challengeClubSlug, clubSlug, teamSlug })
+          .then((challenges) => {
+            const count = challenges.filter(
+              (challenge) =>
+                challenge.status === 'open' &&
+                challenge.visibility === 'targeted' &&
+                challenge.targetTeamClubSlug === clubSlug &&
+                challenge.targetTeamSlug === teamSlug,
+            ).length;
+            setIncomingChallengeCount(count);
+          })
+          .catch(() => {
+            setIncomingChallengeCount(0);
+          });
       })
       .catch(() => {
         setActiveTeam(null);
         setActiveMembership(null);
         setCurrentPlayer(null);
+        setIncomingChallengeCount(0);
+        setPendingAvailabilityCount(0);
         setTeamNavSummary({
           activeMemberCount: 0,
           losses: 0,
@@ -526,6 +589,16 @@ export default function AppShell() {
               >
                 <PlayerMenuIcon type={route.icon} />
                 <span>{route.label}</span>
+                {route.icon === 'competition' && incomingChallengeCount > 0 ? (
+                  <span className="nav-link__badge" aria-label={`${incomingChallengeCount} open challenges received`}>
+                    {incomingChallengeCount > 9 ? '9+' : incomingChallengeCount}
+                  </span>
+                ) : null}
+                {route.icon === 'matches' && pendingAvailabilityCount > 0 ? (
+                  <span className="nav-link__badge" aria-label={`${pendingAvailabilityCount} matches need availability`}>
+                    {pendingAvailabilityCount > 9 ? '9+' : pendingAvailabilityCount}
+                  </span>
+                ) : null}
               </NavLink>
             ))}
             <NavLink className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} onClick={() => setMobileNavOpen(false)} to="profile">

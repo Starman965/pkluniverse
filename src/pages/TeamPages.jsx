@@ -131,7 +131,7 @@ function createEmptyScheduleAdminForm() {
     matchStatus: 'scheduled',
     opponent: '',
     opponentScore: '',
-    playersNeeded: 8,
+    playersNeeded: 2,
     teamScore: '',
     timeLabel: '',
   };
@@ -146,7 +146,7 @@ function createEmptyChallengeForm() {
     minute: '00',
     notes: '',
     period: 'AM',
-    playersNeeded: 8,
+    playersNeeded: 2,
     targetTeamKey: '',
     visibility: 'targeted',
   };
@@ -3638,6 +3638,7 @@ export function SchedulePage() {
         user,
       });
       await loadScheduleData();
+      window.dispatchEvent(new Event('team-updated'));
     } catch (updateError) {
       setError(updateError.message ?? 'Unable to update availability.');
     } finally {
@@ -6605,6 +6606,8 @@ export function ChallengesPage() {
   const [message, setMessage] = useState('');
   const [postedChallengeTab, setPostedChallengeTab] = useState('proposed');
   const [appliedChallengeTargetKey, setAppliedChallengeTargetKey] = useState('');
+  const [challengeFormOpen, setChallengeFormOpen] = useState(false);
+  const [incomingChallengeIndex, setIncomingChallengeIndex] = useState(0);
 
   const canManage = canManageRole(membership?.role);
   const challengeTargetTeamKey = location.state?.challengeTargetTeamKey ?? '';
@@ -6698,6 +6701,7 @@ export function ChallengesPage() {
     setError('');
     setMessage(`Challenge form started for ${challengeTargetTeamName || matchingTargetTeam.name}.`);
     setAppliedChallengeTargetKey(challengeTargetTeamKey);
+    setChallengeFormOpen(true);
   }, [
     appliedChallengeTargetKey,
     canManage,
@@ -6741,7 +6745,8 @@ export function ChallengesPage() {
 
       setForm(createEmptyChallengeForm());
       setEditingChallengeId('');
-      setMessage(editingChallengeId ? 'Challenge updated.' : 'Challenge sent.');
+      setMessage(editingChallengeId ? 'Challenge updated.' : '');
+      setChallengeFormOpen(false);
       await loadChallengeData();
     } catch (submitError) {
       setError(submitError.message ?? 'Unable to save that challenge.');
@@ -6755,12 +6760,27 @@ export function ChallengesPage() {
     setEditingChallengeId(challenge.id);
     setError('');
     setMessage('');
+    setChallengeFormOpen(true);
   }
 
   function handleCancelEditChallenge() {
     setForm(createEmptyChallengeForm());
     setEditingChallengeId('');
     setError('');
+    setChallengeFormOpen(false);
+  }
+
+  function handleOpenChallengeForm() {
+    setForm(createEmptyChallengeForm());
+    setEditingChallengeId('');
+    setError('');
+    setChallengeFormOpen(true);
+  }
+
+  function handleScrollToSection(sectionId) {
+    requestAnimationFrame(() => {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   }
 
   async function handleAcceptChallenge(challenge) {
@@ -6778,6 +6798,7 @@ export function ChallengesPage() {
       });
       setMessage('Challenge accepted and added to both schedules.');
       await loadChallengeData();
+      window.dispatchEvent(new Event('team-updated'));
     } catch (acceptError) {
       setError(acceptError.message ?? 'Unable to accept that challenge.');
     } finally {
@@ -6830,6 +6851,16 @@ export function ChallengesPage() {
   }
 
   function renderChallengeCard(challenge, actions = null) {
+    const sourceTeam =
+      challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug
+        ? team
+        : eligibleTeams.find(
+            (eligibleTeam) =>
+              eligibleTeam.clubSlug === challenge.createdByTeamClubSlug &&
+              eligibleTeam.teamSlug === challenge.createdByTeamSlug,
+          );
+    const sourceTeamName = challenge.createdByTeamName || sourceTeam?.name || challenge.createdByTeamSlug || 'Team';
+    const sourceTeamLogo = sourceTeam?.logoUrl || defaultTeamLogo;
     const targetLabel =
       challenge.visibility === 'targeted'
         ? `To ${challenge.targetTeamName || challenge.targetTeamSlug}`
@@ -6841,26 +6872,31 @@ export function ChallengesPage() {
 
     return (
       <article key={challenge.id} className="challenge-card">
-        <div className="challenge-card__badge">CC</div>
+        <div className="challenge-card__badge">
+          <img alt={`${sourceTeamName} logo`} src={sourceTeamLogo} />
+        </div>
         <div className="challenge-card__body">
           <div className="challenge-card__header">
             <div className="challenge-card__title">
               <strong>{challenge.createdByTeamName || challenge.createdByTeamSlug}</strong>
               <span>{targetLabel}</span>
             </div>
+            <time dateTime={challenge.createdAtMs ? new Date(challenge.createdAtMs).toISOString() : undefined}>
+              {formatActivityTimestamp(challenge.createdAtMs)}
+            </time>
             <span className="status-badge">{getChallengeStatusLabel(challenge)}</span>
           </div>
 
           <div className="challenge-card__details">
-            <span>Date: {formatChallengeDate(challenge)}</span>
-            <span>Time: {formatChallengeTime(challenge)}</span>
-            <span>Players needed: {challenge.playersNeeded ?? 8}</span>
-            <span>Court(s): {challenge.location || 'TBD'}</span>
+            <span>{formatChallengeDate(challenge)}</span>
+            <span>{formatChallengeTime(challenge)}</span>
+            <span>{challenge.playersNeeded ?? 2} Players</span>
+            <span>{challenge.location || 'Location TBD'}</span>
             {challenge.status === 'accepted' && scheduleGameId ? (
               <span>Scheduled match created</span>
             ) : null}
           </div>
-          {challenge.notes ? <p className="challenge-card__notes">{challenge.notes}</p> : null}
+          {challenge.notes ? <p className="challenge-card__notes">“{challenge.notes}”</p> : null}
           {actions || (challenge.status === 'accepted' && scheduleGameId) ? (
             <div className="challenge-card__actions">
               {challenge.status === 'accepted' && scheduleGameId ? (
@@ -6883,6 +6919,42 @@ export function ChallengesPage() {
       challenge.targetTeamClubSlug === clubSlug &&
       challenge.targetTeamSlug === teamSlug,
   );
+  useEffect(() => {
+    if (incomingChallengeIndex >= incomingChallenges.length) {
+      setIncomingChallengeIndex(Math.max(0, incomingChallenges.length - 1));
+    }
+  }, [incomingChallengeIndex, incomingChallenges.length]);
+
+  const selectedIncomingChallenge = incomingChallenges[incomingChallengeIndex] ?? null;
+  const selectedIncomingSourceTeam = selectedIncomingChallenge
+    ? eligibleTeams.find(
+        (eligibleTeam) =>
+          eligibleTeam.clubSlug === selectedIncomingChallenge.createdByTeamClubSlug &&
+          eligibleTeam.teamSlug === selectedIncomingChallenge.createdByTeamSlug,
+      )
+    : null;
+  const selectedIncomingSourceName =
+    selectedIncomingChallenge?.createdByTeamName ||
+    selectedIncomingSourceTeam?.name ||
+    selectedIncomingChallenge?.createdByTeamSlug ||
+    'Team';
+  const selectedIncomingSourceLogo = selectedIncomingSourceTeam?.logoUrl || defaultTeamLogo;
+  const featuredIncomingChallenge = incomingChallenges[0] ?? null;
+  const featuredChallengerTeam = featuredIncomingChallenge
+    ? eligibleTeams.find(
+        (eligibleTeam) =>
+          eligibleTeam.clubSlug === featuredIncomingChallenge.createdByTeamClubSlug &&
+          eligibleTeam.teamSlug === featuredIncomingChallenge.createdByTeamSlug,
+      )
+    : null;
+  const featuredChallengerName =
+    featuredIncomingChallenge?.createdByTeamName ||
+    featuredChallengerTeam?.name ||
+    featuredIncomingChallenge?.createdByTeamSlug ||
+    'A club team';
+  const featuredTeamName = team?.name ?? teamSlug;
+  const featuredTeamLogo = team?.logoUrl || defaultTeamLogo;
+  const featuredChallengerLogo = featuredChallengerTeam?.logoUrl || defaultTeamLogo;
   const postedChallenges = teamChallenges.filter(
     (challenge) => challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug,
   );
@@ -6891,21 +6963,65 @@ export function ChallengesPage() {
   const closedPostedChallenges = postedChallenges.filter((challenge) =>
     ['cancelled', 'declined'].includes(challenge.status),
   );
+  const openClubChallenges = clubChallenges.filter((challenge) => challenge.status === 'open');
   const visiblePostedChallenges =
     postedChallengeTab === 'accepted'
       ? acceptedPostedChallenges
       : postedChallengeTab === 'closed'
         ? closedPostedChallenges
         : proposedPostedChallenges;
+  const pendingSentChallengeCount = proposedPostedChallenges.length;
+  const openClubChallengeCount = openClubChallenges.length;
+  const emptyHeroState =
+    pendingSentChallengeCount > 0
+      ? {
+          actionLabel: 'View Sent Challenges',
+          body:
+            pendingSentChallengeCount === 1
+              ? 'Track the challenge below while the other captain responds.'
+              : 'Track those challenges below while the other captains respond.',
+          eyebrow: 'Challenges Pending',
+          onAction: () => {
+            setPostedChallengeTab('proposed');
+            handleScrollToSection('competition-hub-sent');
+          },
+          title: `${featuredTeamName} has ${pendingSentChallengeCount} challenge${
+            pendingSentChallengeCount === 1 ? '' : 's'
+          } waiting for a response`,
+        }
+      : openClubChallengeCount > 0
+        ? {
+            actionLabel: 'View Open Challenges',
+            body: 'Review club-wide challenges from teams looking to play.',
+            eyebrow: 'Open Challenges Available',
+            onAction: () => handleScrollToSection('competition-hub-directory'),
+            title: `${openClubChallengeCount} open club challenge${
+              openClubChallengeCount === 1 ? '' : 's'
+            } available`,
+          }
+        : {
+            actionLabel: canManage ? 'Challenge a Team' : '',
+            body: 'Send a challenge to another approved team when you are ready to schedule a match.',
+            eyebrow: 'Ready to Compete',
+            onAction: handleOpenChallengeForm,
+            title: 'No active team challenges right now',
+          };
   return (
     <div className="page-grid schedule-admin-page">
-      <section className="card">
-        <p className="eyebrow">Competition</p>
-        <h1>Competition Hub</h1>
-        <p>
-          Challenge another approved team in your club network. Accepted challenges become scheduled matches for both
-          teams.
-        </p>
+      <section className="card competition-hub-page">
+        <div className="competition-hub-header">
+          <div>
+            <p className="eyebrow">Competition</p>
+            <h1>Competition Hub</h1>
+            <p>Everything you need to compete and win.</p>
+          </div>
+          {canManage ? (
+            <button className="button competition-hub-header__action" onClick={handleOpenChallengeForm} type="button">
+              <img alt="" aria-hidden="true" src={ACTIVITY_ICON_BY_TYPE.challenge_created} />
+              <span>Challenge a Team</span>
+            </button>
+          ) : null}
+        </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
         {message ? <div className="notice notice--success">{message}</div> : null}
@@ -6920,7 +7036,72 @@ export function ChallengesPage() {
           </div>
         ) : (
           <div className="challenge-page">
-            {canManage ? (
+            {featuredIncomingChallenge ? (
+              <section className="competition-challenge-hero">
+                <div className="competition-challenge-hero__icon">
+                  <img alt="" aria-hidden="true" src={ACTIVITY_ICON_BY_TYPE.challenge_created} />
+                </div>
+                <div className="competition-challenge-hero__copy">
+                  <p className="eyebrow">You&apos;ve Been Challenged</p>
+                  <h2>{featuredChallengerName} has challenged {featuredTeamName}</h2>
+                  <p>
+                    Respond by {formatChallengeDate(featuredIncomingChallenge)} to secure your match.
+                  </p>
+                </div>
+                <div className="competition-challenge-hero__matchup" aria-label={`${featuredChallengerName} versus ${featuredTeamName}`}>
+                  <img alt={`${featuredChallengerName} logo`} src={featuredChallengerLogo} />
+                  <span>vs</span>
+                  <img alt={`${featuredTeamName} logo`} src={featuredTeamLogo} />
+                </div>
+                <div className="competition-challenge-hero__actions">
+                  <button
+                    className="button"
+                    disabled={updatingChallengeId === featuredIncomingChallenge.id}
+                    onClick={() => handleAcceptChallenge(featuredIncomingChallenge)}
+                    type="button"
+                  >
+                    {updatingChallengeId === featuredIncomingChallenge.id ? 'Accepting...' : 'Accept Challenge'}
+                  </button>
+                  <button
+                    className="button button--ghost"
+                    disabled={updatingChallengeId === featuredIncomingChallenge.id}
+                    onClick={() => handleDeclineChallenge(featuredIncomingChallenge)}
+                    type="button"
+                  >
+                    Decline Challenge
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <section className="competition-challenge-hero competition-challenge-hero--empty">
+                <div className="competition-challenge-hero__icon">
+                  <img alt="" aria-hidden="true" src={ACTIVITY_ICON_BY_TYPE.challenge_created} />
+                </div>
+                <div className="competition-challenge-hero__copy">
+                  <p className="eyebrow">{emptyHeroState.eyebrow}</p>
+                  <h2>{emptyHeroState.title}</h2>
+                  <p>{emptyHeroState.body}</p>
+                </div>
+                <div className="competition-challenge-hero__actions">
+                  {emptyHeroState.actionLabel ? (
+                    <button className="button" onClick={emptyHeroState.onAction} type="button">
+                      {emptyHeroState.actionLabel}
+                    </button>
+                  ) : (
+                    <span className="competition-challenge-hero__note">Captains can send team challenges.</span>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {canManage && challengeFormOpen ? (
+              <div className="challenge-form-dialog" role="dialog" aria-modal="true" aria-label="Challenge a team">
+                <button
+                  aria-label="Close challenge form"
+                  className="challenge-form-dialog__backdrop"
+                  onClick={handleCancelEditChallenge}
+                  type="button"
+                />
               <section className="schedule-admin-card">
                 <div className="schedule-admin-card__header">
                   <div>
@@ -6932,6 +7113,9 @@ export function ChallengesPage() {
                         : 'Send a challenge directly to another team in your club network.'}
                     </p>
                   </div>
+                  <button className="button button--ghost" onClick={handleCancelEditChallenge} type="button">
+                    Close
+                  </button>
                 </div>
 
                 <form
@@ -7122,54 +7306,110 @@ export function ChallengesPage() {
                   </div>
                 </form>
               </section>
-            ) : (
-              <div className="notice notice--info">
-                Captains and co-captains can create or respond to club challenges.
               </div>
+            ) : (
+              !canManage ? (
+                <div className="notice notice--info">
+                Captains and co-captains can create or respond to club challenges.
+                </div>
+              ) : null
             )}
 
-            <section className="schedule-admin-card">
+            <section id="competition-challenges-inbox" className="schedule-admin-card">
               <div className="schedule-admin-card__header">
                 <div>
                   <p className="eyebrow">Inbox</p>
                   <h2>Challenges received</h2>
                   <p>Respond to direct challenges from other captains.</p>
                 </div>
+                {incomingChallenges.length > 1 ? (
+                  <div className="challenge-inbox-nav" aria-label="Challenge inbox navigation">
+                    <button
+                      aria-label="Previous challenge"
+                      disabled={incomingChallenges.length <= 1}
+                      onClick={() =>
+                        setIncomingChallengeIndex((current) =>
+                          current === 0 ? incomingChallenges.length - 1 : current - 1,
+                        )
+                      }
+                      type="button"
+                    >
+                      ‹
+                    </button>
+                    <span>{incomingChallengeIndex + 1} / {incomingChallenges.length}</span>
+                    <button
+                      aria-label="Next challenge"
+                      disabled={incomingChallenges.length <= 1}
+                      onClick={() =>
+                        setIncomingChallengeIndex((current) =>
+                          current === incomingChallenges.length - 1 ? 0 : current + 1,
+                        )
+                      }
+                      type="button"
+                    >
+                      ›
+                    </button>
+                  </div>
+                ) : incomingChallenges.length === 1 ? (
+                  <span className="challenge-inbox-count">1 / 1</span>
+                ) : null}
               </div>
-              {incomingChallenges.length > 0 ? (
-                <div className="challenge-grid">
-                  {incomingChallenges.map((challenge) =>
-                    renderChallengeCard(
-                      challenge,
-                      canManage ? (
-                        <>
-                          <button
-                            className="button"
-                            disabled={updatingChallengeId === challenge.id}
-                            onClick={() => handleAcceptChallenge(challenge)}
-                            type="button"
-                          >
-                            {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept'}
-                          </button>
-                          <button
-                            className="button button--ghost"
-                            disabled={updatingChallengeId === challenge.id}
-                            onClick={() => handleDeclineChallenge(challenge)}
-                            type="button"
-                          >
-                            Decline
-                          </button>
-                        </>
-                      ) : null,
-                    ),
-                  )}
-                </div>
+              {selectedIncomingChallenge ? (
+                <article className="challenge-inbox-card">
+                  <img
+                    alt={`${selectedIncomingSourceName} logo`}
+                    className="challenge-inbox-card__logo"
+                    src={selectedIncomingSourceLogo}
+                  />
+                  <div className="challenge-inbox-card__body">
+                    <div className="challenge-inbox-card__header">
+                      <div>
+                        <h3>{selectedIncomingSourceName}</h3>
+                        <p>To {team?.name ?? teamSlug}</p>
+                      </div>
+                      <time dateTime={selectedIncomingChallenge.createdAtMs ? new Date(selectedIncomingChallenge.createdAtMs).toISOString() : undefined}>
+                        {formatActivityTimestamp(selectedIncomingChallenge.createdAtMs)}
+                      </time>
+                    </div>
+                    <div className="challenge-inbox-card__pills">
+                      <span>{getChallengeStatusLabel(selectedIncomingChallenge)}</span>
+                      <span>{formatChallengeDate(selectedIncomingChallenge)}</span>
+                      <span>{formatChallengeTime(selectedIncomingChallenge)}</span>
+                      <span>{selectedIncomingChallenge.playersNeeded ?? 2} Players</span>
+                    </div>
+                    {selectedIncomingChallenge.notes ? (
+                      <p className="challenge-inbox-card__note">“{selectedIncomingChallenge.notes}”</p>
+                    ) : (
+                      <p className="challenge-inbox-card__note">No captain note was included.</p>
+                    )}
+                    {canManage ? (
+                      <div className="challenge-inbox-card__actions">
+                        <button
+                          className="button"
+                          disabled={updatingChallengeId === selectedIncomingChallenge.id}
+                          onClick={() => handleAcceptChallenge(selectedIncomingChallenge)}
+                          type="button"
+                        >
+                          {updatingChallengeId === selectedIncomingChallenge.id ? 'Accepting...' : 'Accept Challenge'}
+                        </button>
+                        <button
+                          className="button button--ghost"
+                          disabled={updatingChallengeId === selectedIncomingChallenge.id}
+                          onClick={() => handleDeclineChallenge(selectedIncomingChallenge)}
+                          type="button"
+                        >
+                          Decline Challenge
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
               ) : (
                 <div className="notice notice--info">No direct challenges are waiting for this team.</div>
               )}
             </section>
 
-            <section className="schedule-admin-card">
+            <section className="schedule-admin-card" id="competition-hub-sent">
               <div className="schedule-admin-card__header">
                 <div>
                   <p className="eyebrow">Sent</p>
@@ -7224,7 +7464,7 @@ export function ChallengesPage() {
                                 onClick={() => handleCancelChallenge(challenge)}
                                 type="button"
                               >
-                                {updatingChallengeId === challenge.id ? 'Cancelling...' : 'Cancel Challenge'}
+                                {updatingChallengeId === challenge.id ? 'Cancelling...' : 'Cancel'}
                               </button>
                             </>
                           ) : null,
@@ -7246,7 +7486,7 @@ export function ChallengesPage() {
               )}
             </section>
 
-            <section className="schedule-admin-card">
+            <section className="schedule-admin-card" id="competition-hub-directory">
               <div className="schedule-admin-card__header">
                 <div>
                   <p className="eyebrow">Directory</p>
@@ -7254,9 +7494,9 @@ export function ChallengesPage() {
                   <p>Browse open club-wide challenges that your team can accept.</p>
                 </div>
               </div>
-              {clubChallenges.length > 0 ? (
+              {openClubChallenges.length > 0 ? (
                 <div className="challenge-grid">
-                  {clubChallenges.map((challenge) =>
+                  {openClubChallenges.map((challenge) =>
                     renderChallengeCard(
                       challenge,
                       canManage ? (
