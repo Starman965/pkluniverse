@@ -138,11 +138,41 @@ service cloud.firestore {
           'match_completed',
           'score_reported',
           'team_created',
+          'player_added',
           'player_joined_team',
           'event_created',
           'event_registered',
           'standings_updated',
         ];
+    }
+
+    function canReadActivityLog() {
+      return isPlatformAdmin()
+        || (
+          resource.data.clubId is string
+          && resource.data.teamId is string
+          && resource.data.teamId != ''
+          && isTeamMember(resource.data.clubId, resource.data.teamId)
+        )
+        || (
+          signedIn()
+          && resource.data.clubId is string
+          && hasActiveApprovedTeamInClub(resource.data.clubId)
+        );
+    }
+
+    function hasActiveApprovedTeamInClub(activityClubId) {
+      let profile = userProfileDoc(request.auth.uid);
+      let activeClubId = profile.data.lastActiveClubId;
+      let activeTeamId = profile.data.lastActiveTeamId;
+
+      return signedIn()
+        && activeClubId is string
+        && activeTeamId is string
+        && exists(memberPath(activeClubId, activeTeamId))
+        && get(/databases/$(database)/documents/clubs/$(activeClubId)/teams/$(activeTeamId)).data.status == 'active'
+        && get(/databases/$(database)/documents/clubs/$(activeClubId)/teams/$(activeTeamId)).data.affiliationStatus == 'approved'
+        && get(/databases/$(database)/documents/clubs/$(activeClubId)/teams/$(activeTeamId)).data.approvedClubSlug == activityClubId;
     }
 
     function safeSelfMembershipUpdate(uid) {
@@ -584,7 +614,8 @@ service cloud.firestore {
     }
 
     match /activityLogs/{logId} {
-      allow read, delete: if isPlatformAdmin();
+      allow read: if canReadActivityLog();
+      allow delete: if isPlatformAdmin();
       allow create: if safeActivityLogCreate();
       allow update: if false;
     }

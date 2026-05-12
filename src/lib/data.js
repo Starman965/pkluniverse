@@ -55,6 +55,7 @@ export const ACTIVITY_TYPES = {
   EVENT_REGISTERED: 'event_registered',
   MATCH_COMPLETED: 'match_completed',
   MATCH_SCHEDULED: 'match_scheduled',
+  PLAYER_ADDED: 'player_added',
   PLAYER_JOINED_TEAM: 'player_joined_team',
   SCORE_REPORTED: 'score_reported',
   STANDINGS_UPDATED: 'standings_updated',
@@ -1864,6 +1865,22 @@ export async function createTeam({ teamName, user }) {
     type: ACTIVITY_TYPES.TEAM_CREATED,
   });
 
+  await logActivityBestEffort({
+    actorId: user.uid,
+    clubId: club.slug,
+    metadata: {
+      clubName: club.name,
+      playerId,
+      playerName: user.displayName || user.email || 'A player',
+      source: 'team_creation',
+      teamId: teamSlug,
+      teamName: trimmedName,
+    },
+    targetId: playerId,
+    teamId: teamSlug,
+    type: ACTIVITY_TYPES.PLAYER_ADDED,
+  });
+
   return { clubSlug: club.slug, joinCode, teamSlug };
 }
 
@@ -1889,6 +1906,11 @@ export async function joinTeamByCode({ code, user }) {
   const { team, teamDoc } = match;
   const teamClubSlug = team.clubId ?? match.clubSlug ?? teamDoc.ref.parent.parent?.id ?? INDEPENDENT_CLUB.id;
   const teamSlug = teamDoc.id;
+  const activityClubSlug =
+    team.affiliationStatus === 'approved' && team.approvedClubSlug && team.approvedClubSlug !== 'independent'
+      ? team.approvedClubSlug
+      : teamClubSlug;
+  const activityClubName = team.approvedClubName ?? team.clubName ?? activityClubSlug;
   const membershipRef = doc(db, 'clubs', teamClubSlug, 'teams', teamSlug, 'members', user.uid);
   const existingMemberships = await listMemberships(user.uid).catch(() => []);
   const existingMembership =
@@ -1965,8 +1987,25 @@ export async function joinTeamByCode({ code, user }) {
 
     await logActivityBestEffort({
       actorId: user.uid,
-      clubId: teamClubSlug,
+      clubId: activityClubSlug,
       metadata: {
+        clubName: activityClubName,
+        playerId,
+        playerName: user.displayName || user.email || 'A player',
+        source: 'join_code',
+        teamId: teamSlug,
+        teamName: team.name ?? teamSlug,
+      },
+      targetId: playerId,
+      teamId: teamSlug,
+      type: ACTIVITY_TYPES.PLAYER_ADDED,
+    });
+
+    await logActivityBestEffort({
+      actorId: user.uid,
+      clubId: activityClubSlug,
+      metadata: {
+        clubName: activityClubName,
         playerId,
         playerName: user.displayName || user.email || 'A player',
         role: nextRole,
@@ -3485,6 +3524,8 @@ export function formatActivity(activity) {
       return `${teamLabel(metadata.teamName)} reported a score against ${teamLabel(metadata.opponentName, metadata.opponent || 'TBD')}`;
     case ACTIVITY_TYPES.TEAM_CREATED:
       return `${teamLabel(metadata.teamName)} was created`;
+    case ACTIVITY_TYPES.PLAYER_ADDED:
+      return `${metadata.playerName || 'A player'} was added to ${teamLabel(metadata.teamName)}`;
     case ACTIVITY_TYPES.PLAYER_JOINED_TEAM:
       return `${metadata.playerName || 'A player'} joined ${teamLabel(metadata.teamName)}`;
     case ACTIVITY_TYPES.EVENT_CREATED:
@@ -3576,6 +3617,44 @@ export async function listAdminActivity({
       ...activity,
       description: formatActivity(activity),
     }));
+}
+
+export async function listClubActivity({ clubSlug, limitCount = 75, teamOnly = false, teamSlug = '', user } = {}) {
+  requireDb();
+
+  if (!user?.uid) {
+    throw new Error('You must be signed in to view activity.');
+  }
+
+  if (!clubSlug) {
+    throw new Error('Choose a club to view activity.');
+  }
+
+  const cappedLimit = Math.min(Math.max(Number(limitCount) || 75, 1), 100);
+  const filters = [where('clubId', '==', clubSlug)];
+
+  if (teamOnly && teamSlug) {
+    filters.push(where('teamId', '==', teamSlug));
+  }
+
+  const snapshot = await getDocs(
+    query(
+      collection(db, 'activityLogs'),
+      ...filters,
+    ),
+  );
+
+  return snapshot.docs
+    .map((entry) => {
+      const activity = normalizeActivity(entry);
+
+      return {
+        ...activity,
+        description: formatActivity(activity),
+      };
+    })
+    .sort((left, right) => right.timestampMs - left.timestampMs)
+    .slice(0, cappedLimit);
 }
 
 export async function listPlayers(clubSlug, teamSlug) {
@@ -3955,7 +4034,13 @@ export async function saveGame({
 
   if (shouldLogScheduled || shouldLogCompleted) {
     const teamSnapshot = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug));
-    const teamName = teamSnapshot.exists() ? teamSnapshot.data().name ?? teamSlug : teamSlug;
+    const teamData = teamSnapshot.exists() ? teamSnapshot.data() : {};
+    const teamName = teamData.name ?? teamSlug;
+    const activityClubSlug =
+      teamData.affiliationStatus === 'approved' && teamData.approvedClubSlug && teamData.approvedClubSlug !== 'independent'
+        ? teamData.approvedClubSlug
+        : clubSlug;
+    const activityClubName = teamData.approvedClubName ?? teamData.clubName ?? activityClubSlug;
     const scoreLabel =
       normalizedTeamScore !== null && normalizedOpponentScore !== null
         ? `${normalizedTeamScore}-${normalizedOpponentScore}`
@@ -3976,8 +4061,9 @@ export async function saveGame({
     if (shouldLogScheduled) {
       await logActivityBestEffort({
         actorId: user?.uid ?? '',
-        clubId: clubSlug,
+        clubId: activityClubSlug,
         metadata: {
+          clubName: activityClubName,
           dateLabel: normalizedDateTbd ? 'Date TBD' : trimmedIsoDate,
           gameId: nextGameId,
           location: trimmedLocation || 'Location TBD',
@@ -3994,6 +4080,7 @@ export async function saveGame({
 
     if (shouldLogCompleted) {
       const matchMetadata = {
+        clubName: activityClubName,
         gameId: nextGameId,
         loserTeamName,
         opponentName: trimmedOpponent,
@@ -4011,7 +4098,7 @@ export async function saveGame({
 
       await logActivityBestEffort({
         actorId: user?.uid ?? '',
-        clubId: clubSlug,
+        clubId: activityClubSlug,
         metadata: matchMetadata,
         targetId: nextGameId,
         teamId: teamSlug,
@@ -4020,7 +4107,7 @@ export async function saveGame({
 
       await logActivityBestEffort({
         actorId: user?.uid ?? '',
-        clubId: clubSlug,
+        clubId: activityClubSlug,
         metadata: matchMetadata,
         targetId: nextGameId,
         teamId: teamSlug,

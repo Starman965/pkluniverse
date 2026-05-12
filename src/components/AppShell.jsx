@@ -17,14 +17,15 @@ import pklUniverseWideLogo from '../../pkl_universe_wide_logo.webp';
 
 const primaryRoutes = [
   { icon: 'news', label: 'Home', to: 'news' },
-  { icon: 'members', label: 'Team Members', to: 'team' },
-  { icon: 'matches', label: 'Team Matches', to: 'schedule' },
-  { icon: 'standings', label: 'Team Standing', to: 'team-standing' },
-  { icon: 'club', label: 'Club Hub', requiresApprovedClub: true, to: 'club-teams' },
+  { icon: 'competition', label: 'Competition Hub', to: 'challenges' },
+  { icon: 'matches', label: 'Matches', to: 'schedule' },
+  { icon: 'standings', label: 'Standings', to: 'standings' },
+  { icon: 'members', label: 'Teams', to: 'team' },
+  { icon: 'events', label: 'Events', to: 'events' },
+  { icon: 'activity', label: 'Activity', to: 'activity' },
 ];
 
 const adminRoutes = [
-  { icon: 'challenges', label: 'Club Challenges', to: 'challenges' },
   { icon: 'manageMatches', label: 'Manage Matches', to: 'schedule-scores' },
   { icon: 'rosters', label: 'Build Rosters', to: 'roster-mgmt' },
   { icon: 'managePlayers', label: 'Manage Players', to: 'player-mgmt' },
@@ -56,6 +57,16 @@ function PlayerMenuIcon({ type }) {
     );
   }
 
+  if (type === 'competition') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M7 17 17 7" />
+        <path d="M14 4h6v6" />
+        <path d="M10 20H4v-6" />
+      </svg>
+    );
+  }
+
   if (type === 'matches') {
     return (
       <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
@@ -70,6 +81,26 @@ function PlayerMenuIcon({ type }) {
     return (
       <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
         <path d="M5 20V9h4v11M10 20V4h4v16M15 20v-7h4v7" />
+      </svg>
+    );
+  }
+
+  if (type === 'events') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M6.5 3.5v3M17.5 3.5v3M4.5 8h15" />
+        <path d="M5 5.5h14v15H5z" />
+        <path d="M8 12h3M8 16h7M14 12h2" />
+      </svg>
+    );
+  }
+
+  if (type === 'activity') {
+    return (
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M4 19V5" />
+        <path d="M4 17c2.2 0 3.1-1.5 4.4-4.5C9.5 9.9 10.4 8 12 8s2.5 1.9 3.6 4.5C16.9 15.5 17.8 17 20 17" />
+        <path d="M7 19h14" />
       </svg>
     );
   }
@@ -485,7 +516,7 @@ export default function AppShell() {
 
         <nav className="sidebar__nav">
           <div className="sidebar__nav-group">
-            <p className="sidebar__nav-heading">Player</p>
+            <p className="sidebar__nav-heading">Main</p>
             {visiblePrimaryRoutes.map((route) => (
               <NavLink
                 key={route.label}
@@ -497,6 +528,18 @@ export default function AppShell() {
                 <span>{route.label}</span>
               </NavLink>
             ))}
+            <NavLink className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} onClick={() => setMobileNavOpen(false)} to="profile">
+              <PlayerMenuIcon type="profile" />
+              <span>Profile</span>
+            </NavLink>
+            <NavLink className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} onClick={() => setMobileNavOpen(false)} to="help">
+              <PlayerMenuIcon type="help" />
+              <span>Help &amp; Feedback</span>
+            </NavLink>
+            <button className="nav-link sidebar__nav-button" onClick={handleSignOut} type="button">
+              <PlayerMenuIcon type="signout" />
+              <span>Sign out</span>
+            </button>
           </div>
 
           {canManage ? (
@@ -523,21 +566,6 @@ export default function AppShell() {
               </details>
             </div>
           ) : null}
-
-          <div className="sidebar__nav-group">
-            <NavLink className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} onClick={() => setMobileNavOpen(false)} to="profile">
-              <PlayerMenuIcon type="profile" />
-              <span>Profile</span>
-            </NavLink>
-            <NavLink className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} onClick={() => setMobileNavOpen(false)} to="help">
-              <PlayerMenuIcon type="help" />
-              <span>Help &amp; Feedback</span>
-            </NavLink>
-            <button className="nav-link sidebar__nav-button" onClick={handleSignOut} type="button">
-              <PlayerMenuIcon type="signout" />
-              <span>Sign out</span>
-            </button>
-          </div>
         </nav>
 
         {membershipError ? (

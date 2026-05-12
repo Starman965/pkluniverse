@@ -339,6 +339,130 @@ textarea {
   padding: 0.35rem 0.55rem;
 }
 
+.activity-page {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.activity-page__feed-card {
+  display: grid;
+  gap: 1.2rem;
+  overflow: hidden;
+}
+
+.activity-page__section-header h2 {
+  margin: 0;
+}
+
+.activity-page__eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.activity-page__eyebrow span {
+  border: 1px solid rgba(240, 193, 75, 0.36);
+  border-radius: 999px;
+  background: rgba(240, 193, 75, 0.14);
+  color: #f0c14b;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  padding: 0.18rem 0.48rem;
+}
+
+.activity-page__section-header p {
+  margin: 0.35rem 0 0;
+  color: #9fb6d8;
+}
+
+.activity-page__section-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.activity-feed {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.activity-feed__item {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 0.8rem;
+  padding: 0.82rem 0.95rem;
+  border: 1px solid rgba(126, 161, 255, 0.16);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    rgba(8, 18, 31, 0.5);
+}
+
+.activity-feed__icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid rgba(240, 193, 75, 0.18);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle, rgba(240, 193, 75, 0.12), rgba(240, 193, 75, 0.035) 58%, transparent 72%),
+    rgba(255, 255, 255, 0.025);
+  color: #f0c14b;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.activity-feed__icon img {
+  display: block;
+  width: 48px;
+  height: 48px;
+  filter: brightness(1.22) saturate(1.25) contrast(1.08) drop-shadow(0 0 10px rgba(240, 193, 75, 0.22));
+  object-fit: contain;
+}
+
+.activity-feed__body {
+  display: grid;
+  min-width: 0;
+}
+
+.activity-feed__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.activity-feed__header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.activity-feed__header time {
+  color: #91a8c8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .activity-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 620px) {
+  .activity-feed__item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .activity-feed__header {
+    display: grid;
+  }
+}
+
 .hero__background {
   position: absolute;
   inset: 0;

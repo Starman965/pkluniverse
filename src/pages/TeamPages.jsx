@@ -4,6 +4,7 @@ import 'react-easy-crop/react-easy-crop.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import TeamDivisionLabel from '../components/TeamDivisionLabel';
 import { useAuth } from '../context/AuthContext';
+import { ACTIVITY_ICON_BY_TYPE, DEMO_ACTIVITY_CLUB_NAME, DEMO_ACTIVITY_ITEMS } from '../lib/demoActivity';
 import {
   ACTIVITY_TYPES,
   PLAYER_AVAILABLE_DAYS,
@@ -801,6 +802,7 @@ const ACTIVITY_TYPE_META = {
   [ACTIVITY_TYPES.MATCH_COMPLETED]: { icon: 'W', label: 'Match Completed' },
   [ACTIVITY_TYPES.SCORE_REPORTED]: { icon: '11', label: 'Score Reported' },
   [ACTIVITY_TYPES.TEAM_CREATED]: { icon: 'T', label: 'Team Created' },
+  [ACTIVITY_TYPES.PLAYER_ADDED]: { icon: '+', label: 'Player Added' },
   [ACTIVITY_TYPES.PLAYER_JOINED_TEAM]: { icon: '+', label: 'Player Joined' },
   [ACTIVITY_TYPES.EVENT_CREATED]: { icon: 'Evt', label: 'Event Created' },
   [ACTIVITY_TYPES.EVENT_REGISTERED]: { icon: 'Reg', label: 'Event Registered' },
@@ -816,10 +818,22 @@ function formatActivityTimestamp(timestampMs) {
     return 'Just now';
   }
 
-  return new Date(timestampMs).toLocaleString([], {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
+  const elapsedMs = Date.now() - timestampMs;
+  const elapsedMinutes = Math.max(1, Math.round(elapsedMs / 60000));
+
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes}m ago`;
+  }
+
+  const elapsedHours = Math.round(elapsedMinutes / 60);
+
+  if (elapsedHours < 24) {
+    return `${elapsedHours}h ago`;
+  }
+
+  const elapsedDays = Math.round(elapsedHours / 24);
+
+  return `${elapsedDays}d ago`;
 }
 
 function createEmptyRosterForm() {
@@ -1419,6 +1433,62 @@ export function HelpFeedbackPage() {
   );
 }
 
+export function ActivityPage() {
+  const activities = DEMO_ACTIVITY_ITEMS;
+  const activityClubName = DEMO_ACTIVITY_CLUB_NAME;
+
+  return (
+    <div className="page-grid activity-page">
+      <section className="card activity-page__feed-card">
+        <div className="activity-page__section-header">
+          <div>
+            <p className="eyebrow activity-page__eyebrow">
+              Activity
+              <span>Demo</span>
+            </p>
+            <h2>Recent Activity</h2>
+            <p>
+              Latest team, competition, match, standings, and event updates
+              {activityClubName ? ` across ${activityClubName}.` : '.'}
+            </p>
+          </div>
+        </div>
+
+        {activities.length > 0 ? (
+          <div className="activity-feed">
+            {activities.map((activity) => {
+              const typeMeta = getActivityTypeMeta(activity.type);
+              const iconSrc = ACTIVITY_ICON_BY_TYPE[activity.type];
+
+              return (
+                <article key={activity.id} className="activity-feed__item">
+                  <div className="activity-feed__icon">
+                    {iconSrc ? <img alt="" aria-hidden="true" src={iconSrc} /> : typeMeta.icon}
+                  </div>
+                  <div className="activity-feed__body">
+                    <div className="activity-feed__header">
+                      <div>
+                        <h3>{activity.description}</h3>
+                      </div>
+                      <time dateTime={activity.timestampMs ? new Date(activity.timestampMs).toISOString() : undefined}>
+                        {formatActivityTimestamp(activity.timestampMs)}
+                      </time>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="notice notice--info">
+            No activity has been recorded for this team yet. New team, player, challenge, and match updates will appear here.
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function formatClubTeamsClubName(clubSlug) {
   if (!clubSlug) {
     return 'your club';
@@ -1804,7 +1874,7 @@ function ClubEventsPanel({ clubName = '', clubSlug, managerToolsLabel = 'Club ma
           ))}
         </div>
       ) : (
-        <div className="notice notice--info">No club events are posted yet.</div>
+        <div className="notice notice--info">No club events are currently scheduled.</div>
       )}
 
       {previewFlyerEvent ? (
@@ -2424,6 +2494,81 @@ export function ClubEventsStandalonePage() {
           <ClubEventsPanel clubName={club?.name ?? ''} clubSlug={clubSlug} managerView user={user} />
         ) : (
           <div className="notice notice--error">You do not have club manager access for this club.</div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+export function ClubEventsPage() {
+  const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
+  const [team, setTeam] = useState(null);
+  const [club, setClub] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadClubEventsContext() {
+      const teamData = await getTeam(clubSlug, teamSlug);
+      const approvedClubSlug =
+        teamData?.affiliationStatus === 'approved' && teamData?.approvedClubSlug !== 'independent'
+          ? teamData.approvedClubSlug
+          : '';
+      const clubs = approvedClubSlug ? await listClubs().catch(() => []) : [];
+
+      if (!ignore) {
+        setTeam(teamData);
+        setClub(clubs.find((clubItem) => clubItem.slug === approvedClubSlug) ?? null);
+      }
+    }
+
+    setLoading(true);
+    setError('');
+    loadClubEventsContext()
+      .catch((loadError) => {
+        if (!ignore) {
+          setTeam(null);
+          setClub(null);
+          setError(loadError.message ?? 'Unable to load club events yet.');
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [clubSlug, teamSlug]);
+
+  const approvedClubSlug = team?.approvedClubSlug ?? '';
+  const clubName = club?.name ?? formatClubTeamsClubName(approvedClubSlug);
+  const hasApprovedClub = team?.affiliationStatus === 'approved' && approvedClubSlug && approvedClubSlug !== 'independent';
+
+  return (
+    <div className="page-grid club-events-page">
+      <section className="card">
+        <p className="eyebrow">Club Events</p>
+        <h1>{hasApprovedClub ? `${clubName} Events` : 'Events'}</h1>
+        <p>Find club events, clinics, socials, and other pickleball programs in one place.</p>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+
+        {loading ? (
+          <div className="state-panel">
+            <p>Loading club events...</p>
+          </div>
+        ) : hasApprovedClub ? (
+          <ClubEventsPanel clubName={clubName} clubSlug={approvedClubSlug} user={user} />
+        ) : (
+          <div className="notice notice--info">
+            Club events are available after this team is connected to an approved club.
+          </div>
         )}
       </section>
     </div>
@@ -3512,7 +3657,7 @@ export function SchedulePage() {
         <div className="schedule-page__header">
           <div className="schedule-page__header-copy">
             <p className="eyebrow">Schedule</p>
-            <h1>Team Matches</h1>
+            <h1>Matches</h1>
             <p className="schedule-page__copy">
               See match details, set your availability, and review posted rosters from one place.
             </p>
@@ -4203,7 +4348,7 @@ export function StandingsPage() {
         <div className="standings-page__header">
           <div>
             <p className="eyebrow">Standings</p>
-            <h1>Pickleball Team Standings</h1>
+            <h1>Standings</h1>
             <p className="standings-page__copy">
               See how your team ranks by division, with wins, losses, ties, scoring edge, and head-to-head results.
             </p>
@@ -6720,7 +6865,7 @@ export function ChallengesPage() {
             <div className="challenge-card__actions">
               {challenge.status === 'accepted' && scheduleGameId ? (
                 <Link className="button button--ghost" to="../schedule">
-                  View Team Matches
+                  View Matches
                 </Link>
               ) : null}
               {actions}
@@ -6755,8 +6900,8 @@ export function ChallengesPage() {
   return (
     <div className="page-grid schedule-admin-page">
       <section className="card">
-        <p className="eyebrow">PKL Universe matches</p>
-        <h1>Club Challenges</h1>
+        <p className="eyebrow">Competition</p>
+        <h1>Competition Hub</h1>
         <p>
           Challenge another approved team in your club network. Accepted challenges become scheduled matches for both
           teams.

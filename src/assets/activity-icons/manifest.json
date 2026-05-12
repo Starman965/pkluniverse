@@ -1,0 +1,14 @@
+{
+  "team_created": "team-created.webp",
+  "player_added": "player-added.webp",
+  "player_joined_team": "player-joined-team.webp",
+  "challenge_created": "challenge-created.webp",
+  "challenge_accepted": "challenge-accepted.webp",
+  "challenge_declined": "challenge-declined.webp",
+  "match_scheduled": "match-scheduled.webp",
+  "match_completed": "match-completed.webp",
+  "score_reported": "score-reported.webp",
+  "event_created": "event-created.webp",
+  "event_registered": "event-registered.webp",
+  "standings_updated": "standings-updated.webp"
+}

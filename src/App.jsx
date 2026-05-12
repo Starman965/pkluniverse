@@ -15,9 +15,11 @@ import TeamChooserPage from './pages/TeamChooserPage';
 import TeamDirectoryPage from './pages/TeamDirectoryPage';
 import {
   AvailabilityPage,
+  ActivityPage,
   ChallengesPage,
   ClubAffiliationAdminPage,
   ClubCentralPage,
+  ClubEventsPage,
   ClubEventsStandalonePage,
   ClubTeamsPage,
   GameRostersPage,
@@ -141,6 +143,8 @@ export default function App() {
           <Route element={<RosterPage />} path="player-mgmt" />
           <Route element={<SchedulePage />} path="schedule" />
           <Route element={<ChallengesPage />} path="challenges" />
+          <Route element={<ClubEventsPage />} path="events" />
+          <Route element={<ActivityPage />} path="activity" />
           <Route element={<ScheduleScoresPage />} path="schedule-scores" />
           <Route element={<StandingsPage />} path="standings" />
           <Route element={<StandingsPage />} path="team-standing" />
