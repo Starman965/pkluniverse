@@ -2918,6 +2918,7 @@ function buildChallengeGamePayload({
     isoDate,
     linkedGameId,
     linkedTeamClubSlug: linkedTeam.clubSlug,
+    linkedTeamLogoUrl: linkedTeam.logoUrl ?? '',
     linkedTeamName: linkedTeam.name,
     linkedTeamSlug: linkedTeam.teamSlug,
     location,
@@ -2933,6 +2934,7 @@ function buildChallengeGamePayload({
     updatedAt: serverTimestamp(),
     source: 'challenge',
     sourceTeamClubSlug: createdBy.clubSlug,
+    sourceTeamLogoUrl: createdBy.logoUrl ?? '',
     sourceTeamSlug: createdBy.teamSlug,
   };
 }
@@ -4292,11 +4294,69 @@ export async function listGames(clubSlug, teamSlug) {
       challengeId: data.challengeId ?? '',
       linkedGameId: data.linkedGameId ?? '',
       linkedTeamClubSlug: data.linkedTeamClubSlug ?? '',
+      linkedTeamLogoUrl: data.linkedTeamLogoUrl ?? '',
       linkedTeamName: data.linkedTeamName ?? '',
       linkedTeamSlug: data.linkedTeamSlug ?? '',
       source: data.source ?? 'manual',
+      sourceTeamLogoUrl: data.sourceTeamLogoUrl ?? '',
     };
   });
+
+  const currentTeamSnap = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug));
+  const currentTeamLogo = currentTeamSnap.exists() ? (currentTeamSnap.data().logoUrl ?? '').trim() : '';
+  const linkedTeamKeys = new Map();
+
+  games.forEach((game) => {
+    if (game.source !== 'challenge') {
+      return;
+    }
+
+    if (!(game.sourceTeamLogoUrl ?? '').trim() && currentTeamLogo) {
+      game.sourceTeamLogoUrl = currentTeamLogo;
+    }
+
+    if (
+      !(game.linkedTeamLogoUrl ?? '').trim() &&
+      game.linkedTeamClubSlug &&
+      game.linkedTeamSlug
+    ) {
+      const key = `${game.linkedTeamClubSlug}::${game.linkedTeamSlug}`;
+      linkedTeamKeys.set(key, {
+        clubSlug: game.linkedTeamClubSlug,
+        teamSlug: game.linkedTeamSlug,
+      });
+    }
+  });
+
+  if (linkedTeamKeys.size > 0) {
+    const entries = [...linkedTeamKeys.values()];
+    const linkedSnaps = await Promise.all(
+      entries.map(({ clubSlug: linkedClub, teamSlug: linkedTeam }) =>
+        getDoc(doc(db, 'clubs', linkedClub, 'teams', linkedTeam)),
+      ),
+    );
+    const logoByKey = new Map();
+
+    entries.forEach((entry, index) => {
+      const key = `${entry.clubSlug}::${entry.teamSlug}`;
+      const snap = linkedSnaps[index];
+      const url = snap.exists() ? (snap.data().logoUrl ?? '').trim() : '';
+      logoByKey.set(key, url);
+    });
+
+    games.forEach((game) => {
+      if (game.source !== 'challenge' || (game.linkedTeamLogoUrl ?? '').trim()) {
+        return;
+      }
+
+      const key = `${game.linkedTeamClubSlug}::${game.linkedTeamSlug}`;
+      const url = logoByKey.get(key);
+
+      if (url) {
+        game.linkedTeamLogoUrl = url;
+      }
+    });
+  }
 
   games.sort((left, right) => gameSortKey(left).localeCompare(gameSortKey(right)));
 

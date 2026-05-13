@@ -498,6 +498,63 @@ function buildPlayerInitials(fullName) {
     .join('');
 }
 
+function MatchScheduleVersusHeader({ className = '', game, homeLogoUrl = '', homeTeamName = '' }) {
+  const opponentName = (game?.opponent ?? '').trim() || 'Opponent TBD';
+  const homeName = (homeTeamName ?? '').trim() || 'Your team';
+  const homeCustom =
+    game?.source === 'challenge' && (game.sourceTeamLogoUrl ?? '').trim()
+      ? (game.sourceTeamLogoUrl ?? '').trim()
+      : (homeLogoUrl ?? '').trim();
+  const awayCustom =
+    game?.source === 'challenge' && (game.linkedTeamLogoUrl ?? '').trim()
+      ? (game.linkedTeamLogoUrl ?? '').trim()
+      : '';
+  const homeSrc = homeCustom || defaultTeamLogo;
+  const awaySrc = awayCustom || defaultTeamLogo;
+
+  return (
+    <div
+      className={['schedule-matchup-vs', className].filter(Boolean).join(' ')}
+      role="group"
+      aria-label={`${homeName} versus ${opponentName}`}
+    >
+      <div className="schedule-matchup-vs__team">
+        <div className="schedule-matchup-vs__shield">
+          <img
+            alt=""
+            className="schedule-matchup-vs__logo-img"
+            decoding="async"
+            onError={(event) => {
+              event.currentTarget.onerror = null;
+              event.currentTarget.src = defaultTeamLogo;
+            }}
+            src={homeSrc}
+          />
+        </div>
+        <span className="schedule-matchup-vs__team-name">{homeName}</span>
+      </div>
+      <div className="schedule-matchup-vs__vs" aria-hidden="true">
+        <span>VS</span>
+      </div>
+      <div className="schedule-matchup-vs__team">
+        <div className="schedule-matchup-vs__shield">
+          <img
+            alt=""
+            className="schedule-matchup-vs__logo-img"
+            decoding="async"
+            onError={(event) => {
+              event.currentTarget.onerror = null;
+              event.currentTarget.src = defaultTeamLogo;
+            }}
+            src={awaySrc}
+          />
+        </div>
+        <span className="schedule-matchup-vs__team-name">{opponentName}</span>
+      </div>
+    </div>
+  );
+}
+
 function countAvailableGames(games, playerId) {
   if (!playerId) {
     return 0;
@@ -3588,18 +3645,24 @@ export function SchedulePage() {
   const { clubSlug, teamSlug } = useParams();
   const [games, setGames] = useState([]);
   const [players, setPlayers] = useState([]);
+  const [teamProfile, setTeamProfile] = useState({ logoUrl: '', name: '' });
   const [activeTab, setActiveTab] = useState('upcoming');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   async function loadScheduleData() {
-    const [gameData, playerData] = await Promise.all([
+    const [gameData, playerData, teamData] = await Promise.all([
       listGames(clubSlug, teamSlug),
       listPlayers(clubSlug, teamSlug),
+      getTeam(clubSlug, teamSlug),
     ]);
 
     setGames(gameData);
     setPlayers(playerData);
+    setTeamProfile({
+      logoUrl: teamData?.logoUrl ?? '',
+      name: teamData?.name ?? teamSlug,
+    });
   }
 
   useEffect(() => {
@@ -3685,10 +3748,13 @@ export function SchedulePage() {
                               .toUpperCase()
                           : 'DATE TBD'}
                       </p>
-                      <h2 className="schedule-match-card__title">
-                        VS. {game.opponent || 'Opponent TBD'}
-                      </h2>
-                      <span>
+                      <MatchScheduleVersusHeader
+                        className="schedule-matchup-vs--compact"
+                        game={game}
+                        homeLogoUrl={teamProfile.logoUrl}
+                        homeTeamName={teamProfile.name}
+                      />
+                      <span className="schedule-match-card__meta-line">
                         {game.timeLabel || 'Time TBD'} {game.timeLabel ? '·' : ''} {game.location || 'TBD'}
                       </span>
                     </div>
@@ -3764,6 +3830,7 @@ export function ScheduleScoresPage() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(createEmptyScheduleAdminForm());
   const [teamName, setTeamName] = useState('');
+  const [teamLogoUrl, setTeamLogoUrl] = useState('');
   const [activeTab, setActiveTab] = useState('upcoming');
 
   const canManage = canManageRole(membership?.role);
@@ -3792,6 +3859,7 @@ export function ScheduleScoresPage() {
     setGames(gameData);
     setMembership(membershipData);
     setTeamName(teamData?.name ?? '');
+    setTeamLogoUrl(teamData?.logoUrl ?? '');
   }
 
   useEffect(() => {
@@ -4125,10 +4193,13 @@ export function ScheduleScoresPage() {
                             {dateBadge.weekday ? <small>{dateBadge.weekday}</small> : null}
                           </div>
                           <div className="schedule-match-card__content">
-                            <h2 className="schedule-match-card__title">
-                              VS. {game.opponent || 'Opponent TBD'}
-                            </h2>
-                            <span>
+                            <MatchScheduleVersusHeader
+                              className="schedule-matchup-vs--compact schedule-matchup-vs--admin-inline"
+                              game={game}
+                              homeLogoUrl={teamLogoUrl}
+                              homeTeamName={teamName}
+                            />
+                            <span className="schedule-match-card__meta-line">
                               {game.timeLabel || 'Time TBD'} {game.timeLabel ? '·' : ''}{' '}
                               {game.location || 'Location TBD'}
                             </span>
@@ -4303,16 +4374,21 @@ export function GameRostersPage() {
   const { clubSlug, teamSlug } = useParams();
   const [games, setGames] = useState([]);
   const [players, setPlayers] = useState([]);
+  const [teamProfile, setTeamProfile] = useState({ logoUrl: '', name: '' });
   const [selectedGameId, setSelectedGameId] = useState('');
   const [error, setError] = useState('');
 
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
 
   useEffect(() => {
-    Promise.all([listGames(clubSlug, teamSlug), listPlayers(clubSlug, teamSlug)])
-      .then(([gameData, playerData]) => {
+    Promise.all([listGames(clubSlug, teamSlug), listPlayers(clubSlug, teamSlug), getTeam(clubSlug, teamSlug)])
+      .then(([gameData, playerData, teamData]) => {
         setGames(gameData);
         setPlayers(playerData);
+        setTeamProfile({
+          logoUrl: teamData?.logoUrl ?? '',
+          name: teamData?.name ?? teamSlug,
+        });
         setSelectedGameId((current) => {
           if (current && gameData.some((game) => game.id === current)) {
             return current;
@@ -4399,7 +4475,12 @@ export function GameRostersPage() {
                         .toUpperCase()
                     : 'DATE TBD'}
                 </p>
-                <h2 className="game-roster-board__title">VS. {activeGame.opponent || 'Opponent TBD'}</h2>
+                <MatchScheduleVersusHeader
+                  className="schedule-matchup-vs--hero"
+                  game={activeGame}
+                  homeLogoUrl={teamProfile.logoUrl}
+                  homeTeamName={teamProfile.name}
+                />
                 <p className="game-roster-board__meta">
                   {activeGame.timeLabel || 'Time TBD'} {activeGame.timeLabel ? '·' : ''}{' '}
                   {activeGame.location || 'TBD'}
@@ -4907,6 +4988,7 @@ export function AvailabilityPage() {
   const [games, setGames] = useState([]);
   const [players, setPlayers] = useState([]);
   const [membership, setMembership] = useState(null);
+  const [teamProfile, setTeamProfile] = useState({ logoUrl: '', name: '' });
   const [selectedGameId, setSelectedGameId] = useState('');
   const [updatingGameId, setUpdatingGameId] = useState('');
   const [viewMode, setViewMode] = useState('per-game');
@@ -4934,15 +5016,20 @@ export function AvailabilityPage() {
   }, [activePlayers, membership?.playerId]);
 
   async function loadAvailabilityData() {
-    const [gameData, playerData, membershipData] = await Promise.all([
+    const [gameData, playerData, membershipData, teamData] = await Promise.all([
       listGames(clubSlug, teamSlug),
       listPlayers(clubSlug, teamSlug),
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
+      getTeam(clubSlug, teamSlug),
     ]);
 
     setGames(gameData);
     setPlayers(playerData);
     setMembership(membershipData);
+    setTeamProfile({
+      logoUrl: teamData?.logoUrl ?? '',
+      name: teamData?.name ?? teamSlug,
+    });
     setSelectedGameId((current) => {
       if (current && gameData.some((game) => game.id === current)) {
         return current;
@@ -5136,9 +5223,12 @@ export function AvailabilityPage() {
                               .toUpperCase()
                           : 'DATE TBD'}
                       </p>
-                      <h2 className="availability-board__title">
-                        VS. {activeGame.opponent || 'Opponent TBD'}
-                      </h2>
+                      <MatchScheduleVersusHeader
+                        className="schedule-matchup-vs--hero"
+                        game={activeGame}
+                        homeLogoUrl={teamProfile.logoUrl}
+                        homeTeamName={teamProfile.name}
+                      />
                       <p className="availability-board__meta">
                         {activeGame.timeLabel || 'Time TBD'} {activeGame.timeLabel ? '·' : ''}{' '}
                         {activeGame.location || 'Location TBD'}
