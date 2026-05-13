@@ -1366,6 +1366,10 @@ ul {
   white-space: nowrap;
 }
 
+.competition-hub-approval-notice {
+  margin-top: 0.75rem;
+}
+
 .competition-hub-header__action img {
   width: 2rem;
   height: 2rem;
@@ -1481,6 +1485,11 @@ ul {
   border-color: rgba(255, 210, 41, 0.52);
   background: linear-gradient(180deg, #ffe52d 0%, #f2bd15 100%);
   color: #162033;
+}
+
+.challenge-accept-requirement {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .challenge-form-dialog {
@@ -1620,6 +1629,11 @@ ul {
 
 .challenge-inbox-card__actions .button {
   white-space: nowrap;
+}
+
+.challenge-inbox-card__actions .challenge-accept-requirement,
+.challenge-card__actions .challenge-accept-requirement {
+  max-width: none;
 }
 
 @media (max-width: 980px) {

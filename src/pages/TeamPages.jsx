@@ -7,8 +7,10 @@ import { useAuth } from '../context/AuthContext';
 import { ACTIVITY_ICON_BY_TYPE, DEMO_ACTIVITY_CLUB_NAME, DEMO_ACTIVITY_ITEMS } from '../lib/demoActivity';
 import {
   ACTIVITY_TYPES,
+  MATCH_PLAYER_COUNT_OPTIONS,
   PLAYER_AVAILABLE_DAYS,
   PLAYER_SKILL_LEVELS,
+  TEAM_MEMBER_LIMIT,
   acceptChallenge,
   addNewsComment,
   addClubManager,
@@ -50,8 +52,9 @@ import {
   listPlayers,
   listTeamChallenges,
   listTeamMembers,
-  requestClubAffiliation,
   renameClub,
+  RESET_FIRESTORE_TEST_DATA_PHRASE,
+  resetFirestoreTestData,
   removeClubManager,
   reviewClubAffiliationRequest,
   rotateTeamJoinCode,
@@ -62,6 +65,9 @@ import {
   saveClubEvent,
   saveUserPlayerProfile,
   setAvailability,
+  setLastActiveTeam,
+  subscribeChallengeHub,
+  subscribeNewsPosts,
   toggleNewsReaction,
   updateChallenge,
   updateNewsComment,
@@ -75,6 +81,11 @@ import defaultTeamLogo from '../../default_team_logo.webp';
 
 function canManageRole(role) {
   return role === 'captain' || role === 'coCaptain';
+}
+
+function normalizeMatchPlayerCount(value) {
+  const count = Number(value);
+  return MATCH_PLAYER_COUNT_OPTIONS.includes(count) ? count : 2;
 }
 
 function isCaptainRole(role) {
@@ -110,7 +121,7 @@ function createScheduleAdminDraft(game) {
     matchStatus: game.matchStatus ?? 'scheduled',
     opponent: game.opponent ?? '',
     opponentScore: game.opponentScore ?? '',
-    playersNeeded: game.playersNeeded ?? 8,
+    playersNeeded: normalizeMatchPlayerCount(game.playersNeeded),
     teamScore: game.teamScore ?? '',
     timeLabel: game.dateTbd === true || timeLabel === 'Time TBD' ? '' : timeLabel,
   };
@@ -147,6 +158,7 @@ function createEmptyChallengeForm() {
     notes: '',
     period: 'AM',
     playersNeeded: 2,
+    createdByPlayerId: '',
     targetTeamKey: '',
     visibility: 'targeted',
   };
@@ -163,7 +175,7 @@ function createPairingDraft(game) {
 }
 
 function getPairingCountForRoster(rosterPlayerIds = []) {
-  return Math.min(4, Math.max(1, Math.ceil(rosterPlayerIds.length / 2)));
+  return Math.min(1, Math.max(1, Math.ceil(rosterPlayerIds.length / 2)));
 }
 
 function normalizeDraftPairings(pairings = [], rosterPlayerIds = []) {
@@ -191,12 +203,13 @@ function normalizeDraftPairings(pairings = [], rosterPlayerIds = []) {
   });
 }
 
-function normalizeDraftPairingsForMatch(pairings = [], rosterPlayerIds = [], playersNeeded = 8) {
+function normalizeDraftPairingsForMatch(pairings = [], rosterPlayerIds = [], playersNeeded = 2) {
   const selectedIds = new Set(rosterPlayerIds);
   const seen = new Set();
+  const slotCount = normalizeMatchPlayerCount(playersNeeded);
   const pairingCount = Math.min(
-    4,
-    Math.max(getPairingCountForRoster(rosterPlayerIds), Math.ceil(Math.max(1, Number(playersNeeded) || 8) / 2)),
+    1,
+    Math.max(getPairingCountForRoster(rosterPlayerIds), Math.ceil(slotCount / 2)),
   );
 
   return Array.from({ length: pairingCount }, (_, index) => {
@@ -215,7 +228,7 @@ function normalizeDraftPairingsForMatch(pairings = [], rosterPlayerIds = [], pla
         typeof sourcePairing.courtLabel === 'string' && sourcePairing.courtLabel.trim()
           ? sourcePairing.courtLabel.trim()
           : `Court ${index + 1}`,
-      playerIds: playerIds.slice(0, 2),
+      playerIds: playerIds.slice(0, slotCount),
     };
   });
 }
@@ -3573,26 +3586,20 @@ export function RosterPage() {
 
 export function SchedulePage() {
   const { clubSlug, teamSlug } = useParams();
-  const { user } = useAuth();
   const [games, setGames] = useState([]);
   const [players, setPlayers] = useState([]);
-  const [membership, setMembership] = useState(null);
   const [activeTab, setActiveTab] = useState('upcoming');
-  const [expandedRosterIds, setExpandedRosterIds] = useState([]);
-  const [updatingGameId, setUpdatingGameId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   async function loadScheduleData() {
-    const [gameData, playerData, membershipData] = await Promise.all([
+    const [gameData, playerData] = await Promise.all([
       listGames(clubSlug, teamSlug),
       listPlayers(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
 
     setGames(gameData);
     setPlayers(playerData);
-    setMembership(membershipData);
   }
 
   useEffect(() => {
@@ -3606,13 +3613,8 @@ export function SchedulePage() {
       .finally(() => {
         setLoading(false);
       });
-  }, [clubSlug, teamSlug, user?.uid]);
+  }, [clubSlug, teamSlug]);
 
-  const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
-  const currentPlayer = useMemo(
-    () => players.find((player) => player.id === membership?.playerId) ?? null,
-    [membership?.playerId, players],
-  );
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const upcomingGames = useMemo(
     () => games.filter((game) => !gameBelongsInPast(game, todayDateKey)),
@@ -3624,34 +3626,6 @@ export function SchedulePage() {
   );
   const visibleGames = activeTab === 'past' ? pastGames : upcomingGames;
 
-  async function updateAvailability(gameId, status) {
-    setUpdatingGameId(gameId);
-    setError('');
-
-    try {
-      await setAvailability({
-        clubSlug,
-        gameId,
-        playerId: membership?.playerId,
-        status,
-        teamSlug,
-        user,
-      });
-      await loadScheduleData();
-      window.dispatchEvent(new Event('team-updated'));
-    } catch (updateError) {
-      setError(updateError.message ?? 'Unable to update availability.');
-    } finally {
-      setUpdatingGameId('');
-    }
-  }
-
-  function toggleRoster(gameId) {
-    setExpandedRosterIds((current) =>
-      current.includes(gameId) ? current.filter((id) => id !== gameId) : [...current, gameId],
-    );
-  }
-
   return (
     <div className="page-grid schedule-page">
       <section className="card">
@@ -3660,17 +3634,12 @@ export function SchedulePage() {
             <p className="eyebrow">Schedule</p>
             <h1>Matches</h1>
             <p className="schedule-page__copy">
-              See match details, set your availability, and review posted rosters from one place.
+              See scheduled matches, scores, and the rostered player or pair for each matchup.
             </p>
           </div>
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        {!loading && !membership?.playerId ? (
-          <div className="notice notice--info">
-            Your account is not linked to a player record for this team yet, so availability controls are disabled.
-          </div>
-        ) : null}
 
         {games.length > 0 ? (
           <div className="availability-tabs" aria-label="Schedule views">
@@ -3694,22 +3663,12 @@ export function SchedulePage() {
         {games.length > 0 && visibleGames.length > 0 ? (
           <div className="schedule-grid">
             {visibleGames.map((game) => {
-              const availabilitySummary = buildAvailabilitySummary(game, activePlayers);
               const rosterPairings = buildRosterPairings(game, players);
               const hasRoster = rosterPairings.length > 0;
               const rosterCount = game.rosterPlayerIds?.length ?? 0;
-              const playersNeeded = game.playersNeeded ?? 8;
-              const expanded = expandedRosterIds.includes(game.id);
-              const currentStatus = membership?.playerId ? getAttendanceStatus(game, membership.playerId) : 'unknown';
-              const statusMeta = getAvailabilityBoardStatusMeta(currentStatus, true);
-              const currentPlayerRostered = membership?.playerId
-                ? (game.rosterPlayerIds ?? []).includes(membership.playerId)
-                : false;
-              const statusLabel = currentPlayerRostered
-                ? 'You are rostered'
-                : hasRoster
-                  ? 'Roster posted'
-                  : 'Roster not posted yet';
+              const playersNeeded = normalizeMatchPlayerCount(game.playersNeeded);
+              const rosterStatusLabel = hasRoster ? 'Roster posted' : 'Roster not posted yet';
+              const matchTypeLabel = playersNeeded === 1 ? 'Singles' : 'Doubles';
 
               return (
                 <article key={game.id} className="schedule-match-card">
@@ -3739,46 +3698,13 @@ export function SchedulePage() {
                   </div>
 
                   <div className="schedule-match-card__stats">
-                    <span>{statusLabel}</span>
+                    <span>{rosterStatusLabel}</span>
+                    <span>{matchTypeLabel}</span>
                     <span>Roster: {rosterCount} / {playersNeeded}</span>
-                    <span>Available: {availabilitySummary.in}</span>
-                    <span>Your status: {statusMeta.label}</span>
+                    <span>Status: {game.matchStatus || 'scheduled'}</span>
                   </div>
 
-                  <div className="schedule-match-card__actions">
-                    {[
-                      { label: 'Available', value: 'in' },
-                      { label: 'Unavailable', value: 'out' },
-                      { label: 'Clear', value: 'unknown' },
-                    ].map((choice) => (
-                      <button
-                        key={choice.value}
-                        className={`choice-button ${currentStatus === choice.value ? 'choice-button--active' : ''}`}
-                        disabled={!membership?.playerId || updatingGameId === game.id}
-                        onClick={() => updateAvailability(game.id, choice.value)}
-                        type="button"
-                      >
-                        {updatingGameId === game.id && currentStatus === choice.value ? 'Saving...' : choice.label}
-                      </button>
-                    ))}
-                    {hasRoster ? (
-                      <button className="choice-button" onClick={() => toggleRoster(game.id)} type="button">
-                        {expanded ? 'Hide Roster' : 'Show Roster'}
-                      </button>
-                    ) : null}
-                  </div>
-
-                  {currentPlayer ? (
-                    <p className="schedule-match-card__helper">
-                      {currentPlayerRostered
-                        ? `${currentPlayer.fullName || 'You'} is on the posted roster for this match.`
-                        : hasRoster
-                          ? `${currentPlayer.fullName || 'You'} is not currently on the posted roster.`
-                          : 'Captains have not posted a roster for this match yet.'}
-                    </p>
-                  ) : null}
-
-                  {expanded && hasRoster ? (
+                  {hasRoster ? (
                     <div className="schedule-match-roster">
                       {rosterPairings.map((pairing) => (
                         <section key={pairing.courtLabel} className="game-roster-pair-card">
@@ -3787,7 +3713,7 @@ export function SchedulePage() {
                               <strong>{pairing.courtLabel}</strong>
                               <span>{pairing.filledSlots} players assigned</span>
                             </div>
-                            <span className="game-roster-pair-card__count">{pairing.filledSlots}/2</span>
+                            <span className="game-roster-pair-card__count">{pairing.filledSlots}/{playersNeeded}</span>
                           </div>
 
                           <div className="game-roster-pair-card__players">
@@ -4099,7 +4025,7 @@ export function ScheduleScoresPage() {
                         }
                         value={form.playersNeeded}
                       >
-                        {[1, 2, 4, 6, 8].map((count) => (
+                        {MATCH_PLAYER_COUNT_OPTIONS.map((count) => (
                           <option key={count} value={count}>
                             {count}
                           </option>
@@ -4208,7 +4134,7 @@ export function ScheduleScoresPage() {
                             </span>
                             <div className="schedule-match-card__stats">
                               <span>Status: {game.matchStatus === 'completed' ? 'Completed' : 'Scheduled'}</span>
-                              <span>{game.playersNeeded ?? 8} Players</span>
+                              <span>{normalizeMatchPlayerCount(game.playersNeeded)} Players</span>
                               <span>
                                 {hasScore
                                   ? `${teamName || 'Team'} ${game.teamScore ?? '-'} · Opponent ${game.opponentScore ?? '-'}`
@@ -4571,7 +4497,7 @@ export function RosterMgmtPage() {
   }, [clubSlug, teamSlug, todayDateKey, user?.uid]);
 
   const activeGame = games.find((game) => game.id === selectedGameId) ?? games[0] ?? null;
-  const playersNeeded = activeGame?.playersNeeded ?? 8;
+  const playersNeeded = normalizeMatchPlayerCount(activeGame?.playersNeeded);
   const availablePlayers = useMemo(
     () => activePlayers.filter((player) => activeGame?.attendance?.[player.id] === 'in'),
     [activeGame, activePlayers],
@@ -4591,7 +4517,9 @@ export function RosterMgmtPage() {
 
     setPairingDrafts((current) => {
       const draft = current[activeGame.id] ?? createPairingDraft(activeGame);
-      const rosterPlayerIds = draft.rosterPlayerIds.filter((playerId) => activePlayerIds.has(playerId));
+      const rosterPlayerIds = draft.rosterPlayerIds
+        .filter((playerId) => activePlayerIds.has(playerId))
+        .slice(0, playersNeeded);
       const pairings = normalizeDraftPairingsForMatch(draft.pairings, rosterPlayerIds, playersNeeded);
 
       if (
@@ -4664,7 +4592,7 @@ export function RosterMgmtPage() {
         ? draft.rosterPlayerIds.filter((id) => id !== playerId)
         : [...draft.rosterPlayerIds, playerId];
       const selectedIds = new Set(rosterPlayerIds);
-      let pairings = normalizeDraftPairings(draft.pairings, rosterPlayerIds).map((pairing) => ({
+      let pairings = normalizeDraftPairingsForMatch(draft.pairings, rosterPlayerIds, playersNeeded).map((pairing) => ({
         ...pairing,
         playerIds: pairing.playerIds.filter((id) => selectedIds.has(id)),
       }));
@@ -4676,7 +4604,7 @@ export function RosterMgmtPage() {
       setError('');
       return {
         ...draft,
-        pairings: normalizeDraftPairings(pairings, rosterPlayerIds),
+        pairings: normalizeDraftPairingsForMatch(pairings, rosterPlayerIds, playersNeeded),
         rosterPlayerIds,
       };
     });
@@ -4696,14 +4624,14 @@ export function RosterMgmtPage() {
 
       const nextPlayerIds = [...(nextPairings[pairIndex]?.playerIds ?? [])];
 
-      while (nextPlayerIds.length < 2) {
+      while (nextPlayerIds.length < playersNeeded) {
         nextPlayerIds.push('');
       }
 
       nextPlayerIds[slotIndex] = playerId;
       nextPairings[pairIndex] = {
         ...nextPairings[pairIndex],
-        playerIds: nextPlayerIds.filter(Boolean).slice(0, 2),
+        playerIds: nextPlayerIds.filter(Boolean).slice(0, playersNeeded),
       };
       const pairedPlayerIds = new Set(nextPairings.flatMap((pairing) => pairing.playerIds ?? []).filter(Boolean));
       let rosterPlayerIds = draft.rosterPlayerIds.filter((id) => activePlayerIds.has(id));
@@ -4784,7 +4712,7 @@ export function RosterMgmtPage() {
               const selectedCount =
                 pairingDrafts[game.id]?.rosterPlayerIds.length ?? game.rosterPlayerIds?.length ?? 0;
               const availableCount = Object.values(game.attendance ?? {}).filter((status) => status === 'in').length;
-              const matchPlayersNeeded = game.playersNeeded ?? 8;
+              const matchPlayersNeeded = normalizeMatchPlayerCount(game.playersNeeded);
 
               return (
                 <button
@@ -4890,7 +4818,7 @@ export function RosterMgmtPage() {
               {visiblePairings.map((pairing, pairIndex) => {
                 const slotValues = pairing.playerIds.length > 0 ? [...pairing.playerIds] : ['', ''];
 
-                while (slotValues.length < 2) {
+                while (slotValues.length < playersNeeded) {
                   slotValues.push('');
                 }
 
@@ -4899,7 +4827,7 @@ export function RosterMgmtPage() {
                     <h2>{pairing.courtLabel}</h2>
                     {canManage ? (
                       <div className="pairing-card__slots">
-                        {[0, 1].map((slotIndex) => {
+                        {Array.from({ length: playersNeeded }, (_, slotIndex) => slotIndex).map((slotIndex) => {
                           const currentValue = slotValues[slotIndex] ?? '';
                           const selectedElsewhere = new Set(
                             visiblePairings
@@ -5344,7 +5272,7 @@ function getReactionSummary(reactions = []) {
 }
 
 function NewsFeed({
-  canManage = false,
+  canModerate = false,
   commentDrafts = {},
   commentEditDraft = '',
   currentUser,
@@ -5374,7 +5302,7 @@ function NewsFeed({
   savingPostId = '',
 }) {
   if (!newsPosts.length) {
-    return <p>No team posts yet. Share the first photo, update, or team note.</p>;
+    return <p>No news posts yet. Share the first photo, update, or team note.</p>;
   }
 
   return (
@@ -5383,8 +5311,8 @@ function NewsFeed({
         const currentUserReaction = post.reactions?.find((reaction) => reaction.uid === currentUser?.uid);
         const currentReactionMeta = NEWS_REACTIONS.find((reaction) => reaction.id === currentUserReaction?.type);
         const reactionSummary = getReactionSummary(post.reactions);
-        const canDeletePost = canManage || post.authorUid === currentUser?.uid;
-        const canEditPost = post.authorUid === currentUser?.uid;
+        const canDeletePost = canModerate || post.authorUid === currentUser?.uid;
+        const canEditPost = canModerate || post.authorUid === currentUser?.uid;
         const isEditingPost = editingPostId === post.id;
 
         return (
@@ -5400,7 +5328,10 @@ function NewsFeed({
                 </div>
                 <div>
                   <strong>{post.authorName || 'Teammate'}</strong>
-                  <span>{formatNewsPostDate(post)}</span>
+                  <span>
+                    {post.teamName ? `${post.teamName} · ` : ''}
+                    {formatNewsPostDate(post)}
+                  </span>
                 </div>
               </div>
               {canDeletePost || canEditPost ? (
@@ -5527,7 +5458,7 @@ function NewsFeed({
 
             <div className="news-feed-comments">
               {post.comments?.map((comment) => {
-                const canDeleteComment = canManage || comment.authorUid === currentUser?.uid;
+                const canDeleteComment = canModerate || comment.authorUid === currentUser?.uid;
                 const canEditComment = comment.authorUid === currentUser?.uid;
                 const isEditingComment = editingCommentId === comment.id;
 
@@ -5722,7 +5653,7 @@ function NewsroomAdminList({
   );
 }
 
-function NewsFeedIntro({ eyebrow = 'Team updates', title, copy }) {
+function NewsFeedIntro({ eyebrow = 'Club updates', title, copy }) {
   return (
     <div className="news-feed-intro">
       <div className="news-feed-intro__content">
@@ -5739,7 +5670,6 @@ export function NewsPage() {
   const { user } = useAuth();
   const imageInputId = `news-image-${clubSlug}-${teamSlug}`;
   const [newsPosts, setNewsPosts] = useState([]);
-  const [teamName, setTeamName] = useState('');
   const [membership, setMembership] = useState(null);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [form, setForm] = useState({ body: '', imageFile: null, imagePreviewUrl: '' });
@@ -5756,28 +5686,62 @@ export function NewsPage() {
   const [deletingPostId, setDeletingPostId] = useState('');
   const [deletingCommentId, setDeletingCommentId] = useState('');
   const [reactingPostId, setReactingPostId] = useState('');
+  const [isAppAdmin, setIsAppAdmin] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
-  const canManage = canManageRole(membership?.role);
-
-  async function loadNewsData() {
-    const [posts, membershipData, teamData] = await Promise.all([
-      listNewsPosts(clubSlug, teamSlug),
+  async function loadNewsAccess() {
+    const [membershipData, platformAdmin] = await Promise.all([
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
-      getTeam(clubSlug, teamSlug),
+      user?.uid ? isPlatformAdmin(user.uid, user.email) : Promise.resolve(false),
     ]);
+    if (user?.uid && membershipData) {
+      await setLastActiveTeam({ clubSlug, teamSlug, uid: user.uid });
+    }
 
-    setNewsPosts(posts);
     setMembership(membershipData);
-    setTeamName(teamData?.name ?? '');
+    setIsAppAdmin(platformAdmin);
   }
 
   useEffect(() => {
-    loadNewsData().catch((loadError) => {
-      setError(loadError.message ?? 'Unable to load team news yet.');
+    let isMounted = true;
+    let unsubscribe = null;
+
+    async function connectNewsFeed() {
+      await loadNewsAccess();
+
+      if (!isMounted) {
+        return;
+      }
+
+      unsubscribe = subscribeNewsPosts(
+        clubSlug,
+        teamSlug,
+        (posts) => {
+          if (isMounted) {
+            setNewsPosts(posts);
+          }
+        },
+        (subscribeError) => {
+          if (isMounted) {
+            setError(subscribeError.message ?? 'Unable to listen for community feed updates.');
+          }
+        },
+      );
+    }
+
+    setError('');
+    connectNewsFeed().catch((loadError) => {
+      if (isMounted) {
+        setError(loadError.message ?? 'Unable to load community feed yet.');
+      }
     });
-  }, [clubSlug, teamSlug, user?.uid]);
+
+    return () => {
+      isMounted = false;
+      unsubscribe?.();
+    };
+  }, [clubSlug, teamSlug, user?.email, user?.uid]);
 
   useEffect(() => (
     () => {
@@ -5809,7 +5773,6 @@ export function NewsPage() {
       setForm({ body: '', imageFile: null, imagePreviewUrl: '' });
       setIsComposerOpen(false);
       setMessage('Post shared.');
-      await loadNewsData();
     } catch (submitError) {
       setError(submitError.message ?? 'Unable to share that post.');
     } finally {
@@ -5825,7 +5788,6 @@ export function NewsPage() {
     try {
       await deleteNewsPost({ clubSlug, post, teamSlug });
       setMessage('Post deleted.');
-      await loadNewsData();
     } catch (deleteError) {
       setError(deleteError.message ?? 'Unable to delete that post.');
     } finally {
@@ -5910,7 +5872,6 @@ export function NewsPage() {
       setPostEditImageFile(null);
       setPostEditImagePreviewUrl('');
       setMessage('Post updated.');
-      await loadNewsData();
     } catch (editError) {
       setError(editError.message ?? 'Unable to update that post.');
     } finally {
@@ -5932,7 +5893,6 @@ export function NewsPage() {
         user,
       });
       setCommentDrafts((current) => ({ ...current, [post.id]: '' }));
-      await loadNewsData();
     } catch (commentError) {
       setError(commentError.message ?? 'Unable to post that comment.');
     }
@@ -5950,7 +5910,6 @@ export function NewsPage() {
         postId: post.id,
         teamSlug,
       });
-      await loadNewsData();
     } catch (deleteError) {
       setError(deleteError.message ?? 'Unable to delete that comment.');
     } finally {
@@ -5994,7 +5953,6 @@ export function NewsPage() {
       });
       setEditingCommentId('');
       setCommentEditDraft('');
-      await loadNewsData();
     } catch (editError) {
       setError(editError.message ?? 'Unable to update that comment.');
     } finally {
@@ -6014,7 +5972,6 @@ export function NewsPage() {
         type: reactionType,
         user,
       });
-      await loadNewsData();
     } catch (reactionError) {
       setError(reactionError.message ?? 'Unable to update that reaction.');
     } finally {
@@ -6077,8 +6034,8 @@ export function NewsPage() {
     <div className="page-grid news-page">
       <section className="card">
         <NewsFeedIntro
-          copy={`Share photos, team happenings, drills, practices, and match moments with ${teamName || 'the team'}.`}
-          title="News Feed"
+          copy="Share photos, team happenings, drills, practice notes, match moments, shout-outs, and pickleball community updates with everyone in the club."
+          title="Community Feed"
         />
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -6087,10 +6044,10 @@ export function NewsPage() {
         {isComposerOpen ? (
           <form className="news-composer" onSubmit={handleSubmit}>
             <label className="field">
-              <span>What&apos;s new with the team?</span>
+              <span>What&apos;s happening in the pickleball community?</span>
               <textarea
                 onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))}
-                placeholder="Share a photo, practice note, drill idea, match recap, or team update..."
+                placeholder="Share a photo, practice note, drill idea, match recap, shout-out, or community update..."
                 rows={4}
                 value={form.body}
               />
@@ -6135,7 +6092,7 @@ export function NewsPage() {
               onClick={() => setIsComposerOpen(true)}
               type="button"
             >
-              What&apos;s new with the team?
+              What&apos;s happening in the pickleball community?
             </button>
             <button className="button" onClick={() => setIsComposerOpen(true)} type="button">
               Create Post
@@ -6144,7 +6101,7 @@ export function NewsPage() {
         )}
 
         <NewsFeed
-          canManage={canManage}
+          canModerate={isAppAdmin}
           commentDrafts={commentDrafts}
           commentEditDraft={commentEditDraft}
           currentUser={user}
@@ -6196,18 +6153,22 @@ export function NewsroomPage() {
 
   const canManage = canManageRole(membership?.role);
   const editingPost = newsPosts.find((post) => post.id === editingPostId) ?? null;
+  const manageableNewsPosts = useMemo(
+    () => newsPosts.filter((post) => !post.teamSlug || post.teamSlug === teamSlug),
+    [newsPosts, teamSlug],
+  );
   const filterCounts = useMemo(
     () => ({
-      all: newsPosts.length,
-      hasImage: newsPosts.filter((post) => Boolean(post.imageUrl)).length,
-      hasLink: newsPosts.filter((post) => Boolean(post.linkUrl)).length,
+      all: manageableNewsPosts.length,
+      hasImage: manageableNewsPosts.filter((post) => Boolean(post.imageUrl)).length,
+      hasLink: manageableNewsPosts.filter((post) => Boolean(post.linkUrl)).length,
     }),
-    [newsPosts],
+    [manageableNewsPosts],
   );
   const filteredPosts = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
 
-    return newsPosts.filter((post) => {
+    return manageableNewsPosts.filter((post) => {
       if (filterMode === 'has-image' && !post.imageUrl) {
         return false;
       }
@@ -6226,13 +6187,14 @@ export function NewsroomPage() {
           .includes(normalizedSearch),
       );
     });
-  }, [filterMode, newsPosts, searchTerm]);
+  }, [filterMode, manageableNewsPosts, searchTerm]);
 
   async function loadNewsData() {
-    const [posts, membershipData] = await Promise.all([
-      listNewsPosts(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
-    ]);
+    const membershipData = user?.uid ? await getMembership(clubSlug, teamSlug, user.uid, user) : null;
+    if (user?.uid && membershipData) {
+      await setLastActiveTeam({ clubSlug, teamSlug, uid: user.uid });
+    }
+    const posts = await listNewsPosts(clubSlug, teamSlug);
 
     setNewsPosts(posts);
     setMembership(membershipData);
@@ -6414,7 +6376,8 @@ export function NewsroomPage() {
             </p>
           </div>
           <span className="newsroom-list__count">
-            {filteredPosts.length} shown{filteredPosts.length !== newsPosts.length ? ` of ${newsPosts.length}` : ''}
+            {filteredPosts.length} shown
+            {filteredPosts.length !== manageableNewsPosts.length ? ` of ${manageableNewsPosts.length}` : ''}
           </span>
         </div>
 
@@ -6432,7 +6395,7 @@ export function NewsroomPage() {
             selectedPostId={editingPostId}
           />
         ) : (
-          <NewsFeed newsPosts={newsPosts} />
+          <NewsFeed currentTeamSlug={teamSlug} newsPosts={newsPosts} />
         )}
       </section>
 
@@ -6563,7 +6526,8 @@ function createChallengeFormFromChallenge(challenge) {
     minute: challenge.dateTbd === true ? '00' : match?.[2] ?? '00',
     notes: challenge.notes ?? '',
     period: challenge.dateTbd === true ? 'AM' : match?.[3]?.toUpperCase() ?? 'AM',
-    playersNeeded: challenge.playersNeeded ?? 8,
+    playersNeeded: normalizeMatchPlayerCount(challenge.playersNeeded),
+    createdByPlayerId: challenge.createdByPlayerId ?? '',
     targetTeamKey:
       challenge.visibility === 'targeted'
         ? `${challenge.targetTeamClubSlug}:${challenge.targetTeamSlug}`
@@ -6595,6 +6559,7 @@ export function ChallengesPage() {
   const [team, setTeam] = useState(null);
   const [membership, setMembership] = useState(null);
   const [eligibleTeams, setEligibleTeams] = useState([]);
+  const [challengePlayers, setChallengePlayers] = useState([]);
   const [clubChallenges, setClubChallenges] = useState([]);
   const [teamChallenges, setTeamChallenges] = useState([]);
   const [form, setForm] = useState(createEmptyChallengeForm());
@@ -6608,13 +6573,19 @@ export function ChallengesPage() {
   const [appliedChallengeTargetKey, setAppliedChallengeTargetKey] = useState('');
   const [challengeFormOpen, setChallengeFormOpen] = useState(false);
   const [incomingChallengeIndex, setIncomingChallengeIndex] = useState(0);
+  const [acceptPlayerSelections, setAcceptPlayerSelections] = useState({});
 
   const canManage = canManageRole(membership?.role);
   const challengeTargetTeamKey = location.state?.challengeTargetTeamKey ?? '';
   const challengeTargetTeamName = location.state?.challengeTargetTeamName ?? '';
   const challengeClubSlug =
     team?.affiliationStatus === 'approved' && team?.approvedClubSlug ? team.approvedClubSlug : '';
-  const challengeSubmitDisabled = saving || (form.visibility === 'targeted' && !form.targetTeamKey);
+  const activeChallengePlayers = challengePlayers.filter((player) => player.active !== false);
+  const challengeSubmitDisabled =
+    saving ||
+    (form.visibility === 'targeted' && !form.targetTeamKey) ||
+    (normalizeMatchPlayerCount(form.playersNeeded) === 1 && !form.createdByPlayerId) ||
+    (normalizeMatchPlayerCount(form.playersNeeded) === 2 && activeChallengePlayers.length < 2);
   const selectedTargetTeam = eligibleTeams.find(
     (eligibleTeam) => `${eligibleTeam.clubSlug}:${eligibleTeam.teamSlug}` === form.targetTeamKey,
   );
@@ -6636,15 +6607,17 @@ export function ChallengesPage() {
 
     if (!approvedClubSlug) {
       setEligibleTeams([]);
+      setChallengePlayers([]);
       setClubChallenges([]);
       setTeamChallenges([]);
       return;
     }
 
-    const [approvedTeams, openChallenges, relevantChallenges] = await Promise.all([
+    const [approvedTeams, openChallenges, relevantChallenges, playersData] = await Promise.all([
       listApprovedClubTeams(approvedClubSlug).catch(() => []),
       listClubChallenges(approvedClubSlug).catch(() => []),
       listTeamChallenges({ challengeClubSlug: approvedClubSlug, clubSlug, teamSlug }).catch(() => []),
+      listPlayers(clubSlug, teamSlug).catch(() => []),
     ]);
 
     setEligibleTeams(
@@ -6656,6 +6629,7 @@ export function ChallengesPage() {
       ),
     );
     setTeamChallenges(relevantChallenges);
+    setChallengePlayers(playersData);
   }
 
   useEffect(() => {
@@ -6678,6 +6652,23 @@ export function ChallengesPage() {
       ignore = true;
     };
   }, [clubSlug, teamSlug, user?.uid]);
+
+  useEffect(() => {
+    if (!challengeClubSlug) {
+      return undefined;
+    }
+
+    return subscribeChallengeHub(
+      { challengeClubSlug, clubSlug, teamSlug },
+      ({ clubChallenges: nextClubChallenges, teamChallenges: nextTeamChallenges }) => {
+        setClubChallenges(nextClubChallenges);
+        setTeamChallenges(nextTeamChallenges);
+      },
+      (subscriptionError) => {
+        setError(subscriptionError.message ?? 'Unable to keep club challenges updated.');
+      },
+    );
+  }, [challengeClubSlug, clubSlug, teamSlug]);
 
   useEffect(() => {
     if (!challengeTargetTeamKey || appliedChallengeTargetKey === challengeTargetTeamKey || loading || !canManage) {
@@ -6721,6 +6712,7 @@ export function ChallengesPage() {
     try {
       const challengePayload = {
         clubSlug,
+        createdByPlayerId: normalizeMatchPlayerCount(form.playersNeeded) === 1 ? form.createdByPlayerId : '',
         dateTbd: form.dateTbd,
         isoDate: form.isoDate,
         location: form.location,
@@ -6789,7 +6781,11 @@ export function ChallengesPage() {
     setMessage('');
 
     try {
+      const acceptedByPlayerId =
+        normalizeMatchPlayerCount(challenge.playersNeeded) === 1 ? acceptPlayerSelections[challenge.id] ?? '' : '';
+
       await acceptChallenge({
+        acceptedByPlayerId,
         challengeClubSlug: challenge.challengeClubSlug,
         challengeId: challenge.id,
         clubSlug,
@@ -6850,6 +6846,65 @@ export function ChallengesPage() {
     }
   }
 
+  function getChallengePlayerName(player) {
+    return player.fullName || player.displayName || player.email || 'Player';
+  }
+
+  function renderAcceptSinglesSelector(challenge) {
+    if (normalizeMatchPlayerCount(challenge.playersNeeded) !== 1) {
+      return null;
+    }
+
+    return (
+      <label className="field challenge-singles-select">
+        <span>Who will play singles?</span>
+        <select
+          disabled={updatingChallengeId === challenge.id}
+          onChange={(event) =>
+            setAcceptPlayerSelections((current) => ({
+              ...current,
+              [challenge.id]: event.target.value,
+            }))
+          }
+          value={acceptPlayerSelections[challenge.id] ?? ''}
+        >
+          <option value="">Choose player</option>
+          {activeChallengePlayers.map((player) => (
+            <option key={player.id} value={player.id}>
+              {getChallengePlayerName(player)}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  function getAcceptDisabledReason(challenge) {
+    if (updatingChallengeId === challenge.id) {
+      return '';
+    }
+
+    if (normalizeMatchPlayerCount(challenge.playersNeeded) === 1 && !acceptPlayerSelections[challenge.id]) {
+      return 'Choose who will play singles before accepting this challenge.';
+    }
+
+    if (normalizeMatchPlayerCount(challenge.playersNeeded) === 2 && activeChallengePlayers.length < 2) {
+      return 'This team needs two active players before accepting a doubles challenge.';
+    }
+
+    return '';
+  }
+
+  function isAcceptDisabled(challenge) {
+    return updatingChallengeId === challenge.id || Boolean(getAcceptDisabledReason(challenge));
+  }
+
+  function renderAcceptRequirementNotice(challenge) {
+    const reason = getAcceptDisabledReason(challenge);
+
+    return reason ? <div className="notice notice--info challenge-accept-requirement">{reason}</div> : null;
+  }
+
   function renderChallengeCard(challenge, actions = null) {
     const sourceTeam =
       challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug
@@ -6890,12 +6945,20 @@ export function ChallengesPage() {
           <div className="challenge-card__details">
             <span>{formatChallengeDate(challenge)}</span>
             <span>{formatChallengeTime(challenge)}</span>
-            <span>{challenge.playersNeeded ?? 2} Players</span>
+            <span>{normalizeMatchPlayerCount(challenge.playersNeeded)} Players</span>
             <span>{challenge.location || 'Location TBD'}</span>
             {challenge.status === 'accepted' && scheduleGameId ? (
               <span>Scheduled match created</span>
             ) : null}
           </div>
+          {normalizeMatchPlayerCount(challenge.playersNeeded) === 1 && challenge.createdByPlayerName ? (
+            <div className="challenge-card__details">
+              <span>{challenge.createdByTeamName || challenge.createdByTeamSlug}: {challenge.createdByPlayerName}</span>
+              {challenge.acceptedByPlayerName ? (
+                <span>{challenge.acceptedByTeamName || challenge.acceptedByTeamSlug}: {challenge.acceptedByPlayerName}</span>
+              ) : null}
+            </div>
+          ) : null}
           {challenge.notes ? <p className="challenge-card__notes">“{challenge.notes}”</p> : null}
           {actions || (challenge.status === 'accepted' && scheduleGameId) ? (
             <div className="challenge-card__actions">
@@ -7016,7 +7079,13 @@ export function ChallengesPage() {
             <p>Everything you need to compete and win.</p>
           </div>
           {canManage ? (
-            <button className="button competition-hub-header__action" onClick={handleOpenChallengeForm} type="button">
+            <button
+              className="button competition-hub-header__action"
+              disabled={!challengeClubSlug}
+              onClick={handleOpenChallengeForm}
+              title={!challengeClubSlug ? 'Club affiliation approval is required before sending challenges.' : 'Challenge a team'}
+              type="button"
+            >
               <img alt="" aria-hidden="true" src={ACTIVITY_ICON_BY_TYPE.challenge_created} />
               <span>Challenge a Team</span>
             </button>
@@ -7031,7 +7100,7 @@ export function ChallengesPage() {
             <p>Loading club challenges...</p>
           </div>
         ) : !challengeClubSlug ? (
-          <div className="notice notice--info">
+          <div className="notice notice--info competition-hub-approval-notice">
             Club challenges are available after this team is approved for a club affiliation.
           </div>
         ) : (
@@ -7054,10 +7123,12 @@ export function ChallengesPage() {
                   <img alt={`${featuredTeamName} logo`} src={featuredTeamLogo} />
                 </div>
                 <div className="competition-challenge-hero__actions">
+                  {renderAcceptSinglesSelector(featuredIncomingChallenge)}
                   <button
                     className="button"
-                    disabled={updatingChallengeId === featuredIncomingChallenge.id}
+                    disabled={isAcceptDisabled(featuredIncomingChallenge)}
                     onClick={() => handleAcceptChallenge(featuredIncomingChallenge)}
+                    title={getAcceptDisabledReason(featuredIncomingChallenge)}
                     type="button"
                   >
                     {updatingChallengeId === featuredIncomingChallenge.id ? 'Accepting...' : 'Accept Challenge'}
@@ -7070,6 +7141,7 @@ export function ChallengesPage() {
                   >
                     Decline Challenge
                   </button>
+                  {renderAcceptRequirementNotice(featuredIncomingChallenge)}
                 </div>
               </section>
             ) : (
@@ -7253,11 +7325,15 @@ export function ChallengesPage() {
                         <span>Players needed</span>
                         <select
                           onChange={(event) =>
-                            setForm((current) => ({ ...current, playersNeeded: Number(event.target.value) }))
+                            setForm((current) => ({
+                              ...current,
+                              createdByPlayerId: Number(event.target.value) === 1 ? current.createdByPlayerId : '',
+                              playersNeeded: Number(event.target.value),
+                            }))
                           }
                           value={form.playersNeeded}
                         >
-                          {[1, 2, 4, 6, 8].map((count) => (
+                          {MATCH_PLAYER_COUNT_OPTIONS.map((count) => (
                             <option key={count} value={count}>
                               {count}
                             </option>
@@ -7265,6 +7341,28 @@ export function ChallengesPage() {
                         </select>
                       </label>
                     </div>
+                    {normalizeMatchPlayerCount(form.playersNeeded) === 1 ? (
+                      <label className="field challenge-form__singles-player">
+                        <span>Who will play singles?</span>
+                        <select
+                          onChange={(event) =>
+                            setForm((current) => ({ ...current, createdByPlayerId: event.target.value }))
+                          }
+                          value={form.createdByPlayerId}
+                        >
+                          <option value="">Choose player</option>
+                          {activeChallengePlayers.map((player) => (
+                            <option key={player.id} value={player.id}>
+                              {getChallengePlayerName(player)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : activeChallengePlayers.length < 2 ? (
+                      <div className="notice notice--info challenge-form__hint">
+                        Your team needs two active members before sending a doubles challenge.
+                      </div>
+                    ) : null}
                     <label className="field challenge-form__location">
                       <span>Court(s)</span>
                       <input
@@ -7375,7 +7473,7 @@ export function ChallengesPage() {
                       <span>{getChallengeStatusLabel(selectedIncomingChallenge)}</span>
                       <span>{formatChallengeDate(selectedIncomingChallenge)}</span>
                       <span>{formatChallengeTime(selectedIncomingChallenge)}</span>
-                      <span>{selectedIncomingChallenge.playersNeeded ?? 2} Players</span>
+                      <span>{normalizeMatchPlayerCount(selectedIncomingChallenge.playersNeeded)} Players</span>
                     </div>
                     {selectedIncomingChallenge.notes ? (
                       <p className="challenge-inbox-card__note">“{selectedIncomingChallenge.notes}”</p>
@@ -7384,10 +7482,12 @@ export function ChallengesPage() {
                     )}
                     {canManage ? (
                       <div className="challenge-inbox-card__actions">
+                        {renderAcceptSinglesSelector(selectedIncomingChallenge)}
                         <button
                           className="button"
-                          disabled={updatingChallengeId === selectedIncomingChallenge.id}
+                          disabled={isAcceptDisabled(selectedIncomingChallenge)}
                           onClick={() => handleAcceptChallenge(selectedIncomingChallenge)}
+                          title={getAcceptDisabledReason(selectedIncomingChallenge)}
                           type="button"
                         >
                           {updatingChallengeId === selectedIncomingChallenge.id ? 'Accepting...' : 'Accept Challenge'}
@@ -7400,6 +7500,7 @@ export function ChallengesPage() {
                         >
                           Decline Challenge
                         </button>
+                        {renderAcceptRequirementNotice(selectedIncomingChallenge)}
                       </div>
                     ) : null}
                   </div>
@@ -7500,14 +7601,19 @@ export function ChallengesPage() {
                     renderChallengeCard(
                       challenge,
                       canManage ? (
-                        <button
-                          className="button"
-                          disabled={updatingChallengeId === challenge.id}
-                          onClick={() => handleAcceptChallenge(challenge)}
-                          type="button"
-                        >
-                          {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept Challenge'}
-                        </button>
+                        <>
+                          {renderAcceptSinglesSelector(challenge)}
+                          <button
+                            className="button"
+                            disabled={isAcceptDisabled(challenge)}
+                            onClick={() => handleAcceptChallenge(challenge)}
+                            title={getAcceptDisabledReason(challenge)}
+                            type="button"
+                          >
+                            {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept Challenge'}
+                          </button>
+                          {renderAcceptRequirementNotice(challenge)}
+                        </>
                       ) : null,
                     ),
                   )}
@@ -7527,21 +7633,17 @@ export function SettingsPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
   const [team, setTeam] = useState(null);
-  const [clubs, setClubs] = useState([]);
-  const [approvedClubTeams, setApprovedClubTeams] = useState([]);
   const [members, setMembers] = useState([]);
   const [players, setPlayers] = useState([]);
   const [membership, setMembership] = useState(null);
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [rotating, setRotating] = useState(false);
-  const [requestingAffiliation, setRequestingAffiliation] = useState(false);
   const [creatingCrop, setCreatingCrop] = useState(false);
   const [updatingUid, setUpdatingUid] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [form, setForm] = useState(createEmptyTeamSettingsForm());
-  const [requestedClubSlug, setRequestedClubSlug] = useState('');
   const [logoPreviewUrl, setLogoPreviewUrl] = useState('');
   const [cropImageSrc, setCropImageSrc] = useState('');
   const [cropFileName, setCropFileName] = useState('team-logo.webp');
@@ -7551,17 +7653,17 @@ export function SettingsPage() {
 
   const canManage = canManageRole(membership?.role);
   const canManageMembership = isCaptainRole(membership?.role);
-  const clubOptions = clubs.filter((club) => club.slug !== 'independent');
   const playerMap = useMemo(() => new Map(players.map((player) => [player.id, player])), [players]);
   const displayedLogoUrl = logoPreviewUrl || team?.logoUrl || defaultTeamLogo;
   const isTeamArchived = team?.status === 'archived';
   const canManageActiveTeam = canManage && !isTeamArchived;
+  const activeMemberCount = members.filter((member) => member.status !== 'inactive').length;
+  const teamIsFull = activeMemberCount >= TEAM_MEMBER_LIMIT;
+  const canShareInvite = canManageActiveTeam && !teamIsFull;
   const hasUnsavedLogo = Boolean(form.logoFile);
-  const inviteLink = team?.joinCode
+  const inviteLink = team?.joinCode && !teamIsFull
     ? `${window.location.origin}${window.location.pathname}#/join?code=${encodeURIComponent(team.joinCode)}`
     : '';
-  const affiliatedClubName =
-    clubs.find((club) => club.slug === team?.approvedClubSlug)?.name ?? team?.approvedClubSlug ?? '';
 
   function replaceLogoPreview(nextUrl) {
     setLogoPreviewUrl((current) => {
@@ -7583,40 +7685,21 @@ export function SettingsPage() {
   }
 
   async function loadSettingsData() {
-    const [teamData, memberData, playerData, membershipData, clubData] = await Promise.all([
+    const [teamData, membershipData] = await Promise.all([
       getTeam(clubSlug, teamSlug),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
+    ]);
+    const [memberData, playerData] = await Promise.all([
       listTeamMembers(clubSlug, teamSlug),
       listPlayers(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
-      listClubs(),
     ]);
 
     setTeam(teamData);
-    setClubs(clubData);
     setMembers(memberData);
     setPlayers(playerData);
     setMembership(membershipData);
     setForm(createEmptyTeamSettingsForm(teamData ?? {}));
-    setRequestedClubSlug(
-      teamData?.affiliationStatus === 'pending'
-        ? teamData?.requestedClubSlug || ''
-        : teamData?.affiliationStatus === 'approved'
-          ? teamData?.approvedClubSlug || ''
-          : '',
-    );
     replaceLogoPreview('');
-
-    if (teamData?.approvedClubSlug && teamData.affiliationStatus === 'approved') {
-      listApprovedClubTeams(teamData.approvedClubSlug)
-        .then((approvedTeams) => {
-          setApprovedClubTeams(approvedTeams.filter((clubTeam) => clubTeam.teamSlug !== teamSlug));
-        })
-        .catch(() => {
-          setApprovedClubTeams([]);
-        });
-    } else {
-      setApprovedClubTeams([]);
-    }
   }
 
   useEffect(() => {
@@ -7706,6 +7789,12 @@ export function SettingsPage() {
   }
 
   async function handleRotateJoinCode() {
+    if (teamIsFull) {
+      setError('This team already has two members, so new joins are disabled.');
+      setMessage('');
+      return;
+    }
+
     setRotating(true);
     setError('');
     setMessage('');
@@ -7721,29 +7810,13 @@ export function SettingsPage() {
     }
   }
 
-  async function handleRequestClubAffiliation() {
-    setRequestingAffiliation(true);
-    setError('');
-    setMessage('');
-
-    try {
-      await requestClubAffiliation({
-        clubSlug,
-        requestedClubSlug,
-        teamSlug,
-        user,
-      });
-      setMessage('Club affiliation request submitted.');
-      await loadSettingsData();
-      window.dispatchEvent(new Event('team-updated'));
-    } catch (requestError) {
-      setError(requestError.message ?? 'Unable to request club affiliation.');
-    } finally {
-      setRequestingAffiliation(false);
-    }
-  }
-
   async function handleCopyInviteLink() {
+    if (teamIsFull) {
+      setError('This team already has two members, so there is no invite link to copy.');
+      setMessage('');
+      return;
+    }
+
     if (!team?.joinCode) {
       setError('No join code is available yet.');
       setMessage('');
@@ -7837,7 +7910,9 @@ export function SettingsPage() {
               Manage team branding, join code settings, and member roles from one shared admin workspace.
             </p>
           </div>
-          <span className="settings-admin-member-pill">{members.length} Members</span>
+          <span className="settings-admin-member-pill">
+            {activeMemberCount} / {TEAM_MEMBER_LIMIT} Members
+          </span>
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -7848,18 +7923,19 @@ export function SettingsPage() {
             <div className="detail-card settings-admin-join-card">
               <div className="settings-admin-join-copy">
                 <p className="eyebrow">Invite Players</p>
-                <h2>Send this link to teammates</h2>
+                <h2>{teamIsFull ? 'Team is full' : 'Send this link to teammates'}</h2>
                 <p>
-                  Players can use the invite link or enter the join code on the Join Team page. New players will appear
-                  in Manage Players after they join.
+                  {teamIsFull
+                    ? 'This team already has two members, so new joins are disabled.'
+                    : 'Players can use the invite link or enter the join code on the Join Team page. New players will appear in Manage Players after they join.'}
                 </p>
               </div>
               <div className="settings-admin-invite-details">
                 <div className="settings-admin-invite-row">
                   <span>Join code</span>
                   <div className="settings-admin-invite-control">
-                    <strong>{team?.joinCode ?? 'Not available yet'}</strong>
-                    {canManageActiveTeam ? (
+                    <strong>{teamIsFull ? 'Disabled' : team?.joinCode ?? 'Not available yet'}</strong>
+                    {canShareInvite ? (
                       <button
                         className="button button--ghost settings-admin-join-action"
                         disabled={rotating}
@@ -7874,8 +7950,8 @@ export function SettingsPage() {
                 <div className="settings-admin-invite-row">
                   <span>Invite link</span>
                   <div className="settings-admin-invite-control settings-admin-invite-control--link">
-                    <code>{inviteLink || 'Not available yet'}</code>
-                    {canManageActiveTeam ? (
+                    <code>{teamIsFull ? 'Team member limit reached' : inviteLink || 'Not available yet'}</code>
+                    {canShareInvite ? (
                       <button
                         className="button settings-admin-join-action"
                         disabled={!team?.joinCode}
@@ -7973,89 +8049,6 @@ export function SettingsPage() {
             <div className="notice notice--info">
               Captains and co-captains can edit team settings. Your current role is{' '}
               <strong>{membership?.role ?? 'member'}</strong>.
-            </div>
-          )}
-        </section>
-
-        <section className="schedule-admin-card">
-          <div className="schedule-admin-card__header">
-            <div>
-              <p className="eyebrow">Club affiliation</p>
-              <h2>{team?.affiliationStatus === 'approved' ? 'Connected to your club' : 'Affiliate Your Team to a Club'}</h2>
-              <p>
-                {team?.affiliationStatus === 'approved'
-                  ? 'This team is listed with its club and can be found by other club teams.'
-                  : (
-                    <>
-                      If your team is a member of a club within the PKL Universe, select the club and click &quot;Request Club
-                      Affiliation.&quot; If your club is not listed, send an email to{' '}
-                      <a href="mailto:demandgendave@gmail.com?subject=Add%20my%20club%20to%20PKL%20Universe">
-                        demandgendave@gmail.com
-                      </a>{' '}
-                      to have your club added.
-                    </>
-                  )}
-              </p>
-            </div>
-          </div>
-
-          {team?.affiliationStatus === 'approved' ? (
-            <div className="settings-club-status settings-club-status--approved">
-              <div>
-                <span className="status-badge status-badge--active">Approved</span>
-                <h3>{affiliatedClubName || 'Approved club'}</h3>
-                <p>
-                  Your team is visible in this club.{' '}
-                  {approvedClubTeams.length
-                    ? `${approvedClubTeams.length} other team${approvedClubTeams.length === 1 ? '' : 's'} can be challenged.`
-                    : 'No other approved teams are in this club yet.'}
-                </p>
-              </div>
-            </div>
-          ) : canManageActiveTeam ? (
-            <div className="schedule-admin-form settings-admin-form">
-              <label className="field">
-                <span>Choose your club</span>
-                <select
-                  disabled={team?.affiliationStatus === 'pending'}
-                  onChange={(event) => setRequestedClubSlug(event.target.value)}
-                  value={requestedClubSlug}
-                >
-                  <option value="">Select your club</option>
-                  {!clubOptions.length ? <option value="">No clubs available yet</option> : null}
-                  {clubOptions.map((club) => (
-                    <option key={club.slug} value={club.slug}>
-                      {club.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                className="button"
-                disabled={
-                  requestingAffiliation ||
-                  !requestedClubSlug ||
-                  team?.affiliationStatus === 'pending' ||
-                  team?.approvedClubSlug === requestedClubSlug
-                }
-                onClick={handleRequestClubAffiliation}
-                type="button"
-              >
-                {requestingAffiliation ? 'Sending request...' : 'Request Club Affiliation'}
-              </button>
-              {team?.affiliationStatus === 'pending' ? (
-                <div className="notice notice--info">
-                  Request sent. A PKL Universe admin or club admin will review it.
-                </div>
-              ) : null}
-            </div>
-          ) : isTeamArchived ? (
-            <div className="notice notice--info">
-              Archived teams cannot request or change club affiliation.
-            </div>
-          ) : (
-            <div className="notice notice--info">
-              Captains and co-captains can request club affiliation for this team.
             </div>
           )}
         </section>
@@ -8283,6 +8276,8 @@ export function ClubAffiliationAdminPage() {
   const [clubManagersBySlug, setClubManagersBySlug] = useState({});
   const [clubManagerEmailDrafts, setClubManagerEmailDrafts] = useState({});
   const [updatingClubManagerKey, setUpdatingClubManagerKey] = useState('');
+  const [resetTestDataConfirm, setResetTestDataConfirm] = useState('');
+  const [resettingFirestoreTestData, setResettingFirestoreTestData] = useState(false);
 
   async function loadAdminData() {
     if (authLoading) {
@@ -8570,6 +8565,9 @@ export function ClubAffiliationAdminPage() {
   function openAdminSection(section) {
     setAdminSection(section);
     setAdminMenuOpen(false);
+    setResetTestDataConfirm('');
+    setError('');
+    setMessage('');
 
     if (section === 'activity') {
       navigate('/admin/activity');
@@ -8577,6 +8575,28 @@ export function ClubAffiliationAdminPage() {
       navigate('/admin/events');
     } else if (location.pathname === '/admin/activity' || location.pathname === '/admin/events') {
       navigate('/admin');
+    }
+  }
+
+  async function handleResetFirestoreTestData() {
+    if (resetTestDataConfirm !== RESET_FIRESTORE_TEST_DATA_PHRASE) {
+      setError(`Type the phrase exactly: ${RESET_FIRESTORE_TEST_DATA_PHRASE}`);
+      return;
+    }
+
+    setResettingFirestoreTestData(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await resetFirestoreTestData({ user });
+      setMessage('Firestore test data was reset. Clubs and accounts were kept.');
+      setResetTestDataConfirm('');
+      await loadAdminData();
+    } catch (resetErr) {
+      setError(resetErr.message ?? 'Unable to reset test data.');
+    } finally {
+      setResettingFirestoreTestData(false);
     }
   }
 
@@ -9148,6 +9168,13 @@ export function ClubAffiliationAdminPage() {
             >
               Challenges
             </button>
+            <button
+              className={`nav-link admin-nav-button ${adminSection === 'testing' ? 'nav-link--active' : ''}`}
+              onClick={() => openAdminSection('testing')}
+              type="button"
+            >
+              Testing
+            </button>
           </div>
         </nav>
         <div className="sidebar__footer-actions">
@@ -9176,7 +9203,9 @@ export function ClubAffiliationAdminPage() {
                   ? 'Activity'
                   : adminSection === 'events'
                     ? 'Events'
-                    : 'Challenges'}
+                    : adminSection === 'testing'
+                      ? 'Testing'
+                      : 'Challenges'}
         </h1>
         <p>
           {adminSection === 'teams'
@@ -9189,7 +9218,9 @@ export function ClubAffiliationAdminPage() {
                   ? 'Monitor recent platform activity across clubs, teams, challenges, matches, and events.'
                   : adminSection === 'events'
                     ? 'Create and manage club event listings from the admin toolset.'
-                    : 'Review and clean up challenge records.'}
+                    : adminSection === 'testing'
+                      ? 'Dangerous shortcuts for staging and local QA. Do not use in production with real members.'
+                      : 'Review and clean up challenge records.'}
         </p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
@@ -9887,6 +9918,58 @@ export function ClubAffiliationAdminPage() {
             ) : (
               <div className="notice notice--info">No activity matches those filters yet.</div>
             )}
+          </section>
+        ) : adminSection === 'testing' ? (
+          <section className="schedule-admin-card">
+            <div className="schedule-admin-card__header">
+              <div>
+                <p className="eyebrow">Firestore</p>
+                <h2>Reset test data</h2>
+                <p>
+                  Removes teams (and their players, games, and team-scoped news), club news, challenges, affiliation
+                  requests, events, activity logs, and admin notifications across every club—including the independent area.
+                  Club documents, platform admins, club approvers, and user profiles are left in place. Orphaned
+                  membership summary docs are removed when teams are deleted; other storage files may remain until you
+                  clear Firebase Storage manually.
+                </p>
+              </div>
+            </div>
+
+            <div className="notice notice--error">
+              <p>
+                <strong>This cannot be undone.</strong> Deploy the latest <code>firestore.rules</code> so platform admins
+                can delete club events during a reset.
+              </p>
+            </div>
+
+            <label className="field">
+              <span>
+                Type <strong>{RESET_FIRESTORE_TEST_DATA_PHRASE}</strong> to confirm
+              </span>
+              <input
+                autoComplete="off"
+                disabled={resettingFirestoreTestData || loading}
+                onChange={(event) => setResetTestDataConfirm(event.target.value)}
+                spellCheck={false}
+                type="text"
+                value={resetTestDataConfirm}
+              />
+            </label>
+
+            <div className="settings-admin-form__actions">
+              <button
+                className="button button--danger"
+                disabled={
+                  resettingFirestoreTestData || loading || resetTestDataConfirm !== RESET_FIRESTORE_TEST_DATA_PHRASE
+                }
+                onClick={() => {
+                  handleResetFirestoreTestData();
+                }}
+                type="button"
+              >
+                {resettingFirestoreTestData ? 'Resetting Firestore…' : 'Reset all test data'}
+              </button>
+            </div>
           </section>
         ) : (
           <section className="schedule-admin-card">

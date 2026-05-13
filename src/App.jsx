@@ -14,7 +14,6 @@ import OnboardingPage from './pages/OnboardingPage';
 import TeamChooserPage from './pages/TeamChooserPage';
 import TeamDirectoryPage from './pages/TeamDirectoryPage';
 import {
-  AvailabilityPage,
   ActivityPage,
   ChallengesPage,
   ClubAffiliationAdminPage,
@@ -22,12 +21,9 @@ import {
   ClubEventsPage,
   ClubEventsStandalonePage,
   ClubTeamsPage,
-  GameRostersPage,
   HelpFeedbackPage,
   NewsPage,
-  NewsroomPage,
   ProfilePage,
-  RosterMgmtPage,
   RosterPage,
   SchedulePage,
   SettingsPage,
@@ -146,13 +142,8 @@ export default function App() {
           <Route element={<ActivityPage />} path="activity" />
           <Route element={<StandingsPage />} path="standings" />
           <Route element={<StandingsPage />} path="team-standing" />
-          <Route element={<GameRostersPage />} path="pairings" />
-          <Route element={<GameRostersPage />} path="game-rosters" />
-          <Route element={<RosterMgmtPage />} path="roster-mgmt" />
-          <Route element={<AvailabilityPage />} path="availability" />
           <Route element={<HelpFeedbackPage />} path="help" />
           <Route element={<NewsPage />} path="news" />
-          <Route element={<NewsroomPage />} path="newsroom" />
           <Route element={<SettingsPage />} path="settings" />
         </Route>
 

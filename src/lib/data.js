@@ -7,8 +7,10 @@ import {
   getDoc,
   getDocs,
   limit as limitDocs,
+  onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -25,9 +27,24 @@ const INDEPENDENT_CLUB = {
   slug: 'independent',
 };
 
-const RESERVED_CLUBS = [INDEPENDENT_CLUB];
+const BLACKHAWK_CLUB = {
+  id: 'blackhawk-country-club',
+  name: 'Blackhawk Country Club',
+  slug: 'blackhawk-country-club',
+};
+
+const DEFAULT_TEAM_CLUB = BLACKHAWK_CLUB;
+const RESERVED_CLUBS = [INDEPENDENT_CLUB, BLACKHAWK_CLUB];
 
 const SUPER_ADMIN_EMAILS = ['demandgendave@gmail.com'];
+
+export const TEAM_MEMBER_LIMIT = 2;
+export const MATCH_PLAYER_COUNT_OPTIONS = [1, 2];
+
+function normalizeMatchPlayerCount(value) {
+  const count = Number(value);
+  return MATCH_PLAYER_COUNT_OPTIONS.includes(count) ? count : 2;
+}
 
 export const PLAYER_SKILL_LEVELS = [
   'Beginner',
@@ -102,7 +119,7 @@ function getFileExtension(fileName) {
 function buildNewsImagePath({ clubSlug, postId, teamSlug, fileName }) {
   const safeBaseName = sanitizeFileBaseName(fileName);
   const extension = getFileExtension(fileName);
-  return `clubs/${clubSlug}/teams/${teamSlug}/news/${postId}/${Date.now()}-${safeBaseName}${extension}`;
+  return `clubs/${clubSlug}/news/${teamSlug}/${postId}/${Date.now()}-${safeBaseName}${extension}`;
 }
 
 function buildTeamLogoPath({ clubSlug, teamSlug, fileName }) {
@@ -277,6 +294,19 @@ async function deleteRefsInBatches(refs) {
     });
     await batch.commit();
   }
+}
+
+async function collectNewsPostDeleteRefs(postRef) {
+  const [commentsSnapshot, reactionsSnapshot] = await Promise.all([
+    getDocs(collection(postRef, 'comments')),
+    getDocs(collection(postRef, 'reactions')),
+  ]);
+
+  return [
+    ...commentsSnapshot.docs.map((entry) => entry.ref),
+    ...reactionsSnapshot.docs.map((entry) => entry.ref),
+    postRef,
+  ];
 }
 
 function splitDisplayName(displayName, email = '') {
@@ -678,6 +708,12 @@ async function ensureIndependentClub() {
   return ensureReservedClub(INDEPENDENT_CLUB);
 }
 
+async function ensureDefaultTeamClub() {
+  requireDb();
+
+  return ensureReservedClub(DEFAULT_TEAM_CLUB);
+}
+
 export async function listClubs({ includeIndependent = false } = {}) {
   requireDb();
 
@@ -853,7 +889,12 @@ export async function deleteClub({ clubSlug, user }) {
   await deleteDoc(doc(db, 'clubs', clubSlug));
 }
 
-export async function deleteTeamAsAdmin({ clubSlug, teamSlug, user }) {
+export async function deleteTeamAsAdmin({
+  clubSlug,
+  teamSlug,
+  user,
+  skipChallengeAndRequestScan = false,
+} = {}) {
   requireDb();
 
   if (!(await isPlatformAdmin(user?.uid, user?.email))) {
@@ -872,40 +913,50 @@ export async function deleteTeamAsAdmin({ clubSlug, teamSlug, user }) {
   }
 
   const teamData = teamSnapshot.data();
-  const [membersSnapshot, playersSnapshot, playerLinksSnapshot, gamesSnapshot, newsSnapshot, clubs] = await Promise.all([
+  const [membersSnapshot, playersSnapshot, playerLinksSnapshot, gamesSnapshot, newsSnapshot] = await Promise.all([
     getDocs(collection(teamRef, 'members')),
     getDocs(collection(teamRef, 'players')),
     getDocs(collection(teamRef, 'playerLinks')),
     getDocs(collection(teamRef, 'games')),
     getDocs(collection(teamRef, 'newsPosts')),
-    listClubs({ includeIndependent: true }),
   ]);
-  const [affiliationRequestGroups, challengeGroups] = await Promise.all([
-    Promise.all(clubs.map((club) => getDocs(collection(db, 'clubs', club.slug, 'affiliationRequests')).catch(() => null))),
-    Promise.all(clubs.map((club) => getDocs(collection(db, 'clubs', club.slug, 'challenges')).catch(() => null))),
-  ]);
+  let affiliationRequestRefs = [];
+  let challengeRefs = [];
+
+  if (!skipChallengeAndRequestScan) {
+    const clubs = await listClubs({ includeIndependent: true });
+    const [affiliationRequestGroups, challengeGroups] = await Promise.all([
+      Promise.all(clubs.map((club) => getDocs(collection(db, 'clubs', club.slug, 'affiliationRequests')).catch(() => null))),
+      Promise.all(clubs.map((club) => getDocs(collection(db, 'clubs', club.slug, 'challenges')).catch(() => null))),
+    ]);
+
+    affiliationRequestRefs = affiliationRequestGroups
+      .flatMap((snapshot) => snapshot?.docs ?? [])
+      .filter((requestDoc) => {
+        const request = requestDoc.data();
+        return request.teamClubSlug === clubSlug && request.teamSlug === teamSlug;
+      })
+      .map((requestDoc) => requestDoc.ref);
+    challengeRefs = challengeGroups
+      .flatMap((snapshot) => snapshot?.docs ?? [])
+      .filter((challengeDoc) => {
+        const challenge = challengeDoc.data();
+        return (
+          (challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug) ||
+          (challenge.targetTeamClubSlug === clubSlug && challenge.targetTeamSlug === teamSlug) ||
+          (challenge.acceptedByTeamClubSlug === clubSlug && challenge.acceptedByTeamSlug === teamSlug)
+        );
+      })
+      .map((challengeDoc) => challengeDoc.ref);
+  }
+
   const userMembershipRefs = membersSnapshot.docs
     .map((memberDoc) => memberDoc.data().uid || memberDoc.id)
     .filter(Boolean)
     .map((uid) => doc(db, 'users', uid, 'memberships', `${clubSlug}_${teamSlug}`));
-  const affiliationRequestRefs = affiliationRequestGroups
-    .flatMap((snapshot) => snapshot?.docs ?? [])
-    .filter((requestDoc) => {
-      const request = requestDoc.data();
-      return request.teamClubSlug === clubSlug && request.teamSlug === teamSlug;
-    })
-    .map((requestDoc) => requestDoc.ref);
-  const challengeRefs = challengeGroups
-    .flatMap((snapshot) => snapshot?.docs ?? [])
-    .filter((challengeDoc) => {
-      const challenge = challengeDoc.data();
-      return (
-        (challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug) ||
-        (challenge.targetTeamClubSlug === clubSlug && challenge.targetTeamSlug === teamSlug) ||
-        (challenge.acceptedByTeamClubSlug === clubSlug && challenge.acceptedByTeamSlug === teamSlug)
-      );
-    })
-    .map((challengeDoc) => challengeDoc.ref);
+  const teamNewsDeleteRefGroups = await Promise.all(
+    newsSnapshot.docs.map((entry) => collectNewsPostDeleteRefs(entry.ref)),
+  );
   const storagePaths = [
     teamData.logoPath,
     ...newsSnapshot.docs.map((newsDoc) => newsDoc.data().imagePath),
@@ -915,7 +966,7 @@ export async function deleteTeamAsAdmin({ clubSlug, teamSlug, user }) {
     ...affiliationRequestRefs,
     ...challengeRefs,
     ...userMembershipRefs,
-    ...newsSnapshot.docs.map((entry) => entry.ref),
+    ...teamNewsDeleteRefGroups.flat(),
     ...gamesSnapshot.docs.map((entry) => entry.ref),
     ...playerLinksSnapshot.docs.map((entry) => entry.ref),
     ...playersSnapshot.docs.map((entry) => entry.ref),
@@ -924,6 +975,72 @@ export async function deleteTeamAsAdmin({ clubSlug, teamSlug, user }) {
   ]);
 
   await Promise.all(storagePaths.map((storagePath) => deleteStoragePath(storagePath)));
+}
+
+/** Typed in the admin Testing tab before running a full data reset (case-sensitive). */
+export const RESET_FIRESTORE_TEST_DATA_PHRASE = 'RESET PKL TEST DATA';
+
+/**
+ * Deletes operational data across all clubs for local/staging test resets.
+ * Preserves club documents, platform admins, club approvers, and user profiles (and Firestore rules block user doc delete).
+ */
+export async function resetFirestoreTestData({ user } = {}) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only the app admin can reset Firestore test data.');
+  }
+
+  const clubs = await listClubs({ includeIndependent: true });
+  const [activitySnapshot, notificationsSnapshot] = await Promise.all([
+    getDocs(collection(db, 'activityLogs')),
+    getDocs(collection(db, 'adminNotifications')),
+  ]);
+
+  await deleteRefsInBatches([
+    ...activitySnapshot.docs.map((entry) => entry.ref),
+    ...notificationsSnapshot.docs.map((entry) => entry.ref),
+  ]);
+
+  for (const club of clubs) {
+    const challengesSnapshot = await getDocs(collection(db, 'clubs', club.slug, 'challenges'));
+    await deleteRefsInBatches(challengesSnapshot.docs.map((entry) => entry.ref));
+  }
+
+  for (const club of clubs) {
+    const requestsSnapshot = await getDocs(collection(db, 'clubs', club.slug, 'affiliationRequests'));
+    await deleteRefsInBatches(requestsSnapshot.docs.map((entry) => entry.ref));
+  }
+
+  for (const club of clubs) {
+    const eventsSnapshot = await getDocs(collection(db, 'clubs', club.slug, 'events'));
+    await deleteRefsInBatches(eventsSnapshot.docs.map((entry) => entry.ref));
+  }
+
+  for (const club of clubs) {
+    const clubNewsSnapshot = await getDocs(collection(db, 'clubs', club.slug, 'newsPosts'));
+    const clubNewsNestedGroups = await Promise.all(
+      clubNewsSnapshot.docs.map((entry) => collectNewsPostDeleteRefs(entry.ref)),
+    );
+    const clubNewsImagePaths = clubNewsSnapshot.docs.map((newsDoc) => newsDoc.data().imagePath).filter(Boolean);
+
+    await deleteRefsInBatches(clubNewsNestedGroups.flat());
+    await Promise.all(clubNewsImagePaths.map((imagePath) => deleteStoragePath(imagePath)));
+  }
+
+  for (const club of clubs) {
+    const teamsSnapshot = await getDocs(collection(db, 'clubs', club.slug, 'teams'));
+    const teamSlugs = teamsSnapshot.docs.map((entry) => entry.id);
+
+    for (const teamSlug of teamSlugs) {
+      await deleteTeamAsAdmin({
+        clubSlug: club.slug,
+        teamSlug,
+        user,
+        skipChallengeAndRequestScan: true,
+      });
+    }
+  }
 }
 
 export async function listAdminTeamPlayers({ clubSlug, teamSlug, user }) {
@@ -1757,7 +1874,7 @@ export async function createTeam({ teamName, user }) {
     throw new Error('Enter a team name first.');
   }
 
-  const club = await ensureIndependentClub();
+  const club = await ensureDefaultTeamClub();
   const publicSlug = slugify(trimmedName);
 
   if (!publicSlug) {
@@ -1777,8 +1894,11 @@ export async function createTeam({ teamName, user }) {
   const joinCode = makeJoinCode(publicSlug);
 
   await setDoc(teamRef, {
-    affiliationStatus: 'independent',
-    approvedClubSlug: '',
+    affiliationStatus: 'approved',
+    approvedAt: serverTimestamp(),
+    approvedBy: user.uid,
+    approvedClubName: club.name,
+    approvedClubSlug: club.slug,
     clubId: club.id,
     clubName: club.name,
     createdAt: serverTimestamp(),
@@ -1787,12 +1907,28 @@ export async function createTeam({ teamName, user }) {
     joinCode,
     logoPath: '',
     logoUrl: '',
+    memberCount: 1,
     name: trimmedName,
     publicSlug,
+    requestedClubName: '',
     requestedClubSlug: '',
     slug: teamSlug,
     status: 'active',
     teamDivision: '',
+    updatedAt: serverTimestamp(),
+  });
+
+  await setDoc(doc(db, 'clubs', club.id, 'teams', teamSlug, 'members', user.uid), {
+    clubId: club.id,
+    clubSlug: club.slug,
+    joinedAt: serverTimestamp(),
+    playerId: user.uid,
+    role: 'captain',
+    status: 'active',
+    teamId: teamSlug,
+    teamName: trimmedName,
+    teamSlug,
+    uid: user.uid,
     updatedAt: serverTimestamp(),
   });
 
@@ -1803,19 +1939,12 @@ export async function createTeam({ teamName, user }) {
     user,
   });
 
-  await setDoc(doc(db, 'clubs', club.id, 'teams', teamSlug, 'members', user.uid), {
-    clubId: club.id,
-    clubSlug: club.slug,
-    joinedAt: serverTimestamp(),
-    playerId,
-    role: 'captain',
-    status: 'active',
-    teamId: teamSlug,
-    teamName: trimmedName,
-    teamSlug,
-    uid: user.uid,
-    updatedAt: serverTimestamp(),
-  });
+  if (playerId !== user.uid) {
+    await updateDoc(doc(db, 'clubs', club.id, 'teams', teamSlug, 'members', user.uid), {
+      playerId,
+      updatedAt: serverTimestamp(),
+    });
+  }
 
   await syncMembershipSummary({
     clubSlug: club.slug,
@@ -1911,39 +2040,59 @@ export async function joinTeamByCode({ code, user }) {
       ? team.approvedClubSlug
       : teamClubSlug;
   const activityClubName = team.approvedClubName ?? team.clubName ?? activityClubSlug;
+  const teamRef = doc(db, 'clubs', teamClubSlug, 'teams', teamSlug);
   const membershipRef = doc(db, 'clubs', teamClubSlug, 'teams', teamSlug, 'members', user.uid);
-  const existingMemberships = await listMemberships(user.uid).catch(() => []);
-  const existingMembership =
-    existingMemberships.find(
-      (membership) => membership.clubSlug === teamClubSlug && membership.teamSlug === teamSlug,
-    ) ?? null;
-  const nextRole = existingMembership?.role ?? 'member';
+  const { existingMembership, nextRole, teamName } = await runTransaction(db, async (transaction) => {
+    const [currentTeamSnapshot, membershipSnapshot] = await Promise.all([
+      transaction.get(teamRef),
+      transaction.get(membershipRef),
+    ]);
+    const currentTeam = currentTeamSnapshot.exists() ? currentTeamSnapshot.data() : team;
+    const storedMemberCount = Number(currentTeam.memberCount);
+    const currentMemberCount = Number.isFinite(storedMemberCount) ? storedMemberCount : 1;
+    const existingMembershipData = membershipSnapshot.exists() ? membershipSnapshot.data() : null;
+    const role = existingMembershipData?.role ?? 'member';
 
-  if (existingMembership) {
-    await updateDoc(membershipRef, {
-      playerId: user.uid,
-      updatedAt: serverTimestamp(),
-    });
-  } else {
-    await setDoc(membershipRef, {
-      clubId: teamClubSlug,
-      clubSlug: teamClubSlug,
-      joinedAt: serverTimestamp(),
-      playerId: user.uid,
-      role: nextRole,
-      status: 'active',
-      teamId: teamSlug,
-      teamName: team.name,
-      teamSlug,
-      uid: user.uid,
-      updatedAt: serverTimestamp(),
-    });
-  }
+    if (!membershipSnapshot.exists() && currentMemberCount >= TEAM_MEMBER_LIMIT) {
+      throw new Error('This team already has two team members, so it is not accepting new joins.');
+    }
+
+    if (membershipSnapshot.exists()) {
+      transaction.update(membershipRef, {
+        playerId: existingMembershipData?.playerId ?? user.uid,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      transaction.set(membershipRef, {
+        clubId: teamClubSlug,
+        clubSlug: teamClubSlug,
+        joinedAt: serverTimestamp(),
+        playerId: user.uid,
+        role,
+        status: 'active',
+        teamId: teamSlug,
+        teamName: currentTeam.name ?? team.name,
+        teamSlug,
+        uid: user.uid,
+        updatedAt: serverTimestamp(),
+      });
+      transaction.update(teamRef, {
+        memberCount: currentMemberCount + 1,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    return {
+      existingMembership: membershipSnapshot.exists(),
+      nextRole: role,
+      teamName: currentTeam.name ?? team.name,
+    };
+  });
 
   const playerId = await ensurePlayerProfile({
     clubId: teamClubSlug,
     teamId: teamSlug,
-    teamName: team.name,
+    teamName,
     user,
   });
 
@@ -1957,7 +2106,7 @@ export async function joinTeamByCode({ code, user }) {
   await syncMembershipSummary({
     clubSlug: teamClubSlug,
     role: nextRole,
-    teamName: team.name,
+    teamName,
     teamSlug,
     uid: user.uid,
   });
@@ -1974,8 +2123,8 @@ export async function joinTeamByCode({ code, user }) {
     await createAdminNotification({
       ...captainNotificationFields,
       clubSlug: teamClubSlug,
-      message: `${user.displayName || user.email || 'A player'} joined ${team.name || teamSlug}.`,
-      teamName: team.name ?? teamSlug,
+      message: `${user.displayName || user.email || 'A player'} joined ${teamName || teamSlug}.`,
+      teamName: teamName ?? teamSlug,
       teamSlug,
       title: 'New team member joined',
       type: 'teamMember.joined',
@@ -1994,7 +2143,7 @@ export async function joinTeamByCode({ code, user }) {
         playerName: user.displayName || user.email || 'A player',
         source: 'join_code',
         teamId: teamSlug,
-        teamName: team.name ?? teamSlug,
+        teamName: teamName ?? teamSlug,
       },
       targetId: playerId,
       teamId: teamSlug,
@@ -2010,7 +2159,7 @@ export async function joinTeamByCode({ code, user }) {
         playerName: user.displayName || user.email || 'A player',
         role: nextRole,
         teamId: teamSlug,
-        teamName: team.name ?? teamSlug,
+        teamName: teamName ?? teamSlug,
       },
       targetId: playerId,
       teamId: teamSlug,
@@ -2063,6 +2212,58 @@ export async function getMembership(clubSlug, teamSlug, uid, user = null) {
   const snapshot = await getDoc(membershipRef);
 
   if (!snapshot.exists()) {
+    if (user?.uid === uid) {
+      const teamSnapshot = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug));
+      const team = teamSnapshot.exists() ? teamSnapshot.data() : null;
+
+      if (team?.createdBy === uid && (team.status ?? 'active') === 'active') {
+        const teamName = team.name ?? teamSlug;
+        const repairedMembership = {
+          clubId: clubSlug,
+          clubSlug,
+          joinedAt: serverTimestamp(),
+          playerId: uid,
+          role: 'captain',
+          status: 'active',
+          teamId: teamSlug,
+          teamName,
+          teamSlug,
+          uid,
+          updatedAt: serverTimestamp(),
+        };
+
+        await setDoc(membershipRef, repairedMembership);
+        const playerId = await ensurePlayerProfile({
+          clubId: clubSlug,
+          teamId: teamSlug,
+          teamName,
+          user,
+        });
+
+        if (playerId !== uid) {
+          await updateDoc(membershipRef, {
+            playerId,
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        await syncMembershipSummary({
+          clubSlug,
+          role: 'captain',
+          teamName,
+          teamSlug,
+          uid,
+        });
+
+        return {
+          ...repairedMembership,
+          joinedAt: null,
+          playerId,
+          updatedAt: null,
+        };
+      }
+    }
+
     return null;
   }
 
@@ -2587,12 +2788,12 @@ export async function listApprovedClubTeams(clubSlug) {
 
 function normalizeChallenge(entry, challengeClubSlug) {
   const data = entry.data();
-  const normalizedPlayersNeeded = [1, 2, 4, 6, 8].includes(Number(data.playersNeeded))
-    ? Number(data.playersNeeded)
-    : 8;
+  const normalizedPlayersNeeded = normalizeMatchPlayerCount(data.playersNeeded);
 
   return {
     acceptedAtMs: normalizeTimestampMs(data.acceptedAt),
+    acceptedByPlayerId: data.acceptedByPlayerId ?? '',
+    acceptedByPlayerName: data.acceptedByPlayerName ?? '',
     acceptedByTeamClubSlug: data.acceptedByTeamClubSlug ?? '',
     acceptedByTeamName: data.acceptedByTeamName ?? '',
     acceptedByTeamSlug: data.acceptedByTeamSlug ?? '',
@@ -2602,6 +2803,8 @@ function normalizeChallenge(entry, challengeClubSlug) {
     createdByTeamClubSlug: data.createdByTeamClubSlug ?? '',
     createdByTeamName: data.createdByTeamName ?? '',
     createdByTeamSlug: data.createdByTeamSlug ?? '',
+    createdByPlayerId: data.createdByPlayerId ?? '',
+    createdByPlayerName: data.createdByPlayerName ?? '',
     dateTbd: data.dateTbd === true,
     declinedAtMs: normalizeTimestampMs(data.declinedAt),
     homeGameId: data.homeGameId ?? '',
@@ -2662,12 +2865,41 @@ async function requireTeamManager({ clubSlug, teamSlug, user }) {
   return membership;
 }
 
+function getPlayerDisplayName(player) {
+  return player?.fullName || player?.displayName || player?.email || 'Player';
+}
+
+async function listActiveTeamRosterPlayers(clubSlug, teamSlug) {
+  const players = await listPlayers(clubSlug, teamSlug);
+  return players.filter((player) => player.active !== false).slice(0, TEAM_MEMBER_LIMIT);
+}
+
+function requireRosterPlayer(players, playerId, label = 'Choose a player for this singles match.') {
+  const player = players.find((entry) => entry.id === playerId);
+
+  if (!player) {
+    throw new Error(label);
+  }
+
+  return player;
+}
+
+function buildRosterPairing(rosterPlayers) {
+  return [
+    {
+      courtLabel: 'Court 1',
+      playerIds: rosterPlayers.map((player) => player.id),
+    },
+  ];
+}
+
 function buildChallengeGamePayload({
   challenge,
   challengeClubSlug,
   createdBy,
   linkedGameId,
   linkedTeam,
+  rosterPlayers = [],
   user,
 }) {
   const normalizedDateTbd = challenge.dateTbd === true;
@@ -2692,10 +2924,10 @@ function buildChallengeGamePayload({
     matchStatus: 'scheduled',
     opponent: linkedTeam.name,
     opponentScore: null,
-    pairings: createEmptyPairings(),
-    playersNeeded: challenge.playersNeeded ?? 8,
+    pairings: buildRosterPairing(rosterPlayers),
+    playersNeeded: normalizeMatchPlayerCount(challenge.playersNeeded),
     result: 'pending',
-    rosterPlayerIds: [],
+    rosterPlayerIds: rosterPlayers.map((player) => player.id),
     teamScore: null,
     timeLabel,
     updatedAt: serverTimestamp(),
@@ -2707,11 +2939,12 @@ function buildChallengeGamePayload({
 
 export async function createChallenge({
   clubSlug,
+  createdByPlayerId = '',
   dateTbd = false,
   isoDate = '',
   location = '',
   notes = '',
-  playersNeeded = 8,
+  playersNeeded = 2,
   targetTeam = null,
   teamSlug,
   timeLabel = '',
@@ -2745,7 +2978,16 @@ export async function createChallenge({
   const trimmedNotes = notes.trim();
   const trimmedTimeLabel = timeLabel.trim();
   const normalizedDateTbd = dateTbd === true;
-  const normalizedPlayersNeeded = [1, 2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
+  const normalizedPlayersNeeded = normalizeMatchPlayerCount(playersNeeded);
+  const sourcePlayers = await listActiveTeamRosterPlayers(clubSlug, teamSlug);
+  const createdByPlayer =
+    normalizedPlayersNeeded === 1
+      ? requireRosterPlayer(sourcePlayers, createdByPlayerId, 'Choose who will play singles for your team.')
+      : null;
+
+  if (normalizedPlayersNeeded === 2 && sourcePlayers.length < 2) {
+    throw new Error('Your team needs two active members before sending a doubles challenge.');
+  }
 
   if (!normalizedDateTbd && !trimmedIsoDate) {
     throw new Error('Choose a date or mark the challenge date as TBD.');
@@ -2778,6 +3020,8 @@ export async function createChallenge({
     acceptedByTeamName: '',
     acceptedByTeamSlug: '',
     acceptedByUid: '',
+    acceptedByPlayerId: '',
+    acceptedByPlayerName: '',
     awayGameId: '',
     cancelledAt: null,
     clubSlug: challengeClubSlug,
@@ -2786,6 +3030,8 @@ export async function createChallenge({
     createdByTeamName: sourceTeam.name ?? teamSlug,
     createdByTeamSlug: teamSlug,
     createdByUid: user.uid,
+    createdByPlayerId: createdByPlayer?.id ?? '',
+    createdByPlayerName: createdByPlayer ? getPlayerDisplayName(createdByPlayer) : '',
     dateTbd: normalizedDateTbd,
     declinedAt: null,
     homeGameId: '',
@@ -2815,6 +3061,8 @@ export async function createChallenge({
       challengerTeamId: teamSlug,
       challengerTeamName: sourceTeam.name ?? teamSlug,
       challengerTeamSlug: teamSlug,
+      challengerPlayerId: createdByPlayer?.id ?? '',
+      challengerPlayerName: createdByPlayer ? getPlayerDisplayName(createdByPlayer) : '',
       matchType: 'club_challenge',
       opponentTeamId: target?.teamSlug ?? '',
       opponentTeamName: target?.name ?? (normalizedVisibility === 'open' ? 'Open challenge' : ''),
@@ -2852,6 +3100,8 @@ export async function createChallenge({
         challengerTeamClubSlug: clubSlug,
         challengerTeamName: sourceTeam.name ?? teamSlug,
         challengerTeamSlug: teamSlug,
+        challengerPlayerId: createdByPlayer?.id ?? '',
+        challengerPlayerName: createdByPlayer ? getPlayerDisplayName(createdByPlayer) : '',
         dateLabel: challengeDateLabel,
         dateTbd: normalizedDateTbd,
         isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
@@ -2870,11 +3120,12 @@ export async function updateChallenge({
   challengeClubSlug,
   challengeId,
   clubSlug,
+  createdByPlayerId = '',
   dateTbd = false,
   isoDate = '',
   location = '',
   notes = '',
-  playersNeeded = 8,
+  playersNeeded = 2,
   targetTeam = null,
   teamSlug,
   timeLabel = '',
@@ -2915,7 +3166,16 @@ export async function updateChallenge({
   const trimmedNotes = notes.trim();
   const trimmedTimeLabel = timeLabel.trim();
   const normalizedDateTbd = dateTbd === true;
-  const normalizedPlayersNeeded = [1, 2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
+  const normalizedPlayersNeeded = normalizeMatchPlayerCount(playersNeeded);
+  const sourcePlayers = await listActiveTeamRosterPlayers(clubSlug, teamSlug);
+  const createdByPlayer =
+    normalizedPlayersNeeded === 1
+      ? requireRosterPlayer(sourcePlayers, createdByPlayerId, 'Choose who will play singles for your team.')
+      : null;
+
+  if (normalizedPlayersNeeded === 2 && sourcePlayers.length < 2) {
+    throw new Error('Your team needs two active members before sending a doubles challenge.');
+  }
 
   if (!normalizedDateTbd && !trimmedIsoDate) {
     throw new Error('Choose a date or mark the challenge date as TBD.');
@@ -2940,6 +3200,8 @@ export async function updateChallenge({
   }
 
   await updateDoc(challengeRef, {
+    createdByPlayerId: createdByPlayer?.id ?? '',
+    createdByPlayerName: createdByPlayer ? getPlayerDisplayName(createdByPlayer) : '',
     dateTbd: normalizedDateTbd,
     isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
     location: trimmedLocation || 'Location TBD',
@@ -2991,6 +3253,39 @@ export async function listTeamChallenges({ challengeClubSlug, clubSlug, teamSlug
   challenges.sort((left, right) => (right.createdAtMs || 0) - (left.createdAtMs || 0));
 
   return challenges;
+}
+
+export function subscribeChallengeHub({ challengeClubSlug, clubSlug, teamSlug }, onChange, onError) {
+  requireDb();
+
+  if (!challengeClubSlug || challengeClubSlug === INDEPENDENT_CLUB.slug || !clubSlug || !teamSlug) {
+    onChange({ clubChallenges: [], teamChallenges: [] });
+    return () => {};
+  }
+
+  return onSnapshot(
+    collection(db, 'clubs', challengeClubSlug, 'challenges'),
+    (snapshot) => {
+      const challenges = snapshot.docs.map((entry) => normalizeChallenge(entry, challengeClubSlug));
+      challenges.sort((left, right) => (right.createdAtMs || 0) - (left.createdAtMs || 0));
+
+      onChange({
+        clubChallenges: challenges.filter(
+          (challenge) =>
+            challenge.status === 'open' &&
+            challenge.visibility === 'open' &&
+            (challenge.createdByTeamClubSlug !== clubSlug || challenge.createdByTeamSlug !== teamSlug),
+        ),
+        teamChallenges: challenges.filter(
+          (challenge) =>
+            (challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug) ||
+            (challenge.targetTeamClubSlug === clubSlug && challenge.targetTeamSlug === teamSlug) ||
+            (challenge.acceptedByTeamClubSlug === clubSlug && challenge.acceptedByTeamSlug === teamSlug),
+        ),
+      });
+    },
+    onError,
+  );
 }
 
 export async function listAdminChallenges(user) {
@@ -3068,7 +3363,7 @@ export async function deleteChallengeAsAdmin({ challengeClubSlug, challengeId, u
   await batch.commit();
 }
 
-export async function acceptChallenge({ challengeId, challengeClubSlug, clubSlug, teamSlug, user }) {
+export async function acceptChallenge({ acceptedByPlayerId = '', challengeId, challengeClubSlug, clubSlug, teamSlug, user }) {
   requireDb();
 
   await requireTeamManager({ clubSlug, teamSlug, user });
@@ -3109,6 +3404,36 @@ export async function acceptChallenge({ challengeId, challengeClubSlug, clubSlug
       teamSlug,
     }),
   ]);
+  const [createdByPlayers, acceptedByPlayers] = await Promise.all([
+    listActiveTeamRosterPlayers(createdByTeam.clubSlug, createdByTeam.teamSlug),
+    listActiveTeamRosterPlayers(acceptedByTeam.clubSlug, acceptedByTeam.teamSlug),
+  ]);
+  let createdByRosterPlayers = createdByPlayers;
+  let acceptedByRosterPlayers = acceptedByPlayers;
+  let acceptedByPlayer = null;
+
+  if (challenge.playersNeeded === 1) {
+    const createdByPlayer = requireRosterPlayer(
+      createdByPlayers,
+      challenge.createdByPlayerId,
+      'The challenging team must choose a singles player before this challenge can be accepted.',
+    );
+    acceptedByPlayer = requireRosterPlayer(
+      acceptedByPlayers,
+      acceptedByPlayerId,
+      'Choose who will play singles for your team.',
+    );
+    createdByRosterPlayers = [createdByPlayer];
+    acceptedByRosterPlayers = [acceptedByPlayer];
+  } else {
+    if (createdByPlayers.length < 2 || acceptedByPlayers.length < 2) {
+      throw new Error('Both teams need two active members before accepting a doubles challenge.');
+    }
+
+    createdByRosterPlayers = createdByPlayers.slice(0, 2);
+    acceptedByRosterPlayers = acceptedByPlayers.slice(0, 2);
+  }
+
   const homeGameId = `challenge-${challengeId}-${createdByTeam.teamSlug}`;
   const awayGameId = `challenge-${challengeId}-${acceptedByTeam.teamSlug}`;
   const batch = writeBatch(db);
@@ -3119,6 +3444,8 @@ export async function acceptChallenge({ challengeId, challengeClubSlug, clubSlug
     acceptedByTeamName: acceptedByTeam.name,
     acceptedByTeamSlug: acceptedByTeam.teamSlug,
     acceptedByUid: user.uid,
+    acceptedByPlayerId: acceptedByPlayer?.id ?? '',
+    acceptedByPlayerName: acceptedByPlayer ? getPlayerDisplayName(acceptedByPlayer) : '',
     awayGameId,
     homeGameId,
     status: 'accepted',
@@ -3132,6 +3459,7 @@ export async function acceptChallenge({ challengeId, challengeClubSlug, clubSlug
       createdBy: createdByTeam,
       linkedGameId: awayGameId,
       linkedTeam: acceptedByTeam,
+      rosterPlayers: createdByRosterPlayers,
       user,
     }),
   );
@@ -3143,6 +3471,7 @@ export async function acceptChallenge({ challengeId, challengeClubSlug, clubSlug
       createdBy: acceptedByTeam,
       linkedGameId: homeGameId,
       linkedTeam: createdByTeam,
+      rosterPlayers: acceptedByRosterPlayers,
       user,
     }),
   );
@@ -3180,7 +3509,7 @@ export async function acceptChallenge({ challengeId, challengeClubSlug, clubSlug
       isoDate: challenge.dateTbd ? '' : challenge.isoDate,
       location: challenge.location || 'Location TBD',
       notes: challenge.notes || '',
-      playersNeeded: challenge.playersNeeded ?? 8,
+      playersNeeded: normalizeMatchPlayerCount(challenge.playersNeeded),
       timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
     },
   });
@@ -3344,7 +3673,7 @@ export async function cancelChallenge({ challengeId, challengeClubSlug, clubSlug
         isoDate: challenge.dateTbd ? '' : challenge.isoDate,
         location: challenge.location || 'Location TBD',
         notes: challenge.notes || '',
-        playersNeeded: challenge.playersNeeded ?? 8,
+        playersNeeded: normalizeMatchPlayerCount(challenge.playersNeeded),
         timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
       },
     });
@@ -3356,6 +3685,12 @@ export async function rotateTeamJoinCode({ clubSlug, teamSlug }) {
 
   const nextJoinCode = makeJoinCode(teamSlug);
   const teamRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug);
+  const teamSnapshot = await getDoc(teamRef);
+  const memberCount = Number(teamSnapshot.data()?.memberCount ?? 0);
+
+  if (memberCount >= TEAM_MEMBER_LIMIT) {
+    throw new Error('This team already has two members, so new joins are disabled.');
+  }
 
   await updateDoc(teamRef, {
     joinCode: nextJoinCode,
@@ -3754,6 +4089,9 @@ export async function dropTeamMember({ clubSlug, playerId, teamSlug, uid = '', u
     null;
   const targetUid = uid || targetMember?.uid || '';
   const targetPlayerId = playerId || targetMember?.playerId || '';
+  const currentActiveMemberCount = members.filter((member) => member.status !== 'inactive').length;
+  const nextActiveMemberCount =
+    targetMember?.status === 'inactive' ? currentActiveMemberCount : Math.max(0, currentActiveMemberCount - 1);
 
   if (!targetPlayerId) {
     throw new Error('That player could not be found.');
@@ -3810,6 +4148,10 @@ export async function dropTeamMember({ clubSlug, playerId, teamSlug, uid = '', u
     batch.delete(doc(db, 'users', targetUid, 'memberships', `${clubSlug}_${teamSlug}`));
   }
 
+  batch.update(doc(db, 'clubs', clubSlug, 'teams', teamSlug), {
+    memberCount: nextActiveMemberCount,
+    updatedAt: serverTimestamp(),
+  });
   batch.delete(playerRef);
   await batch.commit();
 }
@@ -3870,7 +4212,7 @@ function normalizeTimeLabel(value) {
 
 function getPairingCountForRoster(rosterPlayerIds = []) {
   const selectedCount = normalizePlayerIdList(rosterPlayerIds).length;
-  return Math.min(4, Math.max(1, Math.ceil(selectedCount / 2)));
+  return Math.min(1, Math.max(1, Math.ceil(selectedCount / 2)));
 }
 
 function createEmptyPairings(pairingCount = 1) {
@@ -3935,7 +4277,7 @@ export async function listGames(clubSlug, teamSlug) {
       opponent: data.opponent ?? '',
       opponentScore: normalizeNullableNumber(data.opponentScore),
       pairings: normalizePairings(data.pairings, data.rosterPlayerIds ?? []),
-      playersNeeded: [1, 2, 4, 6, 8].includes(Number(data.playersNeeded)) ? Number(data.playersNeeded) : 8,
+      playersNeeded: normalizeMatchPlayerCount(data.playersNeeded),
       result:
         data.result ??
         deriveMatchResult(
@@ -3970,7 +4312,7 @@ export async function saveGame({
   matchStatus = 'scheduled',
   opponent,
   opponentScore,
-  playersNeeded = 8,
+  playersNeeded = 2,
   teamSlug,
   teamScore,
   timeLabel,
@@ -4001,7 +4343,7 @@ export async function saveGame({
   const existingGame = existingGameSnapshot?.exists() ? existingGameSnapshot.data() : null;
   const normalizedTeamScore = normalizeNullableNumber(teamScore);
   const normalizedOpponentScore = normalizeNullableNumber(opponentScore);
-  const normalizedPlayersNeeded = [1, 2, 4, 6, 8].includes(Number(playersNeeded)) ? Number(playersNeeded) : 8;
+  const normalizedPlayersNeeded = normalizeMatchPlayerCount(playersNeeded);
   const finalStatus =
     matchStatus === 'completed' ||
     (normalizedTeamScore !== null && normalizedOpponentScore !== null)
@@ -4239,7 +4581,7 @@ export async function deleteGame({ clubSlug, gameId, teamSlug, user }) {
       isoDate: game.dateTbd ? '' : game.isoDate ?? '',
       location: game.location ?? 'Location TBD',
       opponent: game.opponent ?? '',
-      playersNeeded: game.playersNeeded ?? 8,
+      playersNeeded: normalizeMatchPlayerCount(game.playersNeeded),
       timeLabel: game.dateTbd ? 'Time TBD' : game.timeLabel || 'Time TBD',
     },
   });
@@ -4262,9 +4604,7 @@ export async function saveGamePairings({
   const gameRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'games', gameId);
 
   const gameSnapshot = await getDoc(gameRef);
-  const playersNeeded = [1, 2, 4, 6, 8].includes(Number(gameSnapshot.data()?.playersNeeded))
-    ? Number(gameSnapshot.data().playersNeeded)
-    : 8;
+  const playersNeeded = normalizeMatchPlayerCount(gameSnapshot.data()?.playersNeeded);
 
   if (normalizedRosterPlayerIds.length > playersNeeded) {
     throw new Error(`Choose up to ${playersNeeded} players for this match roster.`);
@@ -4330,70 +4670,159 @@ function buildAuthorFromUser(user, fallbackRole = '') {
   };
 }
 
+function normalizeNewsCommentEntry(commentEntry) {
+  const comment = commentEntry.data();
+
+  return {
+    authorName: comment.authorName ?? 'Teammate',
+    authorPhotoUrl: comment.authorPhotoUrl ?? '',
+    authorRole: comment.authorRole ?? '',
+    authorUid: comment.authorUid ?? comment.createdBy ?? '',
+    body: (comment.body ?? '').trim(),
+    createdAtMs: normalizeTimestampMs(comment.createdAt),
+    id: commentEntry.id,
+    updatedAtMs: normalizeTimestampMs(comment.updatedAt),
+    updatedBy: comment.updatedBy ?? '',
+  };
+}
+
+function normalizeNewsReactionEntry(reactionEntry) {
+  const reaction = reactionEntry.data();
+
+  return {
+    createdAtMs: normalizeTimestampMs(reaction.createdAt),
+    id: reactionEntry.id,
+    type: reaction.type ?? 'like',
+    uid: reaction.uid ?? reactionEntry.id,
+  };
+}
+
+function normalizeNewsPostEntry(entry, teamSlug, comments = [], reactions = []) {
+  const data = entry.data();
+
+  return {
+    authorName: data.authorName ?? data.createdByName ?? data.createdBy ?? 'Teammate',
+    authorPhotoUrl: data.authorPhotoUrl ?? '',
+    authorRole: data.authorRole ?? '',
+    authorUid: data.authorUid ?? data.createdByUid ?? data.createdBy ?? '',
+    body: (data.body ?? '').trim(),
+    comments,
+    commentCount: comments.length,
+    createdAtMs: normalizeTimestampMs(data.createdAt),
+    createdBy: data.createdBy ?? '',
+    id: entry.id,
+    imagePath: typeof data.imagePath === 'string' ? data.imagePath : '',
+    imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : '',
+    linkUrl: typeof data.linkUrl === 'string' ? data.linkUrl : '',
+    reactions,
+    reactionCount: reactions.length,
+    teamName: data.teamName ?? '',
+    teamSlug: data.teamSlug ?? teamSlug,
+    title: (data.title ?? '').trim() || 'Community update',
+    updatedAtMs: normalizeTimestampMs(data.updatedAt),
+    updatedBy: data.updatedBy ?? '',
+  };
+}
+
+function sortNewsPosts(posts) {
+  return posts.sort((left, right) => (right.createdAtMs || right.updatedAtMs) - (left.createdAtMs || left.updatedAtMs));
+}
+
 export async function listNewsPosts(clubSlug, teamSlug) {
   requireDb();
 
-  const newsRef = collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts');
+  const newsRef = collection(db, 'clubs', clubSlug, 'newsPosts');
   const snapshot = await getDocs(newsRef);
   const posts = await Promise.all(snapshot.docs.map(async (entry) => {
-    const data = entry.data();
     const [commentsSnapshot, reactionsSnapshot] = await Promise.all([
       getDocs(collection(entry.ref, 'comments')).catch(() => null),
       getDocs(collection(entry.ref, 'reactions')).catch(() => null),
     ]);
     const comments = (commentsSnapshot?.docs ?? [])
-      .map((commentEntry) => {
-        const comment = commentEntry.data();
-
-        return {
-          authorName: comment.authorName ?? 'Teammate',
-          authorPhotoUrl: comment.authorPhotoUrl ?? '',
-          authorRole: comment.authorRole ?? '',
-          authorUid: comment.authorUid ?? comment.createdBy ?? '',
-          body: (comment.body ?? '').trim(),
-          createdAtMs: normalizeTimestampMs(comment.createdAt),
-          id: commentEntry.id,
-          updatedAtMs: normalizeTimestampMs(comment.updatedAt),
-          updatedBy: comment.updatedBy ?? '',
-        };
-      })
+      .map(normalizeNewsCommentEntry)
       .sort((left, right) => (left.createdAtMs || 0) - (right.createdAtMs || 0));
-    const reactions = (reactionsSnapshot?.docs ?? []).map((reactionEntry) => {
-      const reaction = reactionEntry.data();
+    const reactions = (reactionsSnapshot?.docs ?? []).map(normalizeNewsReactionEntry);
 
-      return {
-        createdAtMs: normalizeTimestampMs(reaction.createdAt),
-        id: reactionEntry.id,
-        type: reaction.type ?? 'like',
-        uid: reaction.uid ?? reactionEntry.id,
-      };
-    });
-
-    return {
-      authorName: data.authorName ?? data.createdByName ?? data.createdBy ?? 'Teammate',
-      authorPhotoUrl: data.authorPhotoUrl ?? '',
-      authorRole: data.authorRole ?? '',
-      authorUid: data.authorUid ?? data.createdByUid ?? data.createdBy ?? '',
-      body: (data.body ?? '').trim(),
-      comments,
-      commentCount: comments.length,
-      createdAtMs: normalizeTimestampMs(data.createdAt),
-      createdBy: data.createdBy ?? '',
-      id: entry.id,
-      imagePath: typeof data.imagePath === 'string' ? data.imagePath : '',
-      imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : '',
-      linkUrl: typeof data.linkUrl === 'string' ? data.linkUrl : '',
-      reactions,
-      reactionCount: reactions.length,
-      title: (data.title ?? '').trim() || 'Team update',
-      updatedAtMs: normalizeTimestampMs(data.updatedAt),
-      updatedBy: data.updatedBy ?? '',
-    };
+    return normalizeNewsPostEntry(entry, teamSlug, comments, reactions);
   }));
 
-  posts.sort((left, right) => (right.createdAtMs || right.updatedAtMs) - (left.createdAtMs || left.updatedAtMs));
+  return sortNewsPosts(posts);
+}
 
-  return posts;
+export function subscribeNewsPosts(clubSlug, teamSlug, onChange, onError) {
+  requireDb();
+
+  const newsRef = collection(db, 'clubs', clubSlug, 'newsPosts');
+  const postEntries = new Map();
+  const commentsByPost = new Map();
+  const reactionsByPost = new Map();
+  const childUnsubscribers = new Map();
+
+  function emitPosts() {
+    const posts = Array.from(postEntries.values()).map((entry) =>
+      normalizeNewsPostEntry(
+        entry,
+        teamSlug,
+        commentsByPost.get(entry.id) ?? [],
+        reactionsByPost.get(entry.id) ?? [],
+      ));
+
+    onChange(sortNewsPosts(posts));
+  }
+
+  const unsubscribePosts = onSnapshot(
+    newsRef,
+    (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        const postId = change.doc.id;
+
+        if (change.type === 'removed') {
+          postEntries.delete(postId);
+          commentsByPost.delete(postId);
+          reactionsByPost.delete(postId);
+          childUnsubscribers.get(postId)?.forEach((unsubscribe) => unsubscribe());
+          childUnsubscribers.delete(postId);
+          return;
+        }
+
+        postEntries.set(postId, change.doc);
+
+        if (!childUnsubscribers.has(postId)) {
+          const unsubscribeComments = onSnapshot(
+            collection(change.doc.ref, 'comments'),
+            (commentsSnapshot) => {
+              const comments = commentsSnapshot.docs
+                .map(normalizeNewsCommentEntry)
+                .sort((left, right) => (left.createdAtMs || 0) - (right.createdAtMs || 0));
+              commentsByPost.set(postId, comments);
+              emitPosts();
+            },
+            onError,
+          );
+          const unsubscribeReactions = onSnapshot(
+            collection(change.doc.ref, 'reactions'),
+            (reactionsSnapshot) => {
+              reactionsByPost.set(postId, reactionsSnapshot.docs.map(normalizeNewsReactionEntry));
+              emitPosts();
+            },
+            onError,
+          );
+
+          childUnsubscribers.set(postId, [unsubscribeComments, unsubscribeReactions]);
+        }
+      });
+
+      emitPosts();
+    },
+    onError,
+  );
+
+  return () => {
+    unsubscribePosts();
+    childUnsubscribers.forEach((unsubscribers) => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    });
+  };
 }
 
 export async function saveNewsPost({
@@ -4412,9 +4841,13 @@ export async function saveNewsPost({
     throw new Error('You must be signed in to post.');
   }
 
-  const membership = await getMembership(clubSlug, teamSlug, user.uid, user);
+  const sourceTeamSlug = post?.teamSlug || teamSlug;
+  const [membership, platformAdmin] = await Promise.all([
+    getMembership(clubSlug, sourceTeamSlug, user.uid, user),
+    isPlatformAdmin(user.uid, user.email),
+  ]);
 
-  if (!membership) {
+  if (!membership && !platformAdmin) {
     throw new Error('You must be a team member to post in this feed.');
   }
 
@@ -4426,7 +4859,7 @@ export async function saveNewsPost({
   }
 
   const postId = post?.id ?? createNewsPostId(normalizedTitle);
-  const postRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', postId);
+  const postRef = doc(db, 'clubs', clubSlug, 'newsPosts', postId);
   let uploadedImage = null;
 
   if (imageFile) {
@@ -4434,7 +4867,7 @@ export async function saveNewsPost({
       clubSlug,
       file: imageFile,
       postId,
-      teamSlug,
+      teamSlug: sourceTeamSlug,
     });
   }
 
@@ -4448,10 +4881,13 @@ export async function saveNewsPost({
         }
       : buildAuthorFromUser(user, membership?.role ?? '')),
     body: normalizedBody,
+    clubSlug,
     createdBy: post?.createdBy ?? user.uid,
     imagePath: uploadedImage?.imagePath ?? post?.imagePath ?? '',
     imageUrl: uploadedImage?.imageUrl ?? post?.imageUrl ?? '',
     linkUrl: normalizeUrl(linkUrl ?? ''),
+    teamName: post?.teamName ?? membership?.teamName ?? sourceTeamSlug,
+    teamSlug: sourceTeamSlug,
     title: normalizedTitle,
     updatedAt: serverTimestamp(),
     updatedBy: user.uid,
@@ -4474,7 +4910,7 @@ export async function saveNewsPost({
 export async function deleteNewsPost({ clubSlug, post, teamSlug }) {
   requireDb();
 
-  const postRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', post.id);
+  const postRef = doc(db, 'clubs', clubSlug, 'newsPosts', post.id);
   const [commentsSnapshot, reactionsSnapshot] = await Promise.all([
     getDocs(collection(postRef, 'comments')),
     getDocs(collection(postRef, 'reactions')),
@@ -4507,13 +4943,15 @@ export async function addNewsComment({ body, clubSlug, postId, teamSlug, user })
     throw new Error('You must be a team member to comment in this feed.');
   }
 
-  const commentRef = doc(collection(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', postId, 'comments'));
+  const commentRef = doc(collection(db, 'clubs', clubSlug, 'newsPosts', postId, 'comments'));
 
   await setDoc(commentRef, {
     ...buildAuthorFromUser(user, membership?.role ?? ''),
     body: normalizedBody,
     createdAt: serverTimestamp(),
     createdBy: user.uid,
+    teamName: membership?.teamName ?? teamSlug,
+    teamSlug,
   });
 
   return commentRef.id;
@@ -4522,7 +4960,7 @@ export async function addNewsComment({ body, clubSlug, postId, teamSlug, user })
 export async function deleteNewsComment({ clubSlug, commentId, postId, teamSlug }) {
   requireDb();
 
-  await deleteDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', postId, 'comments', commentId));
+  await deleteDoc(doc(db, 'clubs', clubSlug, 'newsPosts', postId, 'comments', commentId));
 }
 
 export async function updateNewsComment({ body, clubSlug, commentId, postId, teamSlug, user }) {
@@ -4538,7 +4976,7 @@ export async function updateNewsComment({ body, clubSlug, commentId, postId, tea
     throw new Error('Write a comment before saving.');
   }
 
-  const commentRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', postId, 'comments', commentId);
+  const commentRef = doc(db, 'clubs', clubSlug, 'newsPosts', postId, 'comments', commentId);
   const commentSnapshot = await getDoc(commentRef);
   const comment = commentSnapshot.exists() ? commentSnapshot.data() : null;
 
@@ -4564,7 +5002,7 @@ export async function toggleNewsReaction({ clubSlug, post, teamSlug, type = 'lik
     throw new Error('You must be signed in to react.');
   }
 
-  const reactionRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'newsPosts', post.id, 'reactions', user.uid);
+  const reactionRef = doc(db, 'clubs', clubSlug, 'newsPosts', post.id, 'reactions', user.uid);
   const existingReaction = post.reactions?.find((reaction) => reaction.uid === user.uid);
 
   if (existingReaction?.type === type) {

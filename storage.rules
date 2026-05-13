@@ -19,6 +19,18 @@ service firebase.storage {
         && firestore.get(memberPath(clubId, teamId)).data.role in roles;
     }
 
+    function hasActiveTeamInClub(clubId) {
+      return signedIn()
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.lastActiveClubId == clubId
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.lastActiveTeamId is string
+        && firestore.exists(
+          memberPath(
+            clubId,
+            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.lastActiveTeamId
+          )
+        );
+    }
+
     function isClubManager(clubId) {
       return signedIn()
         && firestore.exists(/databases/(default)/documents/clubs/$(clubId)/admins/$(request.auth.uid));
@@ -30,6 +42,11 @@ service firebase.storage {
 
     match /clubs/{clubId}/teams/{teamId}/news/{postId}/{fileName} {
       allow read: if isTeamMember(clubId, teamId);
+      allow write: if isTeamMember(clubId, teamId) || isPlatformAdmin();
+    }
+
+    match /clubs/{clubId}/news/{teamId}/{postId}/{fileName} {
+      allow read: if hasActiveTeamInClub(clubId) || isPlatformAdmin();
       allow write: if isTeamMember(clubId, teamId) || isPlatformAdmin();
     }
 

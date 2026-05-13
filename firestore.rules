@@ -69,7 +69,7 @@ service cloud.firestore {
     }
 
     function isReservedClubCreate(clubId) {
-      return clubId in ['independent'];
+      return clubId in ['independent', 'blackhawk-country-club'];
     }
 
     function safeAdminNotificationCreate() {
@@ -146,6 +146,36 @@ service cloud.firestore {
         ];
     }
 
+    function safeTeamMemberCountIncrement(clubId, teamId) {
+      return signedIn()
+        && (
+          (
+            resource.data.memberCount is int
+            && resource.data.memberCount < 2
+            && request.resource.data.memberCount == resource.data.memberCount + 1
+          )
+          || (
+            !resource.data.keys().hasAny(['memberCount'])
+            && request.resource.data.memberCount == 2
+          )
+        )
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'memberCount',
+          'updatedAt',
+        ]);
+    }
+
+    function safeTeamMemberCountDecrement(clubId, teamId) {
+      return signedIn()
+        && resource.data.memberCount is int
+        && resource.data.memberCount > 0
+        && request.resource.data.memberCount == resource.data.memberCount - 1
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'memberCount',
+          'updatedAt',
+        ]);
+    }
+
     function canReadActivityLog() {
       return isPlatformAdmin()
         || (
@@ -173,6 +203,16 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/clubs/$(activeClubId)/teams/$(activeTeamId)).data.status == 'active'
         && get(/databases/$(database)/documents/clubs/$(activeClubId)/teams/$(activeTeamId)).data.affiliationStatus == 'approved'
         && get(/databases/$(database)/documents/clubs/$(activeClubId)/teams/$(activeTeamId)).data.approvedClubSlug == activityClubId;
+    }
+
+    function hasActiveTeamInClub(clubId) {
+      let profile = userProfileDoc(request.auth.uid);
+      let activeTeamId = profile.data.lastActiveTeamId;
+
+      return signedIn()
+        && profile.data.lastActiveClubId == clubId
+        && activeTeamId is string
+        && exists(memberPath(clubId, activeTeamId));
     }
 
     function safeSelfMembershipUpdate(uid) {
@@ -244,8 +284,7 @@ service cloud.firestore {
 
     function safeSelfUserProfileUpdate(uid) {
       return isSelf(uid)
-        && resource.data.uid == uid
-        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.uid == uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(userProfileKeys());
     }
 
@@ -303,8 +342,7 @@ service cloud.firestore {
     function safeSelfPlayerProfileUpdate(playerId, clubId, teamId) {
       return isTeamMember(clubId, teamId)
         && memberDoc(clubId, teamId).data.playerId == playerId
-        && resource.data.uid == request.auth.uid
-        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.uid == request.auth.uid
         && request.resource.data.teamId == resource.data.teamId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'availableDays',
@@ -316,8 +354,7 @@ service cloud.firestore {
     function safeSelfPlayerSnapshotSync(playerId, clubId, teamId) {
       return isTeamMember(clubId, teamId)
         && memberDoc(clubId, teamId).data.playerId == playerId
-        && resource.data.uid == request.auth.uid
-        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.uid == request.auth.uid
         && request.resource.data.teamId == resource.data.teamId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'displayName',
@@ -422,7 +459,8 @@ service cloud.firestore {
         && request.resource.data.status == 'open'
         && request.resource.data.clubSlug == clubId
         && request.resource.data.createdByUid == request.auth.uid
-        && request.resource.data.playersNeeded in [2, 4, 6, 8]
+        && request.resource.data.playersNeeded in [1, 2]
+        && validChallengeCreatePlayerChoices()
         && request.resource.data.visibility in ['open', 'targeted']
         && request.resource.data.createdByTeamClubSlug is string
         && request.resource.data.createdByTeamSlug is string
@@ -439,6 +477,61 @@ service cloud.firestore {
               && request.resource.data.targetTeamSlug == request.resource.data.createdByTeamSlug
             )
           )
+        );
+    }
+
+    function emptyChallengePlayerChoice(fieldId, fieldName) {
+      return request.resource.data[fieldId] == ''
+        && request.resource.data[fieldName] == '';
+    }
+
+    function validSinglesChallengePlayerChoice(fieldId, fieldName) {
+      return request.resource.data[fieldId] is string
+        && request.resource.data[fieldId] != ''
+        && request.resource.data[fieldName] is string
+        && request.resource.data[fieldName] != '';
+    }
+
+    function validChallengeCreatePlayerChoices() {
+      return (
+          request.resource.data.playersNeeded == 1
+          && validSinglesChallengePlayerChoice('createdByPlayerId', 'createdByPlayerName')
+          && emptyChallengePlayerChoice('acceptedByPlayerId', 'acceptedByPlayerName')
+        )
+        || (
+          request.resource.data.playersNeeded == 2
+          && emptyChallengePlayerChoice('createdByPlayerId', 'createdByPlayerName')
+          && emptyChallengePlayerChoice('acceptedByPlayerId', 'acceptedByPlayerName')
+        );
+    }
+
+    function validChallengeEditPlayerChoices() {
+      return (
+          request.resource.data.playersNeeded == 1
+          && validSinglesChallengePlayerChoice('createdByPlayerId', 'createdByPlayerName')
+          && request.resource.data.acceptedByPlayerId == resource.data.acceptedByPlayerId
+          && request.resource.data.acceptedByPlayerName == resource.data.acceptedByPlayerName
+        )
+        || (
+          request.resource.data.playersNeeded == 2
+          && emptyChallengePlayerChoice('createdByPlayerId', 'createdByPlayerName')
+          && request.resource.data.acceptedByPlayerId == resource.data.acceptedByPlayerId
+          && request.resource.data.acceptedByPlayerName == resource.data.acceptedByPlayerName
+        );
+    }
+
+    function validChallengeAcceptPlayerChoices() {
+      return (
+          resource.data.playersNeeded == 1
+          && request.resource.data.createdByPlayerId == resource.data.createdByPlayerId
+          && request.resource.data.createdByPlayerName == resource.data.createdByPlayerName
+          && validSinglesChallengePlayerChoice('acceptedByPlayerId', 'acceptedByPlayerName')
+        )
+        || (
+          resource.data.playersNeeded == 2
+          && request.resource.data.createdByPlayerId == resource.data.createdByPlayerId
+          && request.resource.data.createdByPlayerName == resource.data.createdByPlayerName
+          && emptyChallengePlayerChoice('acceptedByPlayerId', 'acceptedByPlayerName')
         );
     }
 
@@ -482,7 +575,8 @@ service cloud.firestore {
         && request.resource.data.createdByTeamSlug == resource.data.createdByTeamSlug
         && request.resource.data.createdByUid == resource.data.createdByUid
         && request.resource.data.clubSlug == resource.data.clubSlug
-        && request.resource.data.playersNeeded in [2, 4, 6, 8]
+        && request.resource.data.playersNeeded in [1, 2]
+        && validChallengeEditPlayerChoices()
         && request.resource.data.visibility in ['open', 'targeted']
         && (
           request.resource.data.visibility == 'open'
@@ -498,6 +592,8 @@ service cloud.firestore {
         )
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'dateTbd',
+          'createdByPlayerId',
+          'createdByPlayerName',
           'isoDate',
           'location',
           'notes',
@@ -531,6 +627,7 @@ service cloud.firestore {
         && request.resource.data.acceptedByUid == request.auth.uid
         && request.resource.data.acceptedByTeamClubSlug is string
         && request.resource.data.acceptedByTeamSlug is string
+        && validChallengeAcceptPlayerChoices()
         && isManager(request.resource.data.acceptedByTeamClubSlug, request.resource.data.acceptedByTeamSlug)
         && isApprovedChallengeClubTeam(clubId, resource.data.createdByTeamClubSlug, resource.data.createdByTeamSlug)
         && isApprovedChallengeClubTeam(clubId, request.resource.data.acceptedByTeamClubSlug, request.resource.data.acceptedByTeamSlug)
@@ -549,6 +646,8 @@ service cloud.firestore {
         )
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'acceptedAt',
+          'acceptedByPlayerId',
+          'acceptedByPlayerName',
           'acceptedByTeamClubSlug',
           'acceptedByTeamName',
           'acceptedByTeamSlug',
@@ -567,8 +666,9 @@ service cloud.firestore {
         && request.resource.data.challengeId is string
         && (
           request.resource.data.playersNeeded == challenge.playersNeeded
-          || (!challenge.keys().hasAny(['playersNeeded']) && request.resource.data.playersNeeded == 8)
+          || (!challenge.keys().hasAny(['playersNeeded']) && request.resource.data.playersNeeded == 2)
         )
+        && validChallengeGameRoster(request.resource.data.playersNeeded)
         && challenge.status == 'accepted'
         && challenge.acceptedByUid == request.auth.uid
         && (
@@ -583,6 +683,16 @@ service cloud.firestore {
             && request.resource.data.linkedGameId == challenge.homeGameId
           )
         );
+    }
+
+    function validChallengeGameRoster(playersNeeded) {
+      return request.resource.data.rosterPlayerIds is list
+        && request.resource.data.pairings is list
+        && request.resource.data.pairings.size() == 1
+        && request.resource.data.pairings[0].playerIds is list
+        && request.resource.data.rosterPlayerIds.size() == playersNeeded
+        && request.resource.data.pairings[0].playerIds.size() == playersNeeded
+        && playersNeeded in [1, 2];
     }
 
     function challengeGameHasResult() {
@@ -663,7 +773,7 @@ service cloud.firestore {
           && request.resource.data.createdBy == request.auth.uid;
         allow update: if safeClubEventWrite(clubId)
           && request.resource.data.createdBy == resource.data.createdBy;
-        allow delete: if isClubApprover(clubId);
+        allow delete: if isClubApprover(clubId) || isPlatformAdmin();
       }
 
       match /affiliationRequests/{requestId} {
@@ -703,6 +813,58 @@ service cloud.firestore {
         allow delete: if isPlatformAdmin();
       }
 
+      match /newsPosts/{postId} {
+        allow read: if hasActiveTeamInClub(clubId) || isPlatformAdmin();
+        allow create: if request.resource.data.teamSlug is string
+          && isTeamMember(clubId, request.resource.data.teamSlug)
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.createdByUid == request.auth.uid;
+        allow update: if isPlatformAdmin()
+          || (
+            hasActiveTeamInClub(clubId)
+            && resource.data.authorUid == request.auth.uid
+            && request.resource.data.authorUid == resource.data.authorUid
+            && request.resource.data.createdByUid == resource.data.createdByUid
+            && request.resource.data.teamSlug == resource.data.teamSlug
+          );
+        allow delete: if isPlatformAdmin()
+          || (
+            hasActiveTeamInClub(clubId)
+            && resource.data.authorUid == request.auth.uid
+          );
+
+        match /comments/{commentId} {
+          allow read: if hasActiveTeamInClub(clubId) || isPlatformAdmin();
+          allow create: if hasActiveTeamInClub(clubId)
+            && request.resource.data.authorUid == request.auth.uid
+            && request.resource.data.createdBy == request.auth.uid;
+          allow update: if hasActiveTeamInClub(clubId)
+            && (resource.data.authorUid == request.auth.uid || resource.data.createdBy == request.auth.uid)
+            && request.resource.data.updatedBy == request.auth.uid
+            && request.resource.data.body is string
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'body',
+              'updatedAt',
+              'updatedBy',
+            ]);
+          allow delete: if isPlatformAdmin()
+            || (
+              hasActiveTeamInClub(clubId)
+              && resource.data.authorUid == request.auth.uid
+            );
+        }
+
+        match /reactions/{uid} {
+          allow read: if hasActiveTeamInClub(clubId) || isPlatformAdmin();
+          allow create, update: if isSelf(uid)
+            && hasActiveTeamInClub(clubId)
+            && request.resource.data.uid == uid
+            && request.resource.data.type in ['like', 'love', 'thumbsUp', 'thumbsDown', 'laugh', 'cry', 'angry'];
+          allow delete: if isSelf(uid)
+            || isPlatformAdmin();
+        }
+      }
+
       match /teams/{teamId} {
         allow read: if signedIn();
         allow create: if signedIn()
@@ -710,7 +872,9 @@ service cloud.firestore {
           && request.resource.data.clubId == clubId
           && request.resource.data.slug == teamId
           && request.resource.data.status == 'active';
-        allow update: if (
+        allow update: if safeTeamMemberCountIncrement(clubId, teamId)
+          || safeTeamMemberCountDecrement(clubId, teamId)
+          || (
             isManager(clubId, teamId)
             && request.resource.data.clubId == resource.data.clubId
             && request.resource.data.slug == resource.data.slug
@@ -722,6 +886,7 @@ service cloud.firestore {
               'joinCode',
               'logoPath',
               'logoUrl',
+              'memberCount',
               'name',
               'publicSlug',
               'requestedClubName',
@@ -779,6 +944,7 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
               'logoPath',
               'logoUrl',
+              'memberCount',
               'updatedAt',
             ])
           );
@@ -794,6 +960,10 @@ service cloud.firestore {
               && request.resource.data.clubId == clubId
               && request.resource.data.teamId == teamId
               && request.resource.data.teamSlug == teamId
+              && (
+                !get(/databases/$(database)/documents/clubs/$(clubId)/teams/$(teamId)).data.keys().hasAny(['memberCount'])
+                || get(/databases/$(database)/documents/clubs/$(clubId)/teams/$(teamId)).data.memberCount < 2
+              )
               && request.resource.data.role in ['captain', 'member']
               && request.resource.data.status == 'active'
             );
@@ -822,8 +992,9 @@ service cloud.firestore {
 
         match /games/{gameId} {
           allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin() || isApprovedClubTeam(clubId, teamId);
-          allow create: if isManager(clubId, teamId) || safeChallengeGameCreate(clubId, teamId);
-          allow update: if isManager(clubId, teamId)
+          allow create: if (isManager(clubId, teamId) && request.resource.data.playersNeeded in [1, 2])
+            || safeChallengeGameCreate(clubId, teamId);
+          allow update: if (isManager(clubId, teamId) && request.resource.data.playersNeeded in [1, 2])
             || isPlatformAdmin()
             || safeSelfAvailabilityUpdate(clubId, teamId)
             || safeSelfRosterRemoval(clubId, teamId);
@@ -836,7 +1007,6 @@ service cloud.firestore {
             && request.resource.data.authorUid == request.auth.uid
             && request.resource.data.createdByUid == request.auth.uid;
           allow update: if isPlatformAdmin()
-            || isManager(clubId, teamId)
             || (
               isTeamMember(clubId, teamId)
               && resource.data.authorUid == request.auth.uid
@@ -844,7 +1014,6 @@ service cloud.firestore {
               && request.resource.data.createdByUid == resource.data.createdByUid
             );
           allow delete: if isPlatformAdmin()
-            || isManager(clubId, teamId)
             || (
               isTeamMember(clubId, teamId)
               && resource.data.authorUid == request.auth.uid
@@ -865,7 +1034,6 @@ service cloud.firestore {
                 'updatedBy',
               ]);
             allow delete: if isPlatformAdmin()
-              || isManager(clubId, teamId)
               || (
                 isTeamMember(clubId, teamId)
                 && resource.data.authorUid == request.auth.uid
@@ -878,7 +1046,7 @@ service cloud.firestore {
               && isTeamMember(clubId, teamId)
               && request.resource.data.uid == uid
               && request.resource.data.type in ['like', 'love', 'thumbsUp', 'thumbsDown', 'laugh', 'cry', 'angry'];
-            allow delete: if isSelf(uid) || isManager(clubId, teamId) || isPlatformAdmin();
+            allow delete: if isSelf(uid) || isPlatformAdmin();
           }
         }
       }
