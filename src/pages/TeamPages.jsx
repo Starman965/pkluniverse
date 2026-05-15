@@ -59,12 +59,10 @@ import {
   reviewClubAffiliationRequest,
   rotateTeamJoinCode,
   saveGame,
-  saveGamePairings,
   saveNewsPost,
   savePlayer,
   saveClubEvent,
   saveUserPlayerProfile,
-  setAvailability,
   setLastActiveTeam,
   subscribeChallengeHub,
   subscribeNewsPosts,
@@ -118,12 +116,26 @@ function createScheduleAdminDraft(game) {
     dateTbd: game.dateTbd === true,
     isoDate: game.isoDate ?? '',
     location: game.location ?? '',
+    matchScores: createMatchScoreDrafts(game.matchScores),
     matchStatus: game.matchStatus ?? 'scheduled',
     opponent: game.opponent ?? '',
     opponentScore: game.opponentScore ?? '',
     playersNeeded: normalizeMatchPlayerCount(game.playersNeeded),
     teamScore: game.teamScore ?? '',
     timeLabel: game.dateTbd === true || timeLabel === 'Time TBD' ? '' : timeLabel,
+  };
+}
+
+function createMatchScoreDrafts(matchScores = []) {
+  return [0, 1, 2].map((index) => ({
+    opponentScore: matchScores[index]?.opponentScore ?? '',
+    teamScore: matchScores[index]?.teamScore ?? '',
+  }));
+}
+
+function createScoreEntryDraft(game = null) {
+  return {
+    matchScores: createMatchScoreDrafts(game?.matchScores),
   };
 }
 
@@ -139,6 +151,7 @@ function createEmptyScheduleAdminForm() {
     dateTbd: true,
     isoDate: '',
     location: '',
+    matchScores: createMatchScoreDrafts(),
     matchStatus: 'scheduled',
     opponent: '',
     opponentScore: '',
@@ -164,199 +177,8 @@ function createEmptyChallengeForm() {
   };
 }
 
-function createPairingDraft(game) {
-  return {
-    pairings: (game?.pairings ?? []).map((pairing) => ({
-      courtLabel: pairing.courtLabel,
-      playerIds: [...(pairing.playerIds ?? [])],
-    })),
-    rosterPlayerIds: [...(game?.rosterPlayerIds ?? [])],
-  };
-}
-
-function getPairingCountForRoster(rosterPlayerIds = []) {
-  return Math.min(1, Math.max(1, Math.ceil(rosterPlayerIds.length / 2)));
-}
-
-function normalizeDraftPairings(pairings = [], rosterPlayerIds = []) {
-  const selectedIds = new Set(rosterPlayerIds);
-  const seen = new Set();
-
-  return Array.from({ length: getPairingCountForRoster(rosterPlayerIds) }, (_, index) => {
-    const sourcePairing = pairings[index] ?? {};
-    const playerIds = (sourcePairing.playerIds ?? []).filter((playerId) => {
-      if (!selectedIds.has(playerId) || seen.has(playerId)) {
-        return false;
-      }
-
-      seen.add(playerId);
-      return true;
-    });
-
-    return {
-      courtLabel:
-        typeof sourcePairing.courtLabel === 'string' && sourcePairing.courtLabel.trim()
-          ? sourcePairing.courtLabel.trim()
-          : `Court ${index + 1}`,
-      playerIds: playerIds.slice(0, 2),
-    };
-  });
-}
-
-function normalizeDraftPairingsForMatch(pairings = [], rosterPlayerIds = [], playersNeeded = 2) {
-  const selectedIds = new Set(rosterPlayerIds);
-  const seen = new Set();
-  const slotCount = normalizeMatchPlayerCount(playersNeeded);
-  const pairingCount = Math.min(
-    1,
-    Math.max(getPairingCountForRoster(rosterPlayerIds), Math.ceil(slotCount / 2)),
-  );
-
-  return Array.from({ length: pairingCount }, (_, index) => {
-    const sourcePairing = pairings[index] ?? {};
-    const playerIds = (sourcePairing.playerIds ?? []).filter((playerId) => {
-      if (!selectedIds.has(playerId) || seen.has(playerId)) {
-        return false;
-      }
-
-      seen.add(playerId);
-      return true;
-    });
-
-    return {
-      courtLabel:
-        typeof sourcePairing.courtLabel === 'string' && sourcePairing.courtLabel.trim()
-          ? sourcePairing.courtLabel.trim()
-          : `Court ${index + 1}`,
-      playerIds: playerIds.slice(0, slotCount),
-    };
-  });
-}
-
-function buildPairingDrafts(games) {
-  return games.reduce((accumulator, game) => {
-    accumulator[game.id] = createPairingDraft(game);
-    return accumulator;
-  }, {});
-}
-
-function assignPlayerToNextOpenPairingSlot(pairings, playerId) {
-  const nextPairings = pairings.map((pairing) => ({
-    ...pairing,
-    playerIds: [...pairing.playerIds],
-  }));
-
-  for (const pairing of nextPairings) {
-    if (pairing.playerIds.length < 2) {
-      pairing.playerIds = [...pairing.playerIds, playerId];
-      return nextPairings;
-    }
-  }
-
-  return [
-    ...nextPairings,
-    {
-      courtLabel: `Court ${nextPairings.length + 1}`,
-      playerIds: [playerId],
-    },
-  ].slice(0, 4);
-}
-
-function formatMatchupLabel(game) {
-  return `${game.opponent || 'Opponent TBD'} · ${game.isoDate || game.dateLabel || 'Date TBD'}`;
-}
-
-function formatAttendanceStatus(status) {
-  if (status === 'in') {
-    return 'In';
-  }
-
-  if (status === 'out') {
-    return 'Out';
-  }
-
-  return 'Unknown';
-}
-
 function getAttendanceStatus(game, playerId) {
   return game.attendance?.[playerId] ?? 'unknown';
-}
-
-function buildAvailabilitySummary(game, players) {
-  return players.reduce(
-    (counts, player) => {
-      const status = getAttendanceStatus(game, player.id);
-
-      if (status === 'in') {
-        counts.in += 1;
-      } else if (status === 'out') {
-        counts.out += 1;
-      } else {
-        counts.unknown += 1;
-      }
-
-      return counts;
-    },
-    { in: 0, out: 0, unknown: 0 },
-  );
-}
-
-function getAttendanceBadgeClassName(status, selected = false) {
-  const classNames = ['status-badge'];
-
-  if (status === 'in') {
-    classNames.push('status-badge--active');
-  } else if (status === 'out') {
-    classNames.push('status-badge--inactive');
-  }
-
-  if (selected) {
-    classNames.push('status-badge--selected');
-  }
-
-  return classNames.join(' ');
-}
-
-function getAvailabilityStatusMeta(status, selected = false) {
-  if (status === 'in') {
-    return {
-      className: getAttendanceBadgeClassName('in', selected),
-      label: 'In',
-    };
-  }
-
-  if (status === 'out') {
-    return {
-      className: getAttendanceBadgeClassName('out', selected),
-      label: 'Out',
-    };
-  }
-
-  return {
-    className: getAttendanceBadgeClassName('unknown', selected),
-    label: '\u2014',
-  };
-}
-
-function getAvailabilityBoardStatusMeta(status, selected = false) {
-  if (status === 'in') {
-    return {
-      className: getAttendanceBadgeClassName('in', selected),
-      label: 'Available',
-    };
-  }
-
-  if (status === 'out') {
-    return {
-      className: getAttendanceBadgeClassName('out', selected),
-      label: 'Unavailable',
-    };
-  }
-
-  return {
-    className: getAttendanceBadgeClassName('unknown', selected),
-    label: 'No response',
-  };
 }
 
 function readFileAsDataUrl(file) {
@@ -498,60 +320,214 @@ function buildPlayerInitials(fullName) {
     .join('');
 }
 
-function MatchScheduleVersusHeader({ className = '', game, homeLogoUrl = '', homeTeamName = '' }) {
-  const opponentName = (game?.opponent ?? '').trim() || 'Opponent TBD';
-  const homeName = (homeTeamName ?? '').trim() || 'Your team';
-  const homeCustom =
-    game?.source === 'challenge' && (game.sourceTeamLogoUrl ?? '').trim()
-      ? (game.sourceTeamLogoUrl ?? '').trim()
-      : (homeLogoUrl ?? '').trim();
-  const awayCustom =
-    game?.source === 'challenge' && (game.linkedTeamLogoUrl ?? '').trim()
-      ? (game.linkedTeamLogoUrl ?? '').trim()
-      : '';
-  const homeSrc = homeCustom || defaultTeamLogo;
-  const awaySrc = awayCustom || defaultTeamLogo;
+function getVisibleMatchScores(game) {
+  const scores = Array.isArray(game?.matchScores) ? game.matchScores : [];
+  const hasThirdSet = scores[2]?.teamScore !== null || scores[2]?.opponentScore !== null;
+  const columnCount = hasThirdSet ? 3 : 2;
+
+  return Array.from({ length: columnCount }, (_, index) => ({
+    opponentScore: scores[index]?.opponentScore,
+    teamScore: scores[index]?.teamScore,
+  }));
+}
+
+function getSetWinner(score) {
+  if (score?.teamScore === null || score?.teamScore === undefined || score?.opponentScore === null || score?.opponentScore === undefined) {
+    return '';
+  }
+
+  const teamScore = Number(score.teamScore);
+  const opponentScore = Number(score.opponentScore);
+
+  if (!Number.isFinite(teamScore) || !Number.isFinite(opponentScore)) {
+    return '';
+  }
+
+  if (teamScore > opponentScore) {
+    return 'team';
+  }
+
+  if (opponentScore > teamScore) {
+    return 'opponent';
+  }
+
+  return '';
+}
+
+function hasSplitFirstTwoSets(matchScores = []) {
+  const firstWinner = getSetWinner(matchScores[0]);
+  const secondWinner = getSetWinner(matchScores[1]);
+
+  return Boolean(firstWinner && secondWinner && firstWinner !== secondWinner);
+}
+
+function shouldShowThirdScoreDraft(matchScores = []) {
+  const third = matchScores[2] ?? {};
+
+  return hasSplitFirstTwoSets(matchScores) || third.teamScore !== '' || third.opponentScore !== '';
+}
+
+function scoreDraftIsBlank(matchScores = []) {
+  return matchScores.every((score) => score.teamScore === '' && score.opponentScore === '');
+}
+
+function getMatchCourtLabel(location = '') {
+  const trimmed = (location ?? '').trim();
+  return trimmed || 'Court TBD';
+}
+
+function formatMatchFooterDate(game) {
+  if (!game?.isoDate) {
+    return 'Date TBD';
+  }
+
+  const dateLabel = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    weekday: 'short',
+    year: 'numeric',
+  }).format(new Date(`${game.isoDate}T12:00:00`));
+
+  return `${dateLabel} · ${game.timeLabel || 'Time TBD'}`;
+}
+
+function getMatchPlayerRoleRank(player) {
+  if (player?.memberRole === 'captain') {
+    return 0;
+  }
+
+  if (player?.memberRole === 'coCaptain') {
+    return 1;
+  }
+
+  return 2;
+}
+
+function sortMatchPlayersForDisplay(players = []) {
+  return [...players].sort((left, right) => {
+    const roleDifference = getMatchPlayerRoleRank(left) - getMatchPlayerRoleRank(right);
+
+    if (roleDifference !== 0) {
+      return roleDifference;
+    }
+
+    return (left.fullName || '').localeCompare(right.fullName || '');
+  });
+}
+
+function MatchCardScoreRow({
+  aggregateScore,
+  fallbackLogoUrl,
+  isOpponent = false,
+  name,
+  players = [],
+  scores,
+}) {
+  const sortedPlayers = sortMatchPlayersForDisplay(players);
 
   return (
-    <div
-      className={['schedule-matchup-vs', className].filter(Boolean).join(' ')}
-      role="group"
-      aria-label={`${homeName} versus ${opponentName}`}
-    >
-      <div className="schedule-matchup-vs__team">
-        <div className="schedule-matchup-vs__shield">
-          <img
-            alt=""
-            className="schedule-matchup-vs__logo-img"
-            decoding="async"
-            onError={(event) => {
-              event.currentTarget.onerror = null;
-              event.currentTarget.src = defaultTeamLogo;
-            }}
-            src={homeSrc}
-          />
-        </div>
-        <span className="schedule-matchup-vs__team-name">{homeName}</span>
+    <div className={`match-card-score-row ${isOpponent ? 'match-card-score-row--opponent' : ''}`}>
+      <div className="match-card-score-row__identity">
+        <img
+          alt=""
+          className="match-card-score-row__team-logo"
+          decoding="async"
+          onError={(event) => {
+            event.currentTarget.onerror = null;
+            event.currentTarget.src = defaultTeamLogo;
+          }}
+          src={fallbackLogoUrl || defaultTeamLogo}
+        />
+        <strong>{sortedPlayers.length ? sortedPlayers.map((player) => player.fullName || 'Player').join(' / ') : name}</strong>
       </div>
-      <div className="schedule-matchup-vs__vs" aria-hidden="true">
-        <span>VS</span>
-      </div>
-      <div className="schedule-matchup-vs__team">
-        <div className="schedule-matchup-vs__shield">
-          <img
-            alt=""
-            className="schedule-matchup-vs__logo-img"
-            decoding="async"
-            onError={(event) => {
-              event.currentTarget.onerror = null;
-              event.currentTarget.src = defaultTeamLogo;
-            }}
-            src={awaySrc}
-          />
-        </div>
-        <span className="schedule-matchup-vs__team-name">{opponentName}</span>
-      </div>
+      <span className="match-card-score-row__aggregate">{aggregateScore ?? '-'}</span>
+      {scores.map((score, index) => {
+        const winner = getSetWinner(score);
+        const value = isOpponent ? score.opponentScore : score.teamScore;
+
+        return (
+          <span
+            key={`set-${index}`}
+            className={`match-card-score-row__set ${winner === (isOpponent ? 'opponent' : 'team') ? 'match-card-score-row__set--won' : ''}`}
+          >
+            {value ?? '--'}
+          </span>
+        );
+      })}
     </div>
+  );
+}
+
+function CourtIcon() {
+  return (
+    <svg aria-hidden="true" className="match-card-footer__icon match-card-footer__icon--court" viewBox="0 0 32 20">
+      <path d="M2.5 3.5h27v13h-27z" />
+      <path d="M10.8 3.5v13M21.2 3.5v13" />
+      <path d="M2.5 10h8.3M21.2 10h8.3" />
+      <path className="match-card-footer__court-dash" d="M16 4.8v10.4" />
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg aria-hidden="true" className="match-card-footer__icon" viewBox="0 0 24 24">
+      <path d="M12 7v5l3 2" />
+      <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+    </svg>
+  );
+}
+
+function ScheduleMatchCard({
+  actions = null,
+  game,
+  homeLogoUrl = '',
+  homePlayers = [],
+  homeTeamName = '',
+}) {
+  const scores = getVisibleMatchScores(game);
+  const matchTypeLabel = normalizeMatchPlayerCount(game.playersNeeded) === 1 ? 'Singles' : 'Doubles';
+  const opponentName = game.opponent || 'Opponent TBD';
+  const opponentPlayers = game.linkedRosterPlayers ?? [];
+  const matchTitle = `${homeTeamName || 'Team'} VS ${opponentName} | ${matchTypeLabel} Match`;
+
+  return (
+    <article className="schedule-match-card schedule-match-card--scoreboard">
+      <div className="match-card-scoreboard__topline">
+        <span>{matchTitle}</span>
+        {actions ? <div className="match-card-scoreboard__top-actions">{actions}</div> : null}
+      </div>
+
+      <div className="match-card-score-table" aria-label={`${homeTeamName || 'Team'} versus ${opponentName} scores`}>
+        <MatchCardScoreRow
+          aggregateScore={game.teamScore}
+          fallbackLogoUrl={homeLogoUrl}
+          name={homeTeamName || 'Team'}
+          players={homePlayers}
+          scores={scores}
+        />
+        <MatchCardScoreRow
+          aggregateScore={game.opponentScore}
+          fallbackLogoUrl={game.linkedTeamLogoUrl}
+          isOpponent
+          name={opponentName}
+          players={opponentPlayers}
+          scores={scores}
+        />
+      </div>
+
+      <div className="match-card-footer">
+        <span>
+          <ClockIcon />
+          {formatMatchFooterDate(game)}
+        </span>
+        <span>
+          <CourtIcon />
+          {getMatchCourtLabel(game.location)}
+        </span>
+      </div>
+
+    </article>
   );
 }
 
@@ -785,11 +761,52 @@ function createEmptyTeamSettingsForm(team = {}) {
   };
 }
 
+function buildDefaultCourtLabels(numberOfCourts = '') {
+  const courtCount = Number(numberOfCourts);
+
+  if (!Number.isInteger(courtCount) || courtCount <= 0) {
+    return [];
+  }
+
+  return Array.from({ length: courtCount }, (_, index) => String(index + 1));
+}
+
+function createCourtLabelsText(club = {}) {
+  const labels = Array.isArray(club.courtLabels) && club.courtLabels.length
+    ? club.courtLabels
+    : buildDefaultCourtLabels(club.numberOfCourts);
+
+  return labels.join('\n');
+}
+
+function parseCourtLabelsText(value = '') {
+  return value
+    .split(/[\n,]+/)
+    .map((label) => label.trim())
+    .filter(Boolean);
+}
+
+function buildCourtOptionsFromClub(club = null) {
+  if (!club) {
+    return [];
+  }
+
+  const labels = Array.isArray(club.courtLabels) && club.courtLabels.length
+    ? club.courtLabels
+    : buildDefaultCourtLabels(club.numberOfCourts);
+
+  return labels.map((label) => ({
+    label: label.match(/^court\b/i) ? label : `Court ${label}`,
+    value: label.match(/^court\b/i) ? label : `Court ${label}`,
+  }));
+}
+
 function createEmptyClubForm(club = {}) {
   return {
     address: club.address ?? '',
     city: club.city ?? '',
     clubName: club.name ?? '',
+    courtLabelsText: createCourtLabelsText(club),
     logoFile: null,
     logoPreviewUrl: '',
     numberOfCourts: club.numberOfCourts ?? '',
@@ -3643,22 +3660,52 @@ export function RosterPage() {
 
 export function SchedulePage() {
   const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
   const [games, setGames] = useState([]);
+  const [membership, setMembership] = useState(null);
   const [players, setPlayers] = useState([]);
+  const [courtOptions, setCourtOptions] = useState([]);
   const [teamProfile, setTeamProfile] = useState({ logoUrl: '', name: '' });
   const [activeTab, setActiveTab] = useState('upcoming');
+  const [editorMode, setEditorMode] = useState('');
+  const [editingGameId, setEditingGameId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(createEmptyScheduleAdminForm());
+  const [scoreEditorGameId, setScoreEditorGameId] = useState('');
+  const [scoreForm, setScoreForm] = useState(createScoreEntryDraft());
+
+  const canManage = canManageRole(membership?.role);
+  const isEditorOpen = editorMode === 'edit';
+  const editingGame = isEditorOpen ? games.find((game) => game.id === editingGameId) ?? null : null;
+  const scoringGame = scoreEditorGameId ? games.find((game) => game.id === scoreEditorGameId) ?? null : null;
 
   async function loadScheduleData() {
-    const [gameData, playerData, teamData] = await Promise.all([
+    const [gameData, membershipData, playerData, memberData, teamData, clubData] = await Promise.all([
       listGames(clubSlug, teamSlug),
+      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
       listPlayers(clubSlug, teamSlug),
+      listTeamMembers(clubSlug, teamSlug),
       getTeam(clubSlug, teamSlug),
+      listClubs({ includeIndependent: true }),
     ]);
+    const roleByPlayerId = new Map(
+      memberData
+        .filter((member) => member.playerId)
+        .map((member) => [member.playerId, member.role ?? '']),
+    );
+    const activeClubSlug =
+      teamData?.affiliationStatus === 'approved' && teamData?.approvedClubSlug
+        ? teamData.approvedClubSlug
+        : clubSlug;
+    const activeClub = clubData.find((club) => club.slug === activeClubSlug) ?? null;
 
     setGames(gameData);
-    setPlayers(playerData);
+    setMembership(membershipData);
+    setPlayers(playerData.map((player) => ({ ...player, memberRole: roleByPlayerId.get(player.id) ?? '' })));
+    setCourtOptions(buildCourtOptionsFromClub(activeClub));
     setTeamProfile({
       logoUrl: teamData?.logoUrl ?? '',
       name: teamData?.name ?? teamSlug,
@@ -3676,7 +3723,7 @@ export function SchedulePage() {
       .finally(() => {
         setLoading(false);
       });
-  }, [clubSlug, teamSlug]);
+  }, [clubSlug, teamSlug, user?.uid]);
 
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const upcomingGames = useMemo(
@@ -3688,6 +3735,135 @@ export function SchedulePage() {
     [games, todayDateKey],
   );
   const visibleGames = activeTab === 'past' ? pastGames : upcomingGames;
+
+  function openEditEditor(game) {
+    setEditorMode('edit');
+    setScoreEditorGameId('');
+    setEditingGameId(game.id);
+    setForm(createScheduleAdminDraft(game));
+    setError('');
+    setMessage('');
+  }
+
+  function closeEditor() {
+    setEditorMode('');
+    setEditingGameId('');
+    setForm(createEmptyScheduleAdminForm());
+  }
+
+  function openScoreEditor(game) {
+    setEditorMode('');
+    setEditingGameId('');
+    setScoreEditorGameId(game.id);
+    setScoreForm(createScoreEntryDraft(game));
+    setError('');
+    setMessage('');
+  }
+
+  function closeScoreEditor() {
+    setScoreEditorGameId('');
+    setScoreForm(createScoreEntryDraft());
+  }
+
+  function clearScoreDraft() {
+    setScoreForm(createScoreEntryDraft());
+    setError('');
+  }
+
+  function updateScoreDraft(index, field, value) {
+    setScoreForm((current) => ({
+      ...current,
+      matchScores: current.matchScores.map((score, scoreIndex) =>
+        scoreIndex === index
+          ? {
+              ...score,
+              [field]: value,
+            }
+          : score,
+      ),
+    }));
+  }
+
+  async function handleEditorSubmit(event) {
+    event.preventDefault();
+
+    if (!editingGame) {
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await saveGame({
+        ...form,
+        clubSlug,
+        gameId: editingGame.id,
+        teamSlug,
+        user,
+      });
+      setMessage('Matchup updated.');
+      closeEditor();
+      await loadScheduleData();
+    } catch (submitError) {
+      setError(submitError.message ?? 'Unable to save that matchup.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleScoreSubmit(event) {
+    event.preventDefault();
+
+    if (!scoringGame) {
+      return;
+    }
+
+    const resettingScores = scoreDraftIsBlank(scoreForm.matchScores);
+    const firstTwoScoresComplete = scoreForm.matchScores
+      .slice(0, 2)
+      .every((score) => score.teamScore !== '' && score.opponentScore !== '');
+
+    if (!resettingScores && !firstTwoScoresComplete) {
+      setError('Enter scores for the first two games.');
+      return;
+    }
+
+    if (!resettingScores && hasSplitFirstTwoSets(scoreForm.matchScores)) {
+      const thirdScore = scoreForm.matchScores[2] ?? {};
+
+      if (thirdScore.teamScore === '' || thirdScore.opponentScore === '') {
+        setError('Enter the third game score because the teams split the first two games.');
+        return;
+      }
+    }
+
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await saveGame({
+        ...createScheduleAdminDraft(scoringGame),
+        clubSlug,
+        gameId: scoringGame.id,
+        matchScores: resettingScores ? [] : scoreForm.matchScores,
+        matchStatus: resettingScores ? 'scheduled' : 'completed',
+        opponentScore: resettingScores ? '' : undefined,
+        teamSlug,
+        teamScore: resettingScores ? '' : undefined,
+        user,
+      });
+      setMessage(resettingScores ? 'Scores cleared. Match reset to scheduled.' : 'Scores entered.');
+      closeScoreEditor();
+      await loadScheduleData();
+    } catch (submitError) {
+      setError(submitError.message ?? 'Unable to save those scores.');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="page-grid schedule-page">
@@ -3703,6 +3879,171 @@ export function SchedulePage() {
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
+
+        {isEditorOpen && editingGame ? (
+          <section className="schedule-admin-card schedule-admin-card--editor">
+            <div className="schedule-admin-card__header">
+              <div>
+                <h2>Edit {editingGame.opponent || 'match'}</h2>
+                <p>Update the match date, time, court, players needed, and opponent label.</p>
+              </div>
+            </div>
+
+            <form className="schedule-admin-form schedule-admin-form--compact" onSubmit={handleEditorSubmit}>
+              <div className="schedule-admin-form__main-fields">
+                <MatchupLabelField
+                  onChange={(nextOpponent) => setForm((current) => ({ ...current, opponent: nextOpponent }))}
+                  value={form.opponent}
+                />
+                <label className="field">
+                  <span>Court</span>
+                  <select
+                    onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
+                    value={form.location}
+                  >
+                    <option value="">Court TBD</option>
+                    {form.location && !courtOptions.some((court) => court.value === form.location) ? (
+                      <option value={form.location}>{form.location}</option>
+                    ) : null}
+                    {courtOptions.map((court) => (
+                      <option key={court.value} value={court.value}>
+                        {court.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="checkbox-field schedule-admin-form__tbd">
+                <input
+                  checked={form.dateTbd}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      dateTbd: event.target.checked,
+                      isoDate: event.target.checked ? '' : current.isoDate,
+                      timeLabel: event.target.checked ? '' : current.timeLabel,
+                    }))
+                  }
+                  type="checkbox"
+                />
+                <span>
+                  <strong>Date and time TBD</strong>
+                  <small>Leave checked until the match date is confirmed.</small>
+                </span>
+              </label>
+
+              <div className="schedule-admin-form__datetime-row">
+                <label className="field schedule-admin-form__date-field">
+                  <span>Game date</span>
+                  <input
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        dateTbd: event.target.value ? false : current.dateTbd,
+                        isoDate: event.target.value,
+                      }))
+                    }
+                    type="date"
+                    value={form.isoDate}
+                  />
+                </label>
+                <TimePickerField
+                  disabled={form.dateTbd}
+                  onChange={(nextTimeLabel) => setForm((current) => ({ ...current, timeLabel: nextTimeLabel }))}
+                  value={form.timeLabel}
+                />
+                <label className="field schedule-admin-form__players-needed-field">
+                  <span>Players needed</span>
+                  <select
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, playersNeeded: Number(event.target.value) }))
+                    }
+                    value={form.playersNeeded}
+                  >
+                    {MATCH_PLAYER_COUNT_OPTIONS.map((count) => (
+                      <option key={count} value={count}>
+                        {count}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="schedule-admin-form__actions">
+                <button className="button" disabled={saving} type="submit">
+                  {saving ? 'Saving...' : 'Save Match'}
+                </button>
+                <button className="button button--ghost" onClick={closeEditor} type="button">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </section>
+        ) : null}
+
+        {scoringGame ? (
+          <div className="score-entry-dialog" role="dialog" aria-modal="true" aria-label="Enter match scores">
+            <button
+              aria-label="Close score entry"
+              className="score-entry-dialog__backdrop"
+              onClick={closeScoreEditor}
+              type="button"
+            />
+            <form className="score-entry-dialog__panel" onSubmit={handleScoreSubmit}>
+              <div className="score-entry-dialog__header">
+                <div>
+                  <p className="eyebrow">Best of three</p>
+                  <h2>Enter Scores</h2>
+                  <p>
+                    {teamProfile.name || 'Team'} vs. {scoringGame.opponent || 'Opponent TBD'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="score-entry-grid">
+                {(shouldShowThirdScoreDraft(scoreForm.matchScores) ? [0, 1, 2] : [0, 1]).map((index) => (
+                  <fieldset key={index} className="score-entry-set">
+                    <legend>Game {index + 1}</legend>
+                    <label className="field">
+                      <span>{teamProfile.name || 'Team'}</span>
+                      <input
+                        inputMode="numeric"
+                        onChange={(event) => updateScoreDraft(index, 'teamScore', event.target.value)}
+                        value={scoreForm.matchScores[index]?.teamScore ?? ''}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{scoringGame.opponent || 'Opponent'}</span>
+                      <input
+                        inputMode="numeric"
+                        onChange={(event) => updateScoreDraft(index, 'opponentScore', event.target.value)}
+                        value={scoreForm.matchScores[index]?.opponentScore ?? ''}
+                      />
+                    </label>
+                  </fieldset>
+                ))}
+              </div>
+
+              <p className="score-entry-dialog__hint">
+                Game 3 appears when the teams split the first two games.
+              </p>
+
+              <div className="schedule-admin-form__actions">
+                <button className="button" disabled={saving} type="submit">
+                  {saving ? 'Saving scores...' : 'Save scores'}
+                </button>
+                <button className="button button--ghost" disabled={saving} onClick={clearScoreDraft} type="button">
+                  Clear
+                </button>
+                <button className="button button--ghost" onClick={closeScoreEditor} type="button">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : null}
 
         {games.length > 0 ? (
           <div className="availability-tabs" aria-label="Schedule views">
@@ -3727,81 +4068,27 @@ export function SchedulePage() {
           <div className="schedule-grid">
             {visibleGames.map((game) => {
               const rosterPairings = buildRosterPairings(game, players);
-              const hasRoster = rosterPairings.length > 0;
-              const rosterCount = game.rosterPlayerIds?.length ?? 0;
-              const playersNeeded = normalizeMatchPlayerCount(game.playersNeeded);
-              const rosterStatusLabel = hasRoster ? 'Roster posted' : 'Roster not posted yet';
-              const matchTypeLabel = playersNeeded === 1 ? 'Singles' : 'Doubles';
 
               return (
-                <article key={game.id} className="schedule-match-card">
-                  <div className="schedule-match-card__header">
-                    <div>
-                      <p className="schedule-match-card__date">
-                        {game.isoDate
-                          ? new Intl.DateTimeFormat('en-US', {
-                              weekday: 'long',
-                              month: 'short',
-                              day: 'numeric',
-                            })
-                              .format(new Date(`${game.isoDate}T12:00:00`))
-                              .toUpperCase()
-                          : 'DATE TBD'}
-                      </p>
-                      <MatchScheduleVersusHeader
-                        className="schedule-matchup-vs--compact"
-                        game={game}
-                        homeLogoUrl={teamProfile.logoUrl}
-                        homeTeamName={teamProfile.name}
-                      />
-                      <span className="schedule-match-card__meta-line">
-                        {game.timeLabel || 'Time TBD'} {game.timeLabel ? '·' : ''} {game.location || 'TBD'}
-                      </span>
-                    </div>
-                    <span className="game-roster-board__badge">
-                      {getGameRosterBadge(game, todayDateKey)}
-                    </span>
-                  </div>
-
-                  <div className="schedule-match-card__stats">
-                    <span>{rosterStatusLabel}</span>
-                    <span>{matchTypeLabel}</span>
-                    <span>Roster: {rosterCount} / {playersNeeded}</span>
-                    <span>Status: {game.matchStatus || 'scheduled'}</span>
-                  </div>
-
-                  {hasRoster ? (
-                    <div className="schedule-match-roster">
-                      {rosterPairings.map((pairing) => (
-                        <section key={pairing.courtLabel} className="game-roster-pair-card">
-                          <div className="game-roster-pair-card__header">
-                            <div className="game-roster-pair-card__title-row">
-                              <strong>{pairing.courtLabel}</strong>
-                              <span>{pairing.filledSlots} players assigned</span>
-                            </div>
-                            <span className="game-roster-pair-card__count">{pairing.filledSlots}/{playersNeeded}</span>
-                          </div>
-
-                          <div className="game-roster-pair-card__players">
-                            {pairing.players.map((player) => (
-                              <article key={player.id} className="game-roster-player-card">
-                                <div className="game-roster-player-card__identity">
-                                  <div className="game-roster-player-card__avatar">
-                                    {buildPlayerInitials(player.fullName || 'Player')}
-                                  </div>
-                                  <div>
-                                    <strong>{player.fullName || 'Unnamed player'}</strong>
-                                    <span>In {pairing.courtLabel}</span>
-                                  </div>
-                                </div>
-                              </article>
-                            ))}
-                          </div>
-                        </section>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
+                <ScheduleMatchCard
+                  key={game.id}
+                  actions={
+                    canManage ? (
+                      <>
+                        <button className="button" onClick={() => openEditEditor(game)} type="button">
+                          Edit Match
+                        </button>
+                        <button className="button" onClick={() => openScoreEditor(game)} type="button">
+                          Enter Scores
+                        </button>
+                      </>
+                    ) : null
+                  }
+                  game={game}
+                  homeLogoUrl={teamProfile.logoUrl}
+                  homePlayers={rosterPairings.flatMap((pairing) => pairing.players)}
+                  homeTeamName={teamProfile.name}
+                />
               );
             })}
           </div>
@@ -3816,436 +4103,6 @@ export function SchedulePage() {
   );
 }
 
-export function ScheduleScoresPage() {
-  const { clubSlug, teamSlug } = useParams();
-  const { user } = useAuth();
-  const [games, setGames] = useState([]);
-  const [membership, setMembership] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [editorMode, setEditorMode] = useState('');
-  const [editingGameId, setEditingGameId] = useState('');
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState(createEmptyScheduleAdminForm());
-  const [teamName, setTeamName] = useState('');
-  const [teamLogoUrl, setTeamLogoUrl] = useState('');
-  const [activeTab, setActiveTab] = useState('upcoming');
-
-  const canManage = canManageRole(membership?.role);
-  const teamScoreLabel = `${teamName || 'Team'} score`;
-  const isEditorOpen = editorMode === 'add' || editorMode === 'edit';
-  const isEditing = editorMode === 'edit';
-  const editingGame = isEditing ? games.find((game) => game.id === editingGameId) ?? null : null;
-  const todayDateKey = useMemo(() => getTodayDateKey(), []);
-  const upcomingGames = useMemo(
-    () => games.filter((game) => !gameBelongsInPast(game, todayDateKey)),
-    [games, todayDateKey],
-  );
-  const pastGames = useMemo(
-    () => games.filter((game) => gameBelongsInPast(game, todayDateKey)),
-    [games, todayDateKey],
-  );
-  const visibleGames = activeTab === 'past' ? pastGames : upcomingGames;
-
-  async function loadScheduleData() {
-    const [gameData, membershipData, teamData] = await Promise.all([
-      listGames(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
-      getTeam(clubSlug, teamSlug),
-    ]);
-
-    setGames(gameData);
-    setMembership(membershipData);
-    setTeamName(teamData?.name ?? '');
-    setTeamLogoUrl(teamData?.logoUrl ?? '');
-  }
-
-  useEffect(() => {
-    setLoading(true);
-    setError('');
-
-    loadScheduleData()
-      .catch((loadError) => {
-        setError(loadError.message ?? 'Unable to load matchups yet.');
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, [clubSlug, teamSlug, user?.uid]);
-
-  function openAddEditor() {
-    setEditorMode('add');
-    setEditingGameId('');
-    setForm(createEmptyScheduleAdminForm());
-    setError('');
-    setMessage('');
-  }
-
-  function openEditEditor(game) {
-    setEditorMode('edit');
-    setEditingGameId(game.id);
-    setForm(createScheduleAdminDraft(game));
-    setError('');
-    setMessage('');
-  }
-
-  function closeEditor() {
-    setEditorMode('');
-    setEditingGameId('');
-    setForm(createEmptyScheduleAdminForm());
-  }
-
-  async function handleEditorSubmit(event) {
-    event.preventDefault();
-
-    if (isEditing && !editingGame) {
-      return;
-    }
-
-    setSaving(true);
-    setError('');
-    setMessage('');
-
-    try {
-      await saveGame({
-        ...form,
-        clubSlug,
-        gameId: isEditing ? editingGame.id : undefined,
-        teamSlug,
-        user,
-      });
-      setMessage(isEditing ? 'Matchup updated.' : 'Matchup added to the schedule.');
-      closeEditor();
-      await loadScheduleData();
-    } catch (submitError) {
-      setError(submitError.message ?? 'Unable to save that matchup.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDeleteGame() {
-    if (!editingGame) {
-      return;
-    }
-
-    const isChallengeMatch = editingGame.source === 'challenge';
-    const hasChallengeResult =
-      editingGame.matchStatus === 'completed' || editingGame.teamScore !== null || editingGame.opponentScore !== null;
-
-    if (isChallengeMatch && hasChallengeResult) {
-      setError('Completed challenge matches cannot be deleted. Contact the app admin if this result needs correction.');
-      return;
-    }
-
-    if (
-      isChallengeMatch &&
-      !window.confirm(
-        "This accepted challenge match will be removed from both teams' schedules, including availability and roster assignments. Continue?",
-      )
-    ) {
-      return;
-    }
-
-    setDeleting(true);
-    setError('');
-    setMessage('');
-
-    try {
-      await deleteGame({
-        clubSlug,
-        gameId: editingGame.id,
-        teamSlug,
-        user,
-      });
-      setMessage(isChallengeMatch ? 'Challenge match removed from both team schedules.' : 'Matchup deleted.');
-      setForm(createEmptyScheduleAdminForm());
-      closeEditor();
-      await loadScheduleData();
-    } catch (deleteError) {
-      setError(deleteError.message ?? 'Unable to delete that matchup.');
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  function getMatchDateBadge(game) {
-    if (game.dateTbd) {
-      return {
-        day: 'TBD',
-        month: 'Date',
-        weekday: '',
-      };
-    }
-
-    if (!game.isoDate) {
-      return {
-        day: 'TBD',
-        month: 'Date',
-        weekday: '',
-      };
-    }
-
-    const date = new Date(`${game.isoDate}T12:00:00`);
-
-    return {
-      day: new Intl.DateTimeFormat('en-US', { day: 'numeric' }).format(date),
-      month: new Intl.DateTimeFormat('en-US', { month: 'short' }).format(date),
-      weekday: new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date),
-    };
-  }
-
-  return (
-    <div className="page-grid schedule-admin-page">
-      <section className="card">
-        <p className="eyebrow">Match admin</p>
-        <h1>Manage Matches</h1>
-        <p>Add matches, enter scores, and update your team schedule.</p>
-
-        {error ? <div className="notice notice--error">{error}</div> : null}
-        {message ? <div className="notice notice--success">{message}</div> : null}
-
-        {loading ? (
-          <p>Loading matchups...</p>
-        ) : !canManage ? (
-          <div className="notice notice--info">
-            Captains and co-captains manage the schedule. Your current role is{' '}
-            <strong>{membership?.role ?? 'member'}</strong>.
-          </div>
-        ) : canManage ? (
-          <>
-            {isEditorOpen ? (
-              <section className="schedule-admin-card schedule-admin-card--editor">
-                <div className="schedule-admin-card__header">
-                  <div>
-                    <h2>{isEditing ? `Edit ${editingGame?.opponent || 'match'}` : 'Enter Match'}</h2>
-                    <p>
-                      {isEditing
-                        ? 'Update match details and scores.'
-                        : 'Add a match to your team schedule.'}
-                    </p>
-                  </div>
-                  {isEditing && form.timeLabel ? (
-                    <span className="game-roster-board__badge">{form.timeLabel}</span>
-                  ) : null}
-                </div>
-
-                <form className="schedule-admin-form schedule-admin-form--compact" onSubmit={handleEditorSubmit}>
-                  <div className="schedule-admin-form__main-fields">
-                    <MatchupLabelField
-                      onChange={(nextOpponent) => setForm((current) => ({ ...current, opponent: nextOpponent }))}
-                      value={form.opponent}
-                    />
-                    <label className="field">
-                      <span>Location / Court(s)</span>
-                      <input
-                        onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
-                        placeholder="Optional, e.g. Blackhawk CC Courts 1-4 or TBD"
-                        value={form.location}
-                      />
-                    </label>
-                  </div>
-                  <label className="checkbox-field schedule-admin-form__tbd">
-                    <input
-                      checked={form.dateTbd}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          dateTbd: event.target.checked,
-                          isoDate: event.target.checked ? '' : current.isoDate,
-                          timeLabel: event.target.checked ? '' : current.timeLabel,
-                        }))
-                      }
-                      type="checkbox"
-                    />
-                    <span>
-                      <strong>Date and time TBD</strong>
-                      <small>Leave checked until the match date is confirmed.</small>
-                    </span>
-                  </label>
-                  <div className="schedule-admin-form__datetime-row">
-                    <label className="field schedule-admin-form__date-field">
-                      <span>Game date</span>
-                      <input
-                        onChange={(event) =>
-                          setForm((current) => ({
-                            ...current,
-                            dateTbd: event.target.value ? false : current.dateTbd,
-                            isoDate: event.target.value,
-                          }))
-                        }
-                        type="date"
-                        value={form.isoDate}
-                      />
-                    </label>
-                    <TimePickerField
-                      disabled={form.dateTbd}
-                      onChange={(nextTimeLabel) => setForm((current) => ({ ...current, timeLabel: nextTimeLabel }))}
-                      value={form.timeLabel}
-                    />
-                    <label className="field schedule-admin-form__players-needed-field">
-                      <span>Players needed</span>
-                      <select
-                        onChange={(event) =>
-                          setForm((current) => ({ ...current, playersNeeded: Number(event.target.value) }))
-                        }
-                        value={form.playersNeeded}
-                      >
-                        {MATCH_PLAYER_COUNT_OPTIONS.map((count) => (
-                          <option key={count} value={count}>
-                            {count}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <div className="schedule-admin-form__status-score-row">
-                    <label className="field schedule-admin-form__status-field">
-                      <span>Match status</span>
-                      <select
-                        onChange={(event) => setForm((current) => ({ ...current, matchStatus: event.target.value }))}
-                        value={form.matchStatus}
-                      >
-                        <option value="scheduled">Scheduled</option>
-                        <option value="completed">Completed</option>
-                      </select>
-                    </label>
-                    <div className="schedule-admin-form__score-grid">
-                      <label className="field">
-                        <span>{teamScoreLabel}</span>
-                        <input
-                          inputMode="numeric"
-                          onChange={(event) => setForm((current) => ({ ...current, teamScore: event.target.value }))}
-                          value={form.teamScore}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Opponent score</span>
-                        <input
-                          inputMode="numeric"
-                          onChange={(event) =>
-                            setForm((current) => ({ ...current, opponentScore: event.target.value }))
-                          }
-                          value={form.opponentScore}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                  <div className="schedule-admin-form__actions">
-                    <button className="button" disabled={saving} type="submit">
-                      {saving ? 'Saving...' : isEditing ? 'Save Match' : 'Enter Match'}
-                    </button>
-                    <button className="button button--ghost" onClick={closeEditor} type="button">
-                      Cancel
-                    </button>
-                    {isEditing ? (
-                      <button
-                        className="button button--danger"
-                        disabled={deleting}
-                        onClick={handleDeleteGame}
-                        type="button"
-                      >
-                        {deleting ? 'Deleting...' : 'Delete'}
-                      </button>
-                    ) : null}
-                  </div>
-                </form>
-              </section>
-            ) : null}
-
-            {games.length > 0 ? (
-              <>
-                <div className="schedule-admin-list-controls">
-                  <div className="availability-tabs" aria-label="Schedule admin views">
-                    <button
-                      className={`availability-tabs__button ${activeTab === 'upcoming' ? 'availability-tabs__button--active' : ''}`}
-                      onClick={() => setActiveTab('upcoming')}
-                      type="button"
-                    >
-                      Upcoming ({upcomingGames.length})
-                    </button>
-                    <button
-                      className={`availability-tabs__button ${activeTab === 'past' ? 'availability-tabs__button--active' : ''}`}
-                      onClick={() => setActiveTab('past')}
-                      type="button"
-                    >
-                      Past ({pastGames.length})
-                    </button>
-                  </div>
-                  <button className="button" onClick={openAddEditor} type="button">
-                    Add Match
-                  </button>
-                </div>
-
-                {visibleGames.length > 0 ? (
-                  <div className="schedule-admin-match-grid">
-                    {visibleGames.map((game) => {
-                      const hasScore = game.teamScore !== null || game.opponentScore !== null;
-                      const dateBadge = getMatchDateBadge(game);
-
-                      return (
-                        <article key={game.id} className="schedule-match-card schedule-admin-match-card">
-                          <div className="schedule-match-card__date-badge" aria-label={game.dateLabel || 'Date TBD'}>
-                            <span>{dateBadge.month}</span>
-                            <strong>{dateBadge.day}</strong>
-                            {dateBadge.weekday ? <small>{dateBadge.weekday}</small> : null}
-                          </div>
-                          <div className="schedule-match-card__content">
-                            <MatchScheduleVersusHeader
-                              className="schedule-matchup-vs--compact schedule-matchup-vs--admin-inline"
-                              game={game}
-                              homeLogoUrl={teamLogoUrl}
-                              homeTeamName={teamName}
-                            />
-                            <span className="schedule-match-card__meta-line">
-                              {game.timeLabel || 'Time TBD'} {game.timeLabel ? '·' : ''}{' '}
-                              {game.location || 'Location TBD'}
-                            </span>
-                            <div className="schedule-match-card__stats">
-                              <span>Status: {game.matchStatus === 'completed' ? 'Completed' : 'Scheduled'}</span>
-                              <span>{normalizeMatchPlayerCount(game.playersNeeded)} Players</span>
-                              <span>
-                                {hasScore
-                                  ? `${teamName || 'Team'} ${game.teamScore ?? '-'} · Opponent ${game.opponentScore ?? '-'}`
-                                  : 'Score not entered'}
-                              </span>
-                            </div>
-                            <div className="schedule-admin-match-card__actions">
-                              <button
-                                className="choice-button"
-                                onClick={() => openEditEditor(game)}
-                                type="button"
-                              >
-                                Edit
-                              </button>
-                            </div>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p>{activeTab === 'past' ? 'No past matches yet.' : 'No upcoming matches yet.'}</p>
-                )}
-              </>
-            ) : (
-              <div className="schedule-admin-empty">
-                <p>No matches yet.</p>
-                <button className="button" onClick={openAddEditor} type="button">
-                  Add Match
-                </button>
-              </div>
-            )}
-          </>
-        ) : (
-          <p>No matchups saved yet.</p>
-        )}
-      </section>
-    </div>
-  );
-}
 export function StandingsPage() {
   const { clubSlug, teamSlug } = useParams();
   const [clubStandingsLoading, setClubStandingsLoading] = useState(true);
@@ -4366,1391 +4223,6 @@ export function StandingsPage() {
           team={team}
         />
       </section>
-    </div>
-  );
-}
-
-export function GameRostersPage() {
-  const { clubSlug, teamSlug } = useParams();
-  const [games, setGames] = useState([]);
-  const [players, setPlayers] = useState([]);
-  const [teamProfile, setTeamProfile] = useState({ logoUrl: '', name: '' });
-  const [selectedGameId, setSelectedGameId] = useState('');
-  const [error, setError] = useState('');
-
-  const todayDateKey = useMemo(() => getTodayDateKey(), []);
-
-  useEffect(() => {
-    Promise.all([listGames(clubSlug, teamSlug), listPlayers(clubSlug, teamSlug), getTeam(clubSlug, teamSlug)])
-      .then(([gameData, playerData, teamData]) => {
-        setGames(gameData);
-        setPlayers(playerData);
-        setTeamProfile({
-          logoUrl: teamData?.logoUrl ?? '',
-          name: teamData?.name ?? teamSlug,
-        });
-        setSelectedGameId((current) => {
-          if (current && gameData.some((game) => game.id === current)) {
-            return current;
-          }
-
-          return gameData[findFirstUpcomingGameIndex(gameData, todayDateKey)]?.id ?? '';
-        });
-      })
-      .catch((loadError) => {
-        setError(loadError.message ?? 'Unable to load game rosters yet.');
-      });
-  }, [clubSlug, teamSlug, todayDateKey]);
-
-  const selectedGameIndex = Math.max(
-    0,
-    games.findIndex((game) => game.id === selectedGameId),
-  );
-  const activeGame = games[selectedGameIndex] ?? null;
-  const rosterPairings = useMemo(
-    () => (activeGame ? buildRosterPairings(activeGame, players) : []),
-    [activeGame, players],
-  );
-
-  function moveSelection(direction) {
-    if (!games.length) {
-      return;
-    }
-
-    const nextIndex = Math.min(Math.max(selectedGameIndex + direction, 0), games.length - 1);
-    setSelectedGameId(games[nextIndex]?.id ?? '');
-  }
-
-  return (
-    <div className="page-grid game-rosters-page">
-      <section className="card">
-        <div className="game-rosters-page__header">
-          <div className="game-rosters-page__header-copy">
-            <p className="eyebrow">Team view</p>
-            <h1>Game Rosters</h1>
-            <p className="game-rosters-page__copy">
-              See the saved pairings for each matchup and review who is assigned to each court.
-            </p>
-          </div>
-        </div>
-
-        {error ? <div className="notice notice--error">{error}</div> : null}
-
-        {games.length > 0 ? (
-          <div className="game-rosters-page__pager">
-            <button
-              className="choice-button"
-              disabled={selectedGameIndex <= 0}
-              onClick={() => moveSelection(-1)}
-              type="button"
-            >
-              Previous
-            </button>
-            <span className="game-rosters-page__pager-label">
-              Matchup {selectedGameIndex + 1} of {games.length}
-            </span>
-            <button
-              className="choice-button"
-              disabled={selectedGameIndex >= games.length - 1}
-              onClick={() => moveSelection(1)}
-              type="button"
-            >
-              Next
-            </button>
-          </div>
-        ) : null}
-
-        {activeGame ? (
-          <article className="game-roster-board">
-            <div className="game-roster-board__header">
-              <div>
-                <p className="game-roster-board__date">
-                  {activeGame.isoDate
-                    ? new Intl.DateTimeFormat('en-US', {
-                        weekday: 'long',
-                        month: 'short',
-                        day: 'numeric',
-                      })
-                        .format(new Date(`${activeGame.isoDate}T12:00:00`))
-                        .toUpperCase()
-                    : 'DATE TBD'}
-                </p>
-                <MatchScheduleVersusHeader
-                  className="schedule-matchup-vs--hero"
-                  game={activeGame}
-                  homeLogoUrl={teamProfile.logoUrl}
-                  homeTeamName={teamProfile.name}
-                />
-                <p className="game-roster-board__meta">
-                  {activeGame.timeLabel || 'Time TBD'} {activeGame.timeLabel ? '·' : ''}{' '}
-                  {activeGame.location || 'TBD'}
-                </p>
-              </div>
-              <span className="game-roster-board__badge">
-                {getGameRosterBadge(activeGame, todayDateKey)}
-              </span>
-            </div>
-
-            {rosterPairings.length > 0 ? (
-              <div className="game-roster-board__pairs">
-                {rosterPairings.map((pairing) => (
-                  <section key={pairing.courtLabel} className="game-roster-pair-card">
-                    <div className="game-roster-pair-card__header">
-                      <div className="game-roster-pair-card__title-row">
-                        <strong>{pairing.courtLabel}</strong>
-                        <span>{pairing.filledSlots} players assigned</span>
-                      </div>
-                      <span className="game-roster-pair-card__count">{pairing.filledSlots}/2</span>
-                    </div>
-
-                    <div className="game-roster-pair-card__players">
-                      {pairing.players.map((player) => (
-                        <article key={player.id} className="game-roster-player-card">
-                          <div className="game-roster-player-card__identity">
-                            <div className="game-roster-player-card__avatar">
-                              {buildPlayerInitials(player.fullName || 'Player')}
-                            </div>
-                            <div>
-                              <strong>{player.fullName || 'Unnamed player'}</strong>
-                              <span>In {pairing.courtLabel}</span>
-                            </div>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-                ))}
-              </div>
-            ) : (
-              <p className="sidebar__empty">No players assigned yet.</p>
-            )}
-          </article>
-        ) : (
-          <p>No matchups are available for game rosters yet.</p>
-        )}
-      </section>
-    </div>
-  );
-}
-
-export function RosterMgmtPage() {
-  const { clubSlug, teamSlug } = useParams();
-  const { user } = useAuth();
-  const [games, setGames] = useState([]);
-  const [players, setPlayers] = useState([]);
-  const [membership, setMembership] = useState(null);
-  const [selectedGameId, setSelectedGameId] = useState('');
-  const [pairingDrafts, setPairingDrafts] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
-
-  const canManage = canManageRole(membership?.role);
-  const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
-  const activePlayerIds = useMemo(() => new Set(activePlayers.map((player) => player.id)), [activePlayers]);
-  const todayDateKey = useMemo(() => getTodayDateKey(), []);
-
-  async function loadPairingsData() {
-    const [gameData, playerData, membershipData] = await Promise.all([
-      listGames(clubSlug, teamSlug),
-      listPlayers(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
-    ]);
-    const upcomingGameData = gameData.filter((game) => !gameBelongsInPast(game, todayDateKey));
-
-    setGames(upcomingGameData);
-    setPlayers(playerData);
-    setMembership(membershipData);
-    setPairingDrafts(buildPairingDrafts(upcomingGameData));
-    setSelectedGameId((current) => {
-      if (current && upcomingGameData.some((game) => game.id === current)) {
-        return current;
-      }
-
-      return upcomingGameData[0]?.id ?? '';
-    });
-  }
-
-  useEffect(() => {
-    loadPairingsData().catch((loadError) => {
-      setError(loadError.message ?? 'Unable to load matchup pairings yet.');
-    });
-  }, [clubSlug, teamSlug, todayDateKey, user?.uid]);
-
-  const activeGame = games.find((game) => game.id === selectedGameId) ?? games[0] ?? null;
-  const playersNeeded = normalizeMatchPlayerCount(activeGame?.playersNeeded);
-  const availablePlayers = useMemo(
-    () => activePlayers.filter((player) => activeGame?.attendance?.[player.id] === 'in'),
-    [activeGame, activePlayers],
-  );
-  const availablePlayerIds = useMemo(
-    () => new Set(availablePlayers.map((player) => player.id)),
-    [availablePlayers],
-  );
-  const activeDraft = activeGame
-    ? pairingDrafts[activeGame.id] ?? createPairingDraft(activeGame)
-    : null;
-
-  useEffect(() => {
-    if (!activeGame) {
-      return;
-    }
-
-    setPairingDrafts((current) => {
-      const draft = current[activeGame.id] ?? createPairingDraft(activeGame);
-      const rosterPlayerIds = draft.rosterPlayerIds
-        .filter((playerId) => activePlayerIds.has(playerId))
-        .slice(0, playersNeeded);
-      const pairings = normalizeDraftPairingsForMatch(draft.pairings, rosterPlayerIds, playersNeeded);
-
-      if (
-        rosterPlayerIds.length === draft.rosterPlayerIds.length &&
-        JSON.stringify(pairings) === JSON.stringify(draft.pairings)
-      ) {
-        return current;
-      }
-
-      return {
-        ...current,
-        [activeGame.id]: {
-          ...draft,
-          pairings,
-          rosterPlayerIds,
-        },
-      };
-    });
-  }, [activeGame, activePlayerIds, playersNeeded]);
-
-  const pairingSummary = useMemo(() => {
-    if (!activeGame || !activeDraft) {
-      return {
-        pairings: [],
-        selectedPlayers: [],
-      };
-    }
-
-    return buildPairingSummary(
-      {
-        ...activeGame,
-        pairings: activeDraft.pairings,
-        rosterPlayerIds: activeDraft.rosterPlayerIds,
-      },
-      players,
-    );
-  }, [activeDraft, activeGame, players]);
-  const visiblePairings = useMemo(
-    () =>
-      activeDraft ? normalizeDraftPairingsForMatch(activeDraft.pairings, activeDraft.rosterPlayerIds, playersNeeded) : [],
-    [activeDraft, playersNeeded],
-  );
-
-  function updateDraft(updater) {
-    if (!activeGame) {
-      return;
-    }
-
-    setPairingDrafts((current) => ({
-      ...current,
-      [activeGame.id]: updater(current[activeGame.id] ?? createPairingDraft(activeGame)),
-    }));
-  }
-
-  function toggleRosterPlayer(playerId) {
-    if (!availablePlayerIds.has(playerId)) {
-      setError('Only players marked Available for this matchup can be added to the roster.');
-      return;
-    }
-
-    updateDraft((draft) => {
-      const exists = draft.rosterPlayerIds.includes(playerId);
-
-      if (!exists && draft.rosterPlayerIds.length >= playersNeeded) {
-        setError(`Choose up to ${playersNeeded} players for this match roster.`);
-        return draft;
-      }
-
-      const rosterPlayerIds = exists
-        ? draft.rosterPlayerIds.filter((id) => id !== playerId)
-        : [...draft.rosterPlayerIds, playerId];
-      const selectedIds = new Set(rosterPlayerIds);
-      let pairings = normalizeDraftPairingsForMatch(draft.pairings, rosterPlayerIds, playersNeeded).map((pairing) => ({
-        ...pairing,
-        playerIds: pairing.playerIds.filter((id) => selectedIds.has(id)),
-      }));
-
-      if (!exists) {
-        pairings = assignPlayerToNextOpenPairingSlot(pairings, playerId);
-      }
-
-      setError('');
-      return {
-        ...draft,
-        pairings: normalizeDraftPairingsForMatch(pairings, rosterPlayerIds, playersNeeded),
-        rosterPlayerIds,
-      };
-    });
-  }
-
-  function updatePairingSlot(pairIndex, slotIndex, playerId) {
-    updateDraft((draft) => {
-      const nextPairings = normalizeDraftPairingsForMatch(draft.pairings, draft.rosterPlayerIds, playersNeeded).map((pairing) => ({
-        ...pairing,
-        playerIds: [...pairing.playerIds],
-      }));
-      const previousPlayerId = nextPairings[pairIndex]?.playerIds?.[slotIndex] ?? '';
-
-      nextPairings.forEach((pairing) => {
-        pairing.playerIds = pairing.playerIds.filter((id) => id !== playerId);
-      });
-
-      const nextPlayerIds = [...(nextPairings[pairIndex]?.playerIds ?? [])];
-
-      while (nextPlayerIds.length < playersNeeded) {
-        nextPlayerIds.push('');
-      }
-
-      nextPlayerIds[slotIndex] = playerId;
-      nextPairings[pairIndex] = {
-        ...nextPairings[pairIndex],
-        playerIds: nextPlayerIds.filter(Boolean).slice(0, playersNeeded),
-      };
-      const pairedPlayerIds = new Set(nextPairings.flatMap((pairing) => pairing.playerIds ?? []).filter(Boolean));
-      let rosterPlayerIds = draft.rosterPlayerIds.filter((id) => activePlayerIds.has(id));
-
-      if (playerId && !rosterPlayerIds.includes(playerId)) {
-        if (rosterPlayerIds.length >= playersNeeded) {
-          setError(`Choose up to ${playersNeeded} players for this match roster.`);
-          return draft;
-        }
-
-        rosterPlayerIds = [...rosterPlayerIds, playerId];
-      }
-
-      if (previousPlayerId && !pairedPlayerIds.has(previousPlayerId) && !availablePlayerIds.has(previousPlayerId)) {
-        rosterPlayerIds = rosterPlayerIds.filter((id) => id !== previousPlayerId);
-      }
-
-      setError('');
-      return {
-        ...draft,
-        pairings: normalizeDraftPairingsForMatch(nextPairings, rosterPlayerIds, playersNeeded),
-        rosterPlayerIds,
-      };
-    });
-  }
-
-  async function handleSavePairings() {
-    if (!activeGame || !activeDraft) {
-      return;
-    }
-
-    setSaving(true);
-    setError('');
-    setMessage('');
-
-    try {
-      await saveGamePairings({
-        clubSlug,
-        gameId: activeGame.id,
-        pairings: activeDraft.pairings,
-        rosterPlayerIds: activeDraft.rosterPlayerIds,
-        teamSlug,
-      });
-      setMessage('Pairings saved for that matchup.');
-      await loadPairingsData();
-    } catch (saveError) {
-      setError(saveError.message ?? 'Unable to save matchup pairings.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="page-grid roster-builder-page">
-      <section className="card roster-builder-hero">
-        <div className="roster-builder-hero__header">
-          <div>
-            <p className="eyebrow">Match rosters</p>
-            <h1>Build Rosters</h1>
-            <p className="roster-builder-hero__copy">
-                  Pick a match, choose available players, or manually assign any active player into court slots.
-                  Saved rosters appear on the player Team Matches page.
-            </p>
-          </div>
-          {activeDraft ? (
-            <span className="settings-admin-member-pill">
-              {activeDraft.rosterPlayerIds.length} / {playersNeeded} selected
-            </span>
-          ) : null}
-        </div>
-
-        {error ? <div className="notice notice--error">{error}</div> : null}
-        {message ? <div className="notice notice--success">{message}</div> : null}
-
-        {games.length > 0 ? (
-          <div className="roster-builder-match-picker" aria-label="Choose a match">
-            {games.map((game) => {
-              const selectedCount =
-                pairingDrafts[game.id]?.rosterPlayerIds.length ?? game.rosterPlayerIds?.length ?? 0;
-              const availableCount = Object.values(game.attendance ?? {}).filter((status) => status === 'in').length;
-              const matchPlayersNeeded = normalizeMatchPlayerCount(game.playersNeeded);
-
-              return (
-                <button
-                  key={game.id}
-                  className={`roster-builder-match-card ${game.id === activeGame?.id ? 'roster-builder-match-card--active' : ''}`}
-                  onClick={() => {
-                    setSelectedGameId(game.id);
-                    setError('');
-                    setMessage('');
-                  }}
-                  type="button"
-                >
-                  <div className="roster-builder-match-card__main">
-                    <span>{game.id === activeGame?.id ? 'Selected Match' : 'Match'}</span>
-                    <strong>{game.opponent || 'Opponent TBD'}</strong>
-                    <small>
-                      {game.isoDate || game.dateLabel || 'Date TBD'} · {game.location || 'Location TBD'}
-                    </small>
-                  </div>
-                  <div className="roster-builder-match-card__badges">
-                    <span className="roster-builder-match-card__badge">{availableCount} Available</span>
-                    <span className="roster-builder-match-card__badge roster-builder-match-card__badge--selected">
-                      {selectedCount} / {matchPlayersNeeded} Selected
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <p>No upcoming matches are available for roster building yet.</p>
-        )}
-      </section>
-
-      {activeGame ? (
-        <>
-          <section className="card roster-builder-section">
-            <div className="roster-builder-section__header">
-              <div>
-                <p className="eyebrow">Available Players</p>
-                <h2>Select the roster</h2>
-                <p>
-                  Select players marked Available for quick setup. If someone forgot to mark availability,
-                  assign them manually in the court dropdowns below.
-                </p>
-              </div>
-              <span className="settings-admin-member-pill">
-                {availablePlayers.length} available
-              </span>
-            </div>
-
-            {canManage ? (
-              availablePlayers.length > 0 ? (
-                <div className="pairing-pool roster-builder-player-grid">
-                  {availablePlayers.map((player) => {
-                    const selected = activeDraft?.rosterPlayerIds.includes(player.id);
-                    const attendanceStatus = formatAttendanceStatus(
-                      activeGame.attendance?.[player.id] ?? 'unknown',
-                    );
-
-                    return (
-                      <button
-                        key={player.id}
-                        className={`pairing-chip ${selected ? 'pairing-chip--active' : ''}`}
-                        onClick={() => toggleRosterPlayer(player.id)}
-                        type="button"
-                      >
-                        <div className="pairing-chip__header">
-                          <strong>{player.fullName || 'Unnamed player'}</strong>
-                        </div>
-                        <span>
-                          {attendanceStatus}
-                          {player.skillLevel ? ` · ${player.skillLevel}` : ''}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="notice notice--info">
-                  No players have marked Available for this match yet. Players can update availability
-                  from Team Matches.
-                </div>
-              )
-            ) : (
-              <div className="notice notice--info">
-                Captains and co-captains can build rosters. Your current role is{' '}
-                <strong>{membership?.role ?? 'member'}</strong>.
-              </div>
-            )}
-          </section>
-
-          <section className="card roster-builder-section">
-            <div className="roster-builder-section__header">
-              <div>
-                <p className="eyebrow">Assign Courts</p>
-                <h2>Court assignments</h2>
-                <p>Review the auto-filled slots or move players between courts before saving.</p>
-              </div>
-            </div>
-
-            <div className="pairing-grid roster-builder-court-grid">
-              {visiblePairings.map((pairing, pairIndex) => {
-                const slotValues = pairing.playerIds.length > 0 ? [...pairing.playerIds] : ['', ''];
-
-                while (slotValues.length < playersNeeded) {
-                  slotValues.push('');
-                }
-
-                return (
-                  <div key={pairing.courtLabel} className="pairing-card">
-                    <h2>{pairing.courtLabel}</h2>
-                    {canManage ? (
-                      <div className="pairing-card__slots">
-                        {Array.from({ length: playersNeeded }, (_, slotIndex) => slotIndex).map((slotIndex) => {
-                          const currentValue = slotValues[slotIndex] ?? '';
-                          const selectedElsewhere = new Set(
-                            visiblePairings
-                              .flatMap((entry, entryIndex) =>
-                                entryIndex === pairIndex ? [] : entry.playerIds ?? [],
-                              )
-                              .filter(Boolean),
-                          );
-
-                          return (
-                            <label key={`${pairing.courtLabel}-${slotIndex}`} className="field">
-                              <span>Player {slotIndex + 1}</span>
-                              <select
-                                onChange={(event) =>
-                                  updatePairingSlot(pairIndex, slotIndex, event.target.value)
-                                }
-                                value={currentValue}
-                              >
-                                <option value="">Open slot</option>
-                                {activePlayers.map((player) => {
-                                  const attendanceStatus = formatAttendanceStatus(
-                                    activeGame.attendance?.[player.id] ?? 'unknown',
-                                  );
-                                  const disabled =
-                                    currentValue !== player.id && selectedElsewhere.has(player.id);
-
-                                  return (
-                                    <option key={player.id} disabled={disabled} value={player.id}>
-                                      {player.fullName || 'Unnamed player'} · {attendanceStatus}
-                                    </option>
-                                  );
-                                })}
-                              </select>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="pairing-card__slots">
-                        {(pairingSummary.pairings[pairIndex]?.players ?? []).length > 0 ? (
-                          (pairingSummary.pairings[pairIndex]?.players ?? []).map((player) => (
-                            <div key={player.id} className="pairing-chip pairing-chip--readonly">
-                              <strong>{player.fullName || 'Unnamed player'}</strong>
-                            </div>
-                          ))
-                        ) : (
-                          <p>Open slot</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {canManage ? (
-              <div className="pairing-actions roster-builder-save">
-                <button className="button" disabled={saving} onClick={handleSavePairings} type="button">
-                  {saving ? 'Saving roster...' : 'Save Roster'}
-                </button>
-                <span className="sidebar__empty">
-                  Selected: {activeDraft?.rosterPlayerIds.length ?? 0} / {playersNeeded} players. Roster will be
-                  visible to players on Team Matches.
-                </span>
-              </div>
-            ) : null}
-          </section>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-export function AvailabilityPage() {
-  const { clubSlug, teamSlug } = useParams();
-  const { user } = useAuth();
-  const [games, setGames] = useState([]);
-  const [players, setPlayers] = useState([]);
-  const [membership, setMembership] = useState(null);
-  const [teamProfile, setTeamProfile] = useState({ logoUrl: '', name: '' });
-  const [selectedGameId, setSelectedGameId] = useState('');
-  const [updatingGameId, setUpdatingGameId] = useState('');
-  const [viewMode, setViewMode] = useState('per-game');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
-  const todayDateKey = useMemo(() => getTodayDateKey(), []);
-  const orderedPlayers = useMemo(() => {
-    if (!activePlayers.length) {
-      return [];
-    }
-
-    return [...activePlayers].sort((left, right) => {
-      if (left.id === membership?.playerId) {
-        return -1;
-      }
-
-      if (right.id === membership?.playerId) {
-        return 1;
-      }
-
-      return (left.fullName || '').localeCompare(right.fullName || '');
-    });
-  }, [activePlayers, membership?.playerId]);
-
-  async function loadAvailabilityData() {
-    const [gameData, playerData, membershipData, teamData] = await Promise.all([
-      listGames(clubSlug, teamSlug),
-      listPlayers(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
-      getTeam(clubSlug, teamSlug),
-    ]);
-
-    setGames(gameData);
-    setPlayers(playerData);
-    setMembership(membershipData);
-    setTeamProfile({
-      logoUrl: teamData?.logoUrl ?? '',
-      name: teamData?.name ?? teamSlug,
-    });
-    setSelectedGameId((current) => {
-      if (current && gameData.some((game) => game.id === current)) {
-        return current;
-      }
-
-      return gameData[findFirstUpcomingGameIndex(gameData, todayDateKey)]?.id ?? '';
-    });
-  }
-
-  useEffect(() => {
-    setLoading(true);
-    setError('');
-
-    loadAvailabilityData()
-      .catch((loadError) => {
-        setError(loadError.message ?? 'Unable to load availability yet.');
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, [clubSlug, teamSlug, todayDateKey, user?.uid]);
-
-  const selectedGameIndex = Math.max(
-    0,
-    games.findIndex((game) => game.id === selectedGameId),
-  );
-  const activeGame = games[selectedGameIndex] ?? null;
-  const activeGameSummary = useMemo(
-    () => (activeGame ? buildAvailabilitySummary(activeGame, activePlayers) : null),
-    [activeGame, activePlayers],
-  );
-
-  function moveSelection(direction) {
-    if (!games.length) {
-      return;
-    }
-
-    const nextIndex = Math.min(Math.max(selectedGameIndex + direction, 0), games.length - 1);
-    setSelectedGameId(games[nextIndex]?.id ?? '');
-  }
-
-  async function updateAvailability(gameId, status) {
-    setUpdatingGameId(gameId);
-    setError('');
-
-    try {
-      await setAvailability({
-        clubSlug,
-        gameId,
-        playerId: membership?.playerId,
-        status,
-        teamSlug,
-        user,
-      });
-      await loadAvailabilityData();
-    } catch (updateError) {
-      setError(updateError.message ?? 'Unable to update availability.');
-    } finally {
-      setUpdatingGameId('');
-    }
-  }
-
-  return (
-    <div className="page-grid availability-page">
-      <section className="card">
-        <p className="eyebrow">Availability</p>
-        <h1>Team availability board</h1>
-        <p>
-          Review the full roster response for each matchup while only updating the signed-in
-          member&apos;s linked player record.
-        </p>
-
-        {error ? <div className="notice notice--error">{error}</div> : null}
-
-        {!loading && !membership?.playerId ? (
-          <div className="notice notice--warning">
-            Your account is not linked to a player record for this team yet.
-          </div>
-        ) : null}
-
-        <div className="availability-tabs" aria-label="Availability views">
-          <button
-            className={`availability-tabs__button ${viewMode === 'per-game' ? 'availability-tabs__button--active' : ''}`}
-            onClick={() => setViewMode('per-game')}
-            type="button"
-          >
-            Per Game
-          </button>
-          <button
-            className={`availability-tabs__button ${viewMode === 'summary' ? 'availability-tabs__button--active' : ''}`}
-            onClick={() => setViewMode('summary')}
-            type="button"
-          >
-            Summary
-          </button>
-        </div>
-
-        <p className="availability-summary__helper">
-          {viewMode === 'summary'
-            ? 'Summary is read-only. Scroll sideways on smaller screens to compare who is available for each matchup.'
-            : 'Review one matchup at a time. Your player stays pinned to the top so you can update your status quickly.'}
-        </p>
-
-        {games.length > 0 && activePlayers.length > 0 ? (
-          viewMode === 'summary' ? (
-            <div className="availability-summary">
-              <div className="availability-summary__scroll">
-                <table className="availability-summary__table">
-                  <thead>
-                    <tr>
-                      <th>Player</th>
-                      {games.map((game) => (
-                        <th key={game.id}>{formatMatchupLabel(game)}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orderedPlayers.map((player) => (
-                      <tr key={player.id}>
-                        <th>
-                          {player.fullName || 'Unnamed player'}
-                          {membership?.playerId === player.id ? ' (You)' : ''}
-                        </th>
-                        {games.map((game) => {
-                          const status = getAttendanceStatus(game, player.id);
-                          const statusMeta = getAvailabilityStatusMeta(
-                            status,
-                            membership?.playerId === player.id,
-                          );
-
-                          return (
-                            <td key={game.id}>
-                              <span className={`availability-status ${statusMeta.className}`}>
-                                {statusMeta.label}
-                              </span>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                    <tr className="availability-summary__totals">
-                      <th>Total in</th>
-                      {games.map((game) => {
-                        const summary = buildAvailabilitySummary(game, activePlayers);
-
-                        return <td key={game.id}>{summary.in}</td>;
-                      })}
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : (
-            <>
-              {games.length > 0 ? (
-                <div className="game-rosters-page__pager">
-                  <button
-                    className="choice-button"
-                    disabled={selectedGameIndex <= 0}
-                    onClick={() => moveSelection(-1)}
-                    type="button"
-                  >
-                    Previous
-                  </button>
-                  <span className="game-rosters-page__pager-label">
-                    Matchup {selectedGameIndex + 1} of {games.length}
-                  </span>
-                  <button
-                    className="choice-button"
-                    disabled={selectedGameIndex >= games.length - 1}
-                    onClick={() => moveSelection(1)}
-                    type="button"
-                  >
-                    Next
-                  </button>
-                </div>
-              ) : null}
-
-              {activeGame ? (
-                <article className="availability-board">
-                  <div className="availability-board__header">
-                    <div>
-                      <p className="availability-board__date">
-                        {activeGame.isoDate
-                          ? new Intl.DateTimeFormat('en-US', {
-                              weekday: 'long',
-                              month: 'short',
-                              day: 'numeric',
-                            })
-                              .format(new Date(`${activeGame.isoDate}T12:00:00`))
-                              .toUpperCase()
-                          : 'DATE TBD'}
-                      </p>
-                      <MatchScheduleVersusHeader
-                        className="schedule-matchup-vs--hero"
-                        game={activeGame}
-                        homeLogoUrl={teamProfile.logoUrl}
-                        homeTeamName={teamProfile.name}
-                      />
-                      <p className="availability-board__meta">
-                        {activeGame.timeLabel || 'Time TBD'} {activeGame.timeLabel ? '·' : ''}{' '}
-                        {activeGame.location || 'Location TBD'}
-                      </p>
-                    </div>
-                    <span className="availability-board__badge">
-                      {getGameRosterBadge(activeGame, todayDateKey)}
-                    </span>
-                  </div>
-
-                  <div className="availability-board__summary">
-                    {[
-                      {
-                        key: 'in',
-                        label: 'Available',
-                        value: activeGameSummary?.in ?? 0,
-                      },
-                      {
-                        key: 'out',
-                        label: 'Unavailable',
-                        value: activeGameSummary?.out ?? 0,
-                      },
-                      {
-                        key: 'unknown',
-                        label: 'No response',
-                        value: activeGameSummary?.unknown ?? 0,
-                      },
-                    ].map((item) => (
-                      <div key={item.key} className="availability-board__summary-card">
-                        <span>{item.label}</span>
-                        <strong>{item.value}</strong>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="availability-board__players">
-                    {orderedPlayers.map((player) => {
-                      const currentStatus = getAttendanceStatus(activeGame, player.id);
-                      const isCurrentPlayer = membership?.playerId === player.id;
-                      const statusMeta = getAvailabilityBoardStatusMeta(
-                        currentStatus,
-                        isCurrentPlayer,
-                      );
-
-                      return (
-                        <div
-                          key={player.id}
-                          className={`availability-board__player ${isCurrentPlayer ? 'availability-board__player--current' : ''}`}
-                        >
-                          <div className="availability-board__player-top">
-                            <strong className="availability-board__player-name">
-                              {player.fullName || 'Unnamed player'}
-                            </strong>
-                            <span className={`availability-status ${statusMeta.className}`}>
-                              {statusMeta.label}
-                            </span>
-                          </div>
-
-                          {isCurrentPlayer ? (
-                            <div className="choice-row availability-board__actions">
-                              {[
-                                { label: 'Available', value: 'in' },
-                                { label: 'Unavailable', value: 'out' },
-                                { label: 'Clear', value: 'unknown' },
-                              ].map((choice) => (
-                                <button
-                                  key={choice.value}
-                                  className={`choice-button ${currentStatus === choice.value ? 'choice-button--active' : ''}`}
-                                  disabled={!membership?.playerId || updatingGameId === activeGame.id}
-                                  onClick={() => updateAvailability(activeGame.id, choice.value)}
-                                  type="button"
-                                >
-                                  {updatingGameId === activeGame.id && currentStatus === choice.value
-                                    ? 'Saving...'
-                                    : choice.label}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </article>
-              ) : (
-                <p>No scheduled matchups yet.</p>
-              )}
-            </>
-          )
-        ) : activePlayers.length === 0 ? (
-          <p>No active roster players are available yet.</p>
-        ) : (
-          <p>No scheduled matchups yet.</p>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function LinkifiedText({ text }) {
-  const parts = String(text ?? '').split(/(https?:\/\/[^\s]+)/g);
-
-  return parts.map((part, index) => {
-    if (/^https?:\/\//i.test(part)) {
-      return (
-        <a key={`${part}-${index}`} href={part} rel="noreferrer" target="_blank">
-          {part}
-        </a>
-      );
-    }
-
-    return part;
-  });
-}
-
-const NEWS_REACTIONS = [
-  { id: 'like', label: 'Like', symbol: '👍' },
-  { id: 'love', label: 'Love', symbol: '❤️' },
-  { id: 'thumbsUp', label: 'Thumbs up', symbol: '🙌' },
-  { id: 'thumbsDown', label: 'Thumbs down', symbol: '👎' },
-  { id: 'laugh', label: 'Laugh', symbol: '😂' },
-  { id: 'cry', label: 'Cry', symbol: '😢' },
-  { id: 'angry', label: 'Angry', symbol: '😡' },
-];
-
-function getReactionSummary(reactions = []) {
-  return NEWS_REACTIONS.map((reaction) => ({
-    ...reaction,
-    count: reactions.filter((entry) => entry.type === reaction.id).length,
-  })).filter((reaction) => reaction.count > 0);
-}
-
-function NewsFeed({
-  canModerate = false,
-  commentDrafts = {},
-  commentEditDraft = '',
-  currentUser,
-  deletingCommentId = '',
-  deletingPostId = '',
-  editingCommentId = '',
-  editingPostId = '',
-  newsPosts,
-  onCancelCommentEdit,
-  onCancelPostEdit,
-  onCommentChange,
-  onCommentEditChange,
-  onCommentSubmit,
-  onDeleteComment,
-  onDeletePost,
-  onEditComment,
-  onEditPost,
-  onPostEditChange,
-  onPostEditImageSelected,
-  onReactionToggle,
-  onSaveCommentEdit,
-  onSavePostEdit,
-  postEditDraft = '',
-  postEditImagePreviewUrl = '',
-  reactingPostId = '',
-  savingCommentId = '',
-  savingPostId = '',
-}) {
-  if (!newsPosts.length) {
-    return <p>No news posts yet. Share the first photo, update, or team note.</p>;
-  }
-
-  return (
-    <div className="news-feed">
-      {newsPosts.map((post) => {
-        const currentUserReaction = post.reactions?.find((reaction) => reaction.uid === currentUser?.uid);
-        const currentReactionMeta = NEWS_REACTIONS.find((reaction) => reaction.id === currentUserReaction?.type);
-        const reactionSummary = getReactionSummary(post.reactions);
-        const canDeletePost = canModerate || post.authorUid === currentUser?.uid;
-        const canEditPost = canModerate || post.authorUid === currentUser?.uid;
-        const isEditingPost = editingPostId === post.id;
-
-        return (
-          <article key={post.id} className="news-feed-card">
-            <div className="news-feed-card__header">
-              <div className="news-feed-card__author">
-                <div className="news-feed-card__avatar">
-                  {post.authorPhotoUrl ? (
-                    <img alt="" decoding="async" loading="lazy" src={post.authorPhotoUrl} />
-                  ) : (
-                    buildPlayerInitials(post.authorName || 'Teammate')
-                  )}
-                </div>
-                <div>
-                  <strong>{post.authorName || 'Teammate'}</strong>
-                  <span>
-                    {post.teamName ? `${post.teamName} · ` : ''}
-                    {formatNewsPostDate(post)}
-                  </span>
-                </div>
-              </div>
-              {canDeletePost || canEditPost ? (
-                <div className="news-feed-icon-actions">
-                  {canEditPost ? (
-                    <button
-                      aria-label="Edit post"
-                      className="news-icon-button"
-                      disabled={isEditingPost || savingPostId === post.id}
-                      onClick={() => onEditPost?.(post)}
-                      title="Edit post"
-                      type="button"
-                    >
-                      <PencilIcon />
-                    </button>
-                  ) : null}
-                  {canDeletePost ? (
-                    <button
-                      aria-label={deletingPostId === post.id ? 'Deleting post' : 'Delete post'}
-                      className="news-icon-button news-icon-button--danger"
-                      disabled={deletingPostId === post.id}
-                      onClick={() => onDeletePost?.(post)}
-                      title="Delete post"
-                      type="button"
-                    >
-                      <TrashIcon />
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-
-            {post.imageUrl ? (
-              <div className="news-feed-card__image-wrap">
-                <img alt="" className="news-feed-card__image" decoding="async" loading="lazy" src={post.imageUrl} />
-              </div>
-            ) : null}
-
-            {isEditingPost ? (
-              <form
-                className="news-edit-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  onSavePostEdit?.(post);
-                }}
-              >
-                <label className="field">
-                  <span>Edit post</span>
-                  <textarea
-                    onChange={(event) => onPostEditChange?.(event.target.value)}
-                    rows={4}
-                    value={postEditDraft}
-                  />
-                </label>
-                <label className="field">
-                  <span>Replace image</span>
-                  <input
-                    accept="image/*"
-                    disabled={savingPostId === post.id}
-                    onChange={(event) => onPostEditImageSelected?.(event.target.files?.[0] ?? null)}
-                    type="file"
-                  />
-                </label>
-                {postEditImagePreviewUrl ? (
-                  <div className="news-composer-preview">
-                    <img alt="Selected replacement preview" src={postEditImagePreviewUrl} />
-                  </div>
-                ) : post.imageUrl ? (
-                  <p className="news-feed-card__date">Choose a replacement image to change the current photo.</p>
-                ) : null}
-                <div className="news-edit-form__actions">
-                  <button
-                    className="button button--ghost"
-                    disabled={savingPostId === post.id}
-                    onClick={onCancelPostEdit}
-                    type="button"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="button"
-                    disabled={savingPostId === post.id || (!postEditDraft.trim() && !postEditImagePreviewUrl && !post.imageUrl)}
-                    type="submit"
-                  >
-                    {savingPostId === post.id ? 'Saving...' : 'Save'}
-                  </button>
-                </div>
-              </form>
-            ) : post.body ? (
-              <p className="news-feed-card__text">
-                <LinkifiedText text={post.body} />
-              </p>
-            ) : null}
-
-            <div className="news-feed-card__actions">
-              <div className="news-reaction-picker" aria-label="Post reactions">
-                {NEWS_REACTIONS.map((reaction) => (
-                  <button
-                    key={reaction.id}
-                    aria-label={reaction.label}
-                    className={`news-reaction-button ${currentUserReaction?.type === reaction.id ? 'news-reaction-button--active' : ''}`}
-                    disabled={reactingPostId === post.id}
-                    onClick={() => onReactionToggle?.(post, reaction.id)}
-                    title={reaction.label}
-                    type="button"
-                  >
-                    <span>{reaction.symbol}</span>
-                  </button>
-                ))}
-              </div>
-              <span>{post.commentCount} comments</span>
-            </div>
-
-            {reactionSummary.length > 0 ? (
-              <div className="news-reaction-summary">
-                {reactionSummary.map((reaction) => (
-                  <span key={reaction.id}>
-                    {reaction.symbol} {reaction.count}
-                  </span>
-                ))}
-                {currentReactionMeta ? <strong>You reacted {currentReactionMeta.symbol}</strong> : null}
-              </div>
-            ) : null}
-
-            <div className="news-feed-comments">
-              {post.comments?.map((comment) => {
-                const canDeleteComment = canModerate || comment.authorUid === currentUser?.uid;
-                const canEditComment = comment.authorUid === currentUser?.uid;
-                const isEditingComment = editingCommentId === comment.id;
-
-                return (
-                  <div key={comment.id} className="news-feed-comment">
-                    <div className="news-feed-comment__body">
-                      <strong>{comment.authorName || 'Teammate'}</strong>
-                      {isEditingComment ? (
-                        <form
-                          className="news-edit-form news-edit-form--comment"
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            onSaveCommentEdit?.(post, comment);
-                          }}
-                        >
-                          <textarea
-                            aria-label="Edit comment"
-                            onChange={(event) => onCommentEditChange?.(event.target.value)}
-                            rows={2}
-                            value={commentEditDraft}
-                          />
-                          <div className="news-edit-form__actions">
-                            <button
-                              className="button button--ghost"
-                              disabled={savingCommentId === comment.id}
-                              onClick={onCancelCommentEdit}
-                              type="button"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              className="button"
-                              disabled={savingCommentId === comment.id || !commentEditDraft.trim()}
-                              type="submit"
-                            >
-                              {savingCommentId === comment.id ? 'Saving...' : 'Save'}
-                            </button>
-                          </div>
-                        </form>
-                      ) : (
-                        <p>
-                          <LinkifiedText text={comment.body} />
-                          {comment.updatedAtMs ? <span className="news-feed-comment__edited"> Edited</span> : null}
-                        </p>
-                      )}
-                    </div>
-                    {canDeleteComment || canEditComment ? (
-                      <div className="news-feed-icon-actions">
-                        {canEditComment ? (
-                          <button
-                            aria-label="Edit comment"
-                            className="news-icon-button"
-                            disabled={isEditingComment || savingCommentId === comment.id}
-                            onClick={() => onEditComment?.(comment)}
-                            title="Edit comment"
-                            type="button"
-                          >
-                            <PencilIcon />
-                          </button>
-                        ) : null}
-                        {canDeleteComment ? (
-                          <button
-                            aria-label={deletingCommentId === comment.id ? 'Deleting comment' : 'Delete comment'}
-                            className="news-icon-button news-icon-button--danger"
-                            disabled={deletingCommentId === comment.id}
-                            onClick={() => onDeleteComment?.(post, comment)}
-                            title="Delete comment"
-                            type="button"
-                          >
-                            <TrashIcon />
-                          </button>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-
-              <form
-                className="news-feed-comment-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  onCommentSubmit?.(event, post);
-                }}
-              >
-                <input
-                  onChange={(event) => onCommentChange?.(post.id, event.target.value)}
-                  placeholder="Write a comment..."
-                  value={commentDrafts[post.id] ?? ''}
-                />
-                <button
-                  aria-label="Send comment"
-                  className="news-feed-comment-submit"
-                  disabled={!String(commentDrafts[post.id] ?? '').trim()}
-                  type="submit"
-                >
-                  Send
-                </button>
-              </form>
-            </div>
-          </article>
-        );
-      })}
-    </div>
-  );
-}
-
-function NewsroomAdminList({
-  deletingId = '',
-  emptyMessage = 'No news posts match those filters.',
-  newsPosts,
-  onDelete,
-  onEdit,
-  selectedPostId = '',
-}) {
-  if (!newsPosts.length) {
-    return <p>{emptyMessage}</p>;
-  }
-
-  return (
-    <div className="newsroom-list">
-      {newsPosts.map((post) => {
-        const isSelected = selectedPostId === post.id;
-
-        return (
-          <article
-            key={post.id}
-            className={`newsroom-post-row ${isSelected ? 'newsroom-post-row--active' : ''}`}
-          >
-            <button
-              className="newsroom-post-row__main"
-              onClick={() => onEdit?.(post)}
-              type="button"
-            >
-              <div className="newsroom-post-row__top">
-                <div>
-                  <p className="newsroom-post-row__meta">{buildNewsPostMeta(post)}</p>
-                  <h2 className="newsroom-post-row__title">{post.title}</h2>
-                </div>
-                <div className="newsroom-post-row__chips">
-                  {post.imageUrl ? <span className="newsroom-post-row__chip">Image</span> : null}
-                  {post.linkUrl ? <span className="newsroom-post-row__chip">Link</span> : null}
-                  {isSelected ? (
-                    <span className="newsroom-post-row__chip newsroom-post-row__chip--active">
-                      Editing
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-              <p className="newsroom-post-row__excerpt">{buildNewsExcerpt(post.body)}</p>
-            </button>
-
-            <div className="newsroom-post-row__footer">
-              <span className="newsroom-post-row__date">{formatNewsPostDate(post)}</span>
-              <div className="choice-row newsroom-post-row__actions">
-                {post.linkUrl ? (
-                  <a
-                    className="news-feed-card__action"
-                    href={post.linkUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Open link
-                  </a>
-                ) : null}
-                {post.imageUrl ? (
-                  <button
-                    className="news-feed-card__action"
-                    onClick={() => downloadNewsImage(post)}
-                    type="button"
-                  >
-                    Download image
-                  </button>
-                ) : null}
-                <button className="choice-button" onClick={() => onEdit?.(post)} type="button">
-                  Edit
-                </button>
-                <button
-                  className="choice-button"
-                  disabled={deletingId === post.id}
-                  onClick={() => onDelete?.(post)}
-                  type="button"
-                >
-                  {deletingId === post.id ? 'Deleting...' : 'Delete'}
-                </button>
-              </div>
-            </div>
-          </article>
-        );
-      })}
-    </div>
-  );
-}
-
-function NewsFeedIntro({ eyebrow = 'Club updates', title, copy }) {
-  return (
-    <div className="news-feed-intro">
-      <div className="news-feed-intro__content">
-        <p className="eyebrow">{eyebrow}</p>
-        <h1>{title}</h1>
-        <p className="news-feed-intro__copy">{copy}</p>
-      </div>
     </div>
   );
 }
@@ -6652,6 +5124,7 @@ export function ChallengesPage() {
   const [challengePlayers, setChallengePlayers] = useState([]);
   const [clubChallenges, setClubChallenges] = useState([]);
   const [teamChallenges, setTeamChallenges] = useState([]);
+  const [challengeCourtOptions, setChallengeCourtOptions] = useState([]);
   const [form, setForm] = useState(createEmptyChallengeForm());
   const [editingChallengeId, setEditingChallengeId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -6700,15 +5173,18 @@ export function ChallengesPage() {
       setChallengePlayers([]);
       setClubChallenges([]);
       setTeamChallenges([]);
+      setChallengeCourtOptions([]);
       return;
     }
 
-    const [approvedTeams, openChallenges, relevantChallenges, playersData] = await Promise.all([
+    const [approvedTeams, openChallenges, relevantChallenges, playersData, clubData] = await Promise.all([
       listApprovedClubTeams(approvedClubSlug).catch(() => []),
       listClubChallenges(approvedClubSlug).catch(() => []),
       listTeamChallenges({ challengeClubSlug: approvedClubSlug, clubSlug, teamSlug }).catch(() => []),
       listPlayers(clubSlug, teamSlug).catch(() => []),
+      listClubs({ includeIndependent: true }).catch(() => []),
     ]);
+    const approvedClub = clubData.find((club) => club.slug === approvedClubSlug) ?? null;
 
     setEligibleTeams(
       approvedTeams.filter((approvedTeam) => approvedTeam.clubSlug !== clubSlug || approvedTeam.teamSlug !== teamSlug),
@@ -6720,6 +5196,7 @@ export function ChallengesPage() {
     );
     setTeamChallenges(relevantChallenges);
     setChallengePlayers(playersData);
+    setChallengeCourtOptions(buildCourtOptionsFromClub(approvedClub));
   }
 
   useEffect(() => {
@@ -7454,12 +5931,21 @@ export function ChallengesPage() {
                       </div>
                     ) : null}
                     <label className="field challenge-form__location">
-                      <span>Court(s)</span>
-                      <input
+                      <span>Court</span>
+                      <select
                         onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
-                        placeholder="Optional, e.g. Courts 1-4 or TBD"
                         value={form.location}
-                      />
+                      >
+                        <option value="">Court TBD</option>
+                        {form.location && !challengeCourtOptions.some((court) => court.value === form.location) ? (
+                          <option value={form.location}>{form.location}</option>
+                        ) : null}
+                        {challengeCourtOptions.map((court) => (
+                          <option key={court.value} value={court.value}>
+                            {court.label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </div>
 
@@ -8958,7 +7444,11 @@ export function ClubAffiliationAdminPage() {
     setMessage('');
 
     try {
-      const club = await createClub({ ...clubForm, user });
+      const club = await createClub({
+        ...clubForm,
+        courtLabels: parseCourtLabelsText(clubForm.courtLabelsText),
+        user,
+      });
       revokeClubPreview(clubForm.logoPreviewUrl);
       setClubForm(createEmptyClubForm());
       setMessage(`${club.name} created.`);
@@ -8976,9 +7466,12 @@ export function ClubAffiliationAdminPage() {
     setMessage('');
 
     try {
+      const clubDraft = clubDrafts[club.slug] ?? createEmptyClubForm(club);
+
       await renameClub({
-        ...(clubDrafts[club.slug] ?? createEmptyClubForm(club)),
+        ...clubDraft,
         clubSlug: club.slug,
+        courtLabels: parseCourtLabelsText(clubDraft.courtLabelsText),
         user,
       });
       revokeClubPreview(clubDrafts[club.slug]?.logoPreviewUrl);
@@ -9486,6 +7979,14 @@ export function ClubAffiliationAdminPage() {
                     value={clubForm.numberOfCourts}
                   />
                 </label>
+                <label className="field">
+                  <span>Court numbers</span>
+                  <textarea
+                    onChange={(event) => setClubForm((current) => ({ ...current, courtLabelsText: event.target.value }))}
+                    placeholder="One per line, e.g.&#10;1&#10;2&#10;3&#10;4"
+                    value={clubForm.courtLabelsText}
+                  />
+                </label>
                 <button className="button" disabled={creatingClub} type="submit">
                   {creatingClub ? 'Creating club...' : 'Create club'}
                 </button>
@@ -9605,6 +8106,22 @@ export function ClubAffiliationAdminPage() {
                             }
                             type="number"
                             value={clubDrafts[club.slug]?.numberOfCourts ?? ''}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Court numbers</span>
+                          <textarea
+                            onChange={(event) =>
+                              setClubDrafts((current) => ({
+                                ...current,
+                                [club.slug]: {
+                                  ...(current[club.slug] ?? createEmptyClubForm(club)),
+                                  courtLabelsText: event.target.value,
+                                },
+                              }))
+                            }
+                            placeholder="One per line, e.g.&#10;1&#10;2&#10;3&#10;4"
+                            value={clubDrafts[club.slug]?.courtLabelsText ?? ''}
                           />
                         </label>
                         <span>Slug: {club.slug}</span>

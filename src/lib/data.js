@@ -727,6 +727,7 @@ export async function listClubs({ includeIndependent = false } = {}) {
       return {
         address: data.address ?? '',
         city: data.city ?? '',
+        courtLabels: normalizeCourtLabels(data.courtLabels, data.numberOfCourts),
         id: entry.id,
         logoPath: data.logoPath ?? '',
         logoUrl: data.logoUrl ?? '',
@@ -750,6 +751,7 @@ export async function createClub({
   address = '',
   city = '',
   clubName,
+  courtLabels = [],
   logoFile = null,
   numberOfCourts = '',
   state = '',
@@ -788,6 +790,7 @@ export async function createClub({
   }
 
   const uploadedLogo = logoFile ? await uploadClubLogo({ clubSlug, file: logoFile }) : null;
+  const normalizedNumberOfCourts = normalizeNullableNumber(numberOfCourts);
 
   await setDoc(clubRef, {
     address: address.trim(),
@@ -797,7 +800,8 @@ export async function createClub({
     logoPath: uploadedLogo?.logoPath ?? '',
     logoUrl: uploadedLogo?.logoUrl ?? '',
     name: trimmedName,
-    numberOfCourts: normalizeNullableNumber(numberOfCourts),
+    courtLabels: normalizeCourtLabels(courtLabels, normalizedNumberOfCourts),
+    numberOfCourts: normalizedNumberOfCourts,
     slug: clubSlug,
     state: state.trim(),
     status: 'active',
@@ -813,6 +817,7 @@ export async function renameClub({
   city = '',
   clubName,
   clubSlug,
+  courtLabels = [],
   logoFile = null,
   numberOfCourts = '',
   state = '',
@@ -845,6 +850,7 @@ export async function renameClub({
   const currentClubSnapshot = await getDoc(clubRef);
   const currentClub = currentClubSnapshot.data() ?? {};
   const uploadedLogo = logoFile ? await uploadClubLogo({ clubSlug, file: logoFile }) : null;
+  const normalizedNumberOfCourts = normalizeNullableNumber(numberOfCourts);
 
   await updateDoc(clubRef, {
     address: address.trim(),
@@ -852,7 +858,8 @@ export async function renameClub({
     logoPath: uploadedLogo?.logoPath ?? currentClub.logoPath ?? '',
     logoUrl: uploadedLogo?.logoUrl ?? currentClub.logoUrl ?? '',
     name: trimmedName,
-    numberOfCourts: normalizeNullableNumber(numberOfCourts),
+    courtLabels: normalizeCourtLabels(courtLabels, normalizedNumberOfCourts),
+    numberOfCourts: normalizedNumberOfCourts,
     state: state.trim(),
     updatedAt: serverTimestamp(),
     zip: zip.trim(),
@@ -2923,6 +2930,7 @@ function buildChallengeGamePayload({
     linkedTeamSlug: linkedTeam.teamSlug,
     location,
     matchStatus: 'scheduled',
+    matchScores: [],
     opponent: linkedTeam.name,
     opponentScore: null,
     pairings: buildRosterPairing(rosterPlayers),
@@ -3742,6 +3750,70 @@ function normalizeNullableNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeCourtLabels(courtLabels = [], numberOfCourts = '') {
+  const parsedCourtCount = normalizeNullableNumber(numberOfCourts);
+  const fallbackCount = Number.isInteger(parsedCourtCount) && parsedCourtCount > 0 ? parsedCourtCount : 0;
+  const sourceLabels = Array.isArray(courtLabels)
+    ? courtLabels
+    : String(courtLabels ?? '')
+        .split(/[\n,]+/)
+        .map((label) => label.trim());
+  const labels = sourceLabels
+    .map((label) => String(label ?? '').trim())
+    .filter(Boolean);
+
+  if (labels.length) {
+    return labels.slice(0, fallbackCount || labels.length);
+  }
+
+  return Array.from({ length: fallbackCount }, (_, index) => String(index + 1));
+}
+
+function normalizeMatchScores(scores = []) {
+  if (!Array.isArray(scores)) {
+    return [];
+  }
+
+  return scores
+    .slice(0, 3)
+    .map((score) => ({
+      opponentScore: normalizeNullableNumber(score?.opponentScore),
+      teamScore: normalizeNullableNumber(score?.teamScore),
+    }))
+    .filter((score) => score.teamScore !== null || score.opponentScore !== null);
+}
+
+function summarizeMatchScores(scores = []) {
+  return scores.reduce(
+    (summary, score) => {
+      if (score.teamScore === null || score.opponentScore === null || score.teamScore === score.opponentScore) {
+        return summary;
+      }
+
+      if (score.teamScore > score.opponentScore) {
+        summary.teamSetsWon += 1;
+      } else {
+        summary.opponentSetsWon += 1;
+      }
+
+      summary.hasWinner = true;
+      return summary;
+    },
+    {
+      hasWinner: false,
+      opponentSetsWon: 0,
+      teamSetsWon: 0,
+    },
+  );
+}
+
+function formatSetScoreLabel(scores = []) {
+  return scores
+    .filter((score) => score.teamScore !== null && score.opponentScore !== null)
+    .map((score) => `${score.teamScore}-${score.opponentScore}`)
+    .join(', ');
+}
+
 function normalizeSkillLevel(value) {
   const trimmed = (value ?? '').trim();
 
@@ -4276,6 +4348,7 @@ export async function listGames(clubSlug, teamSlug) {
       isoDate: data.isoDate ?? '',
       location: data.location ?? '',
       matchStatus: data.matchStatus ?? 'scheduled',
+      matchScores: normalizeMatchScores(data.matchScores),
       opponent: data.opponent ?? '',
       opponentScore: normalizeNullableNumber(data.opponentScore),
       pairings: normalizePairings(data.pairings, data.rosterPlayerIds ?? []),
@@ -4296,6 +4369,7 @@ export async function listGames(clubSlug, teamSlug) {
       linkedTeamClubSlug: data.linkedTeamClubSlug ?? '',
       linkedTeamLogoUrl: data.linkedTeamLogoUrl ?? '',
       linkedTeamName: data.linkedTeamName ?? '',
+      linkedRosterPlayers: [],
       linkedTeamSlug: data.linkedTeamSlug ?? '',
       source: data.source ?? 'manual',
       sourceTeamLogoUrl: data.sourceTeamLogoUrl ?? '',
@@ -4315,11 +4389,7 @@ export async function listGames(clubSlug, teamSlug) {
       game.sourceTeamLogoUrl = currentTeamLogo;
     }
 
-    if (
-      !(game.linkedTeamLogoUrl ?? '').trim() &&
-      game.linkedTeamClubSlug &&
-      game.linkedTeamSlug
-    ) {
+    if (game.linkedTeamClubSlug && game.linkedTeamSlug) {
       const key = `${game.linkedTeamClubSlug}::${game.linkedTeamSlug}`;
       linkedTeamKeys.set(key, {
         clubSlug: game.linkedTeamClubSlug,
@@ -4330,31 +4400,94 @@ export async function listGames(clubSlug, teamSlug) {
 
   if (linkedTeamKeys.size > 0) {
     const entries = [...linkedTeamKeys.values()];
-    const linkedSnaps = await Promise.all(
-      entries.map(({ clubSlug: linkedClub, teamSlug: linkedTeam }) =>
-        getDoc(doc(db, 'clubs', linkedClub, 'teams', linkedTeam)),
+    const [linkedSnaps, linkedPlayerGroups, linkedMemberGroups] = await Promise.all([
+      Promise.all(
+        entries.map(({ clubSlug: linkedClub, teamSlug: linkedTeam }) =>
+          getDoc(doc(db, 'clubs', linkedClub, 'teams', linkedTeam)),
+        ),
       ),
-    );
+      Promise.all(
+        entries.map(({ clubSlug: linkedClub, teamSlug: linkedTeam }) =>
+          getDocs(collection(db, 'clubs', linkedClub, 'teams', linkedTeam, 'players')).catch(() => null),
+        ),
+      ),
+      Promise.all(
+        entries.map(({ clubSlug: linkedClub, teamSlug: linkedTeam }) =>
+          getDocs(collection(db, 'clubs', linkedClub, 'teams', linkedTeam, 'members')).catch(() => null),
+        ),
+      ),
+    ]);
     const logoByKey = new Map();
+    const playersByKey = new Map();
 
     entries.forEach((entry, index) => {
       const key = `${entry.clubSlug}::${entry.teamSlug}`;
       const snap = linkedSnaps[index];
       const url = snap.exists() ? (snap.data().logoUrl ?? '').trim() : '';
+      const roleByPlayerId = new Map();
+
+      (linkedMemberGroups[index]?.docs ?? []).forEach((memberDoc) => {
+        const member = memberDoc.data();
+        const playerId = member.playerId || memberDoc.id;
+
+        if (playerId) {
+          roleByPlayerId.set(playerId, member.role ?? '');
+        }
+      });
+
       logoByKey.set(key, url);
+      playersByKey.set(
+        key,
+        new Map(
+          (linkedPlayerGroups[index]?.docs ?? []).map((playerDoc) => {
+            const player = playerDoc.data();
+            const firstName = (player.firstName ?? '').trim();
+            const lastName = (player.lastName ?? '').trim();
+
+            return [
+              playerDoc.id,
+              {
+                fullName: player.fullName ?? buildFullName(firstName, lastName),
+                headshotUrl: player.headshotUrl ?? '',
+                id: playerDoc.id,
+                memberRole: roleByPlayerId.get(playerDoc.id) ?? '',
+              },
+            ];
+          }),
+        ),
+      );
     });
 
+    const linkedGameLookups = games
+      .filter((game) => game.source === 'challenge' && game.linkedTeamClubSlug && game.linkedTeamSlug && game.linkedGameId)
+      .map((game) =>
+        getDoc(doc(db, 'clubs', game.linkedTeamClubSlug, 'teams', game.linkedTeamSlug, 'games', game.linkedGameId))
+          .then((snapshot) => ({ game, snapshot }))
+          .catch(() => ({ game, snapshot: null })),
+      );
+    const linkedGameSnapshots = await Promise.all(linkedGameLookups);
+
     games.forEach((game) => {
-      if (game.source !== 'challenge' || (game.linkedTeamLogoUrl ?? '').trim()) {
+      const key = `${game.linkedTeamClubSlug}::${game.linkedTeamSlug}`;
+      const url = logoByKey.get(key);
+
+      if (!(game.linkedTeamLogoUrl ?? '').trim() && url) {
+        game.linkedTeamLogoUrl = url;
+      }
+    });
+
+    linkedGameSnapshots.forEach(({ game, snapshot }) => {
+      if (!snapshot?.exists()) {
         return;
       }
 
       const key = `${game.linkedTeamClubSlug}::${game.linkedTeamSlug}`;
-      const url = logoByKey.get(key);
+      const linkedPlayers = playersByKey.get(key) ?? new Map();
+      const linkedRosterPlayerIds = normalizePlayerIdList(snapshot.data().rosterPlayerIds);
 
-      if (url) {
-        game.linkedTeamLogoUrl = url;
-      }
+      game.linkedRosterPlayers = linkedRosterPlayerIds
+        .map((playerId) => linkedPlayers.get(playerId))
+        .filter(Boolean);
     });
   }
 
@@ -4370,6 +4503,7 @@ export async function saveGame({
   isoDate,
   location,
   matchStatus = 'scheduled',
+  matchScores = [],
   opponent,
   opponentScore,
   playersNeeded = 2,
@@ -4403,24 +4537,30 @@ export async function saveGame({
   const existingGame = existingGameSnapshot?.exists() ? existingGameSnapshot.data() : null;
   const normalizedTeamScore = normalizeNullableNumber(teamScore);
   const normalizedOpponentScore = normalizeNullableNumber(opponentScore);
+  const normalizedMatchScores = normalizeMatchScores(matchScores);
+  const matchScoreSummary = summarizeMatchScores(normalizedMatchScores);
+  const scoreFromSets = normalizedMatchScores.length > 0 && matchScoreSummary.hasWinner;
+  const finalTeamScore = scoreFromSets ? matchScoreSummary.teamSetsWon : normalizedTeamScore;
+  const finalOpponentScore = scoreFromSets ? matchScoreSummary.opponentSetsWon : normalizedOpponentScore;
   const normalizedPlayersNeeded = normalizeMatchPlayerCount(playersNeeded);
   const finalStatus =
     matchStatus === 'completed' ||
-    (normalizedTeamScore !== null && normalizedOpponentScore !== null)
+    (finalTeamScore !== null && finalOpponentScore !== null)
       ? 'completed'
       : 'scheduled';
-  const result = deriveMatchResult(finalStatus, normalizedTeamScore, normalizedOpponentScore);
+  const result = deriveMatchResult(finalStatus, finalTeamScore, finalOpponentScore);
   const payload = {
     dateLabel: normalizedDateTbd ? 'Date TBD' : trimmedIsoDate,
     dateTbd: normalizedDateTbd,
     isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
     location: trimmedLocation || 'Location TBD',
     matchStatus: finalStatus,
+    matchScores: normalizedMatchScores,
     opponent: trimmedOpponent,
-    opponentScore: normalizedOpponentScore,
+    opponentScore: finalOpponentScore,
     playersNeeded: normalizedPlayersNeeded,
     result,
-    teamScore: normalizedTeamScore,
+    teamScore: finalTeamScore,
     timeLabel: normalizedDateTbd ? 'Time TBD' : trimmedTimeLabel || 'Time TBD',
     updatedAt: serverTimestamp(),
   };
@@ -4441,10 +4581,14 @@ export async function saveGame({
 
   const existingTeamScore = normalizeNullableNumber(existingGame?.teamScore);
   const existingOpponentScore = normalizeNullableNumber(existingGame?.opponentScore);
+  const existingMatchScores = normalizeMatchScores(existingGame?.matchScores);
   const wasCompleted =
     existingGame?.matchStatus === 'completed' ||
     (existingTeamScore !== null && existingOpponentScore !== null);
-  const scoreChanged = existingTeamScore !== normalizedTeamScore || existingOpponentScore !== normalizedOpponentScore;
+  const scoreChanged =
+    existingTeamScore !== finalTeamScore ||
+    existingOpponentScore !== finalOpponentScore ||
+    JSON.stringify(existingMatchScores) !== JSON.stringify(normalizedMatchScores);
   const shouldLogScheduled = !gameId && finalStatus === 'scheduled';
   const shouldLogCompleted = finalStatus === 'completed' && (!wasCompleted || scoreChanged);
 
@@ -4458,8 +4602,10 @@ export async function saveGame({
         : clubSlug;
     const activityClubName = teamData.approvedClubName ?? teamData.clubName ?? activityClubSlug;
     const scoreLabel =
-      normalizedTeamScore !== null && normalizedOpponentScore !== null
-        ? `${normalizedTeamScore}-${normalizedOpponentScore}`
+      normalizedMatchScores.length > 0
+        ? formatSetScoreLabel(normalizedMatchScores)
+        : finalTeamScore !== null && finalOpponentScore !== null
+          ? `${finalTeamScore}-${finalOpponentScore}`
         : '';
     const winnerTeamName =
       result === 'win'
@@ -4500,8 +4646,8 @@ export async function saveGame({
         gameId: nextGameId,
         loserTeamName,
         opponentName: trimmedOpponent,
-        scoreA: normalizedTeamScore,
-        scoreB: normalizedOpponentScore,
+        scoreA: finalTeamScore,
+        scoreB: finalOpponentScore,
         scoreLabel,
         teamAId: teamSlug,
         teamAName: teamName,
@@ -4536,7 +4682,12 @@ export async function saveGame({
 }
 
 function gameHasScore(game) {
-  return game.matchStatus === 'completed' || game.teamScore !== null || game.opponentScore !== null;
+  return (
+    game.matchStatus === 'completed' ||
+    game.teamScore !== null ||
+    game.opponentScore !== null ||
+    normalizeMatchScores(game.matchScores).length > 0
+  );
 }
 
 export async function deleteGame({ clubSlug, gameId, teamSlug, user }) {
