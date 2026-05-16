@@ -31,7 +31,7 @@ export function PrivacyPolicyPage() {
       <h2>Information We Collect</h2>
       <p>
         When you sign in, we may receive your Google account identifier, name, email address, and profile photo. Within
-        the app, users may add team names, club names, player names, phone numbers, skill levels, availability, roster
+        the app, users may add team names, club names, player names, skill levels, availability, roster
         assignments, schedules, match scores, comments, reactions, logos, headshots, and news feed images or posts.
       </p>
 

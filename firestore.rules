@@ -268,7 +268,6 @@ service cloud.firestore {
         'lastActiveTeamId',
         'lastName',
         'lastSeenAt',
-        'phone',
         'photoURL',
         'skillLevel',
         'uid',
@@ -364,7 +363,6 @@ service cloud.firestore {
           'headshotPath',
           'headshotUrl',
           'lastName',
-          'phone',
           'skillLevel',
           'updatedAt',
         ])
@@ -375,7 +373,6 @@ service cloud.firestore {
         && request.resource.data.headshotPath == userProfileDoc(request.auth.uid).data.headshotPath
         && request.resource.data.headshotUrl == userProfileDoc(request.auth.uid).data.headshotUrl
         && request.resource.data.lastName == userProfileDoc(request.auth.uid).data.lastName
-        && request.resource.data.phone == userProfileDoc(request.auth.uid).data.phone
         && request.resource.data.skillLevel == userProfileDoc(request.auth.uid).data.skillLevel;
     }
 
@@ -700,6 +697,31 @@ service cloud.firestore {
         || (resource.data.keys().hasAny(['opponentScore']) && resource.data.opponentScore is number);
     }
 
+    function safeLinkedManualGameCreate(clubId, teamId) {
+      return signedIn()
+        && request.resource.data.source == 'manual'
+        && request.resource.data.linkedTeamClubSlug is string
+        && request.resource.data.linkedTeamSlug is string
+        && request.resource.data.linkedGameId is string
+        && request.resource.data.playersNeeded in [1, 2]
+        && !(request.resource.data.linkedTeamClubSlug == clubId && request.resource.data.linkedTeamSlug == teamId)
+        && isManager(request.resource.data.linkedTeamClubSlug, request.resource.data.linkedTeamSlug);
+    }
+
+    function safeLinkedGameUpdate(clubId, teamId) {
+      return signedIn()
+        && resource.data.linkedTeamClubSlug is string
+        && resource.data.linkedTeamSlug is string
+        && resource.data.linkedGameId is string
+        && request.resource.data.linkedTeamClubSlug == resource.data.linkedTeamClubSlug
+        && request.resource.data.linkedTeamSlug == resource.data.linkedTeamSlug
+        && request.resource.data.linkedGameId == resource.data.linkedGameId
+        && request.resource.data.source == resource.data.source
+        && request.resource.data.playersNeeded in [1, 2]
+        && !(resource.data.linkedTeamClubSlug == clubId && resource.data.linkedTeamSlug == teamId)
+        && isManager(resource.data.linkedTeamClubSlug, resource.data.linkedTeamSlug);
+    }
+
     function safeManagerGameDelete(clubId, teamId) {
       return isManager(clubId, teamId)
         && (
@@ -879,7 +901,6 @@ service cloud.firestore {
             && request.resource.data.slug == resource.data.slug
             && request.resource.data.createdBy == resource.data.createdBy
             && request.resource.data.status == resource.data.status
-            && request.resource.data.teamDivision in ['', 'men', 'women', 'mixed']
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
               'affiliationStatus',
               'joinCode',
@@ -891,7 +912,6 @@ service cloud.firestore {
               'requestedClubName',
               'requestedClubSlug',
               'status',
-              'teamDivision',
               'updatedAt',
             ])
             && (
@@ -992,9 +1012,11 @@ service cloud.firestore {
         match /games/{gameId} {
           allow read: if isTeamMember(clubId, teamId) || isPlatformAdmin() || isApprovedClubTeam(clubId, teamId);
           allow create: if (isManager(clubId, teamId) && request.resource.data.playersNeeded in [1, 2])
-            || safeChallengeGameCreate(clubId, teamId);
+            || safeChallengeGameCreate(clubId, teamId)
+            || safeLinkedManualGameCreate(clubId, teamId);
           allow update: if (isManager(clubId, teamId) && request.resource.data.playersNeeded in [1, 2])
             || isPlatformAdmin()
+            || safeLinkedGameUpdate(clubId, teamId)
             || safeSelfAvailabilityUpdate(clubId, teamId)
             || safeSelfRosterRemoval(clubId, teamId);
           allow delete: if isPlatformAdmin() || safeManagerGameDelete(clubId, teamId) || safeLinkedChallengeGameDelete();

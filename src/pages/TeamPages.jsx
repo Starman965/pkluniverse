@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Cropper from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import TeamDivisionLabel from '../components/TeamDivisionLabel';
 import { useAuth } from '../context/AuthContext';
-import { ACTIVITY_ICON_BY_TYPE, DEMO_ACTIVITY_CLUB_NAME, DEMO_ACTIVITY_ITEMS } from '../lib/demoActivity';
+import { ACTIVITY_ICON_BY_TYPE } from '../lib/activityIcons';
 import {
   ACTIVITY_TYPES,
   MATCH_PLAYER_COUNT_OPTIONS,
@@ -43,6 +42,7 @@ import {
   listAdminChallenges,
   listApprovedClubTeams,
   listClubChallenges,
+  listClubActivity,
   listClubAffiliationRequests,
   listClubEvents,
   listClubManagers,
@@ -65,6 +65,7 @@ import {
   saveUserPlayerProfile,
   setLastActiveTeam,
   subscribeChallengeHub,
+  subscribeTeamGames,
   subscribeNewsPosts,
   toggleNewsReaction,
   updateChallenge,
@@ -73,7 +74,6 @@ import {
   updateTeamMemberRole,
   updateTeamSettings,
 } from '../lib/data';
-import { TEAM_DIVISION_OPTIONS, getTeamDivisionLabel, getVisibleTeamDivisionLabel, normalizeTeamDivision } from '../lib/teamDivision';
 import blackhawkPickleballCourts from '../../blackhawk_pickleball_courts.webp';
 import defaultTeamLogo from '../../default_team_logo.webp';
 
@@ -90,8 +90,8 @@ function isCaptainRole(role) {
   return role === 'captain';
 }
 
-function formatRecord(wins, losses, ties) {
-  return `${wins}-${losses}${ties ? `-${ties}` : ''}`;
+function formatRecord(wins, losses) {
+  return `${wins}-${losses}`;
 }
 
 function createResultDraft(game) {
@@ -116,6 +116,9 @@ function createScheduleAdminDraft(game) {
     dateTbd: game.dateTbd === true,
     isoDate: game.isoDate ?? '',
     location: game.location ?? '',
+    linkedTeamClubSlug: game.linkedTeamClubSlug ?? '',
+    linkedTeamName: game.linkedTeamName ?? '',
+    linkedTeamSlug: game.linkedTeamSlug ?? '',
     matchScores: createMatchScoreDrafts(game.matchScores),
     matchStatus: game.matchStatus ?? 'scheduled',
     opponent: game.opponent ?? '',
@@ -150,6 +153,9 @@ function createEmptyScheduleAdminForm() {
   return {
     dateTbd: true,
     isoDate: '',
+    linkedTeamClubSlug: '',
+    linkedTeamName: '',
+    linkedTeamSlug: '',
     location: '',
     matchScores: createMatchScoreDrafts(),
     matchStatus: 'scheduled',
@@ -588,7 +594,6 @@ function countGamesPlayed(games, playerId) {
 function buildPlayerRecord(games, playerId) {
   const record = {
     losses: 0,
-    ties: 0,
     wins: 0,
   };
 
@@ -608,8 +613,6 @@ function buildPlayerRecord(games, playerId) {
       record.wins += 1;
     } else if (game.result === 'loss') {
       record.losses += 1;
-    } else if (game.result === 'tie') {
-      record.ties += 1;
     }
   });
 
@@ -617,7 +620,7 @@ function buildPlayerRecord(games, playerId) {
 }
 
 function formatPlayerWinRate(record) {
-  const gamesPlayed = record.wins + record.losses + record.ties;
+  const gamesPlayed = record.wins + record.losses;
 
   if (!gamesPlayed) {
     return '0%';
@@ -641,6 +644,43 @@ function gameBelongsInPast(game, todayDateKey) {
   }
 
   return game.isoDate < todayDateKey;
+}
+
+function getGameTimeSortValue(game) {
+  const timeParts = parseTimeLabel(game?.timeLabel);
+
+  if (!timeParts.hour) {
+    return -1;
+  }
+
+  const hour = Number(timeParts.hour);
+  const minute = Number(timeParts.minute) || 0;
+  const normalizedHour = (hour % 12) + (timeParts.period === 'PM' ? 12 : 0);
+
+  return normalizedHour * 60 + minute;
+}
+
+function sortGamesByMostRecent(games = []) {
+  return [...games].sort((left, right) => {
+    const leftDate = left?.isoDate ?? '';
+    const rightDate = right?.isoDate ?? '';
+
+    if (leftDate && rightDate && leftDate !== rightDate) {
+      return rightDate.localeCompare(leftDate);
+    }
+
+    if (leftDate !== rightDate) {
+      return leftDate ? -1 : 1;
+    }
+
+    const timeDifference = getGameTimeSortValue(right) - getGameTimeSortValue(left);
+
+    if (timeDifference !== 0) {
+      return timeDifference;
+    }
+
+    return String(left?.opponent ?? '').localeCompare(String(right?.opponent ?? ''));
+  });
 }
 
 function findFirstUpcomingGameIndex(games, todayDateKey) {
@@ -1070,7 +1110,6 @@ function MemberStatIcon({ type }) {
 function createEmptyTeamSettingsForm(team = {}) {
   return {
     logoFile: null,
-    teamDivision: team.teamDivision ?? '',
     teamName: team.name ?? '',
   };
 }
@@ -1245,7 +1284,6 @@ function createEmptyRosterForm() {
     headshotFile: null,
     lastName: '',
     notes: '',
-    phone: '',
     playerId: '',
     skillLevel: '',
   };
@@ -1259,7 +1297,6 @@ function createRosterFormFromPlayer(player) {
     headshotFile: null,
     lastName: player.lastName ?? '',
     notes: player.notes ?? '',
-    phone: player.phone ?? '',
     playerId: player.id,
     skillLevel: PLAYER_SKILL_LEVELS.includes(player.skillLevel) ? player.skillLevel : '',
   };
@@ -1275,20 +1312,6 @@ function updateAvailableDays(currentDays = [], dayId, checked) {
   }
 
   return PLAYER_AVAILABLE_DAYS.filter((day) => nextDays.has(day.id)).map((day) => day.id);
-}
-
-function formatPhoneInput(value) {
-  const digits = String(value ?? '').replace(/\D/g, '').slice(0, 10);
-
-  if (digits.length <= 3) {
-    return digits;
-  }
-
-  if (digits.length <= 6) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-  }
-
-  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
 const TIME_PICKER_HOURS = Array.from({ length: 12 }, (_, index) => String(index + 1));
@@ -1378,37 +1401,31 @@ function TimePickerField({ disabled = false, onChange, value }) {
   );
 }
 
-function MatchupLabelField({ onChange, teams = [], value }) {
-  const hasExistingUnlistedValue = value && !teams.some((team) => team.name === value);
+function MatchupLabelField({ linkedTeamClubSlug = '', linkedTeamSlug = '', onChange, opponent = '', teams = [] }) {
+  const selectedTeamKey = linkedTeamClubSlug && linkedTeamSlug ? `${linkedTeamClubSlug}/${linkedTeamSlug}` : '';
+  const hasExistingUnlistedValue = opponent && !selectedTeamKey && !teams.some((team) => team.name === opponent);
 
   return (
     <label className="field">
       <span>Opponent team</span>
       <select
         disabled={teams.length === 0 && !hasExistingUnlistedValue}
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
+        onChange={(event) => {
+          const selectedTeam = teams.find((team) => `${team.clubSlug}/${team.teamSlug}` === event.target.value) ?? null;
+          onChange(selectedTeam);
+        }}
+        value={selectedTeamKey || (hasExistingUnlistedValue ? opponent : '')}
       >
         <option value="">Choose opponent team</option>
-        {hasExistingUnlistedValue ? <option value={value}>{value}</option> : null}
+        {hasExistingUnlistedValue ? <option value={opponent}>{opponent}</option> : null}
         {teams.map((team) => (
-          <option key={`${team.clubSlug}/${team.teamSlug}`} value={team.name}>
+          <option key={`${team.clubSlug}/${team.teamSlug}`} value={`${team.clubSlug}/${team.teamSlug}`}>
             {team.name}
           </option>
         ))}
       </select>
     </label>
   );
-}
-
-const STANDINGS_DIVISIONS = [
-  { label: 'Men', value: 'men' },
-  { label: 'Women', value: 'women' },
-  { label: 'Mixed + Unknown', value: 'mixed' },
-];
-
-function getStandingsDivision(value) {
-  return normalizeTeamDivision(value) || 'mixed';
 }
 
 function getTeamStandingsStats(games) {
@@ -1424,8 +1441,7 @@ function getTeamStandingsStats(games) {
     pointDifferential,
     pointsAgainst,
     pointsFor,
-    ties: summary.ties,
-    winPct: gamesPlayed ? (summary.wins + summary.ties * 0.5) / gamesPlayed : 0,
+    winPct: gamesPlayed ? summary.wins / gamesPlayed : 0,
     wins: summary.wins,
   };
 }
@@ -1436,12 +1452,22 @@ function buildClubStandingsRow(teamSummary, games, currentTeamKey) {
   return {
     ...getTeamStandingsStats(games),
     clubSlug: teamSummary.clubSlug,
-    division: getStandingsDivision(teamSummary.teamDivision),
     isCurrentTeam: teamKey === currentTeamKey,
     logoUrl: teamSummary.logoUrl ?? '',
     name: teamSummary.name ?? teamSummary.teamName ?? teamSummary.teamSlug,
     teamSlug: teamSummary.teamSlug,
   };
+}
+
+function normalizeStandingsTeamName(value = '') {
+  return String(value).trim().toLowerCase();
+}
+
+function buildClubStandingsRowsFromGames(teamsForStandings, gamesByTeamKey, currentTeamKey) {
+  return teamsForStandings.map((teamSummary) => {
+    const key = `${teamSummary.clubSlug}/${teamSummary.teamSlug}`;
+    return buildClubStandingsRow(teamSummary, gamesByTeamKey.get(key) ?? [], currentTeamKey);
+  });
 }
 
 function sortStandingsRows(rows) {
@@ -1467,10 +1493,7 @@ function sortStandingsRows(rows) {
 }
 
 function ClubStandingsBoard({ loading, rows }) {
-  const rowsByDivision = STANDINGS_DIVISIONS.map((division) => ({
-    ...division,
-    rows: sortStandingsRows(rows.filter((row) => row.division === division.value)),
-  })).filter((division) => division.rows.length > 0);
+  const sortedRows = sortStandingsRows(rows);
 
   if (loading) {
     return (
@@ -1478,14 +1501,14 @@ function ClubStandingsBoard({ loading, rows }) {
         <div className="standings-league-card__header">
           <div>
             <p className="eyebrow">Club Standings</p>
-            <h2>Building the division table...</h2>
+            <h2>Building the standings table...</h2>
           </div>
         </div>
       </div>
     );
   }
 
-  if (!rowsByDivision.length) {
+  if (!sortedRows.length) {
     return null;
   }
 
@@ -1494,72 +1517,60 @@ function ClubStandingsBoard({ loading, rows }) {
       <div className="standings-league-card__header">
         <div>
           <p className="eyebrow">Club Standings</p>
-          <h2>Division race</h2>
+          <h2>Team Rankings</h2>
           <p>Teams are ranked by wins, then losses, win percentage, and point differential.</p>
         </div>
+        <span>{sortedRows.length} team{sortedRows.length === 1 ? '' : 's'}</span>
       </div>
 
-      <div className="standings-division-stack">
-        {rowsByDivision.map((division) => (
-          <section key={division.value} className="standings-division">
-            <div className="standings-division__header">
-              <TeamDivisionLabel value={division.value} />
-              <span>{division.rows.length} team{division.rows.length === 1 ? '' : 's'}</span>
-            </div>
+      <div className="standings-table" role="table" aria-label="Club standings">
+        <div className="standings-table__row standings-table__row--head" role="row">
+          <span role="columnheader">Rank</span>
+          <span aria-label="Current team marker" role="columnheader" />
+          <span role="columnheader">Team</span>
+          <span role="columnheader">GP</span>
+          <span role="columnheader">W</span>
+          <span role="columnheader">L</span>
+          <span role="columnheader">Win %</span>
+          <span role="columnheader">PF</span>
+          <span role="columnheader">PA</span>
+          <span role="columnheader">Diff</span>
+        </div>
 
-            <div className="standings-table" role="table" aria-label={`${division.label} standings`}>
-              <div className="standings-table__row standings-table__row--head" role="row">
-                <span role="columnheader">Rank</span>
-                <span aria-label="Current team marker" role="columnheader" />
-                <span role="columnheader">Team</span>
-                <span role="columnheader">GP</span>
-                <span role="columnheader">W</span>
-                <span role="columnheader">L</span>
-                <span role="columnheader">T</span>
-                <span role="columnheader">Win %</span>
-                <span role="columnheader">PF</span>
-                <span role="columnheader">PA</span>
-                <span role="columnheader">Diff</span>
-              </div>
-
-              {division.rows.map((row, index) => (
-                <div
-                  key={`${row.clubSlug}-${row.teamSlug}`}
-                  className={`standings-table__row ${row.isCurrentTeam ? 'standings-table__row--current' : ''}`}
-                  role="row"
-                >
-                  <span className="standings-table__rank" data-label="Rank" role="cell">#{index + 1}</span>
-                  <span className="standings-table__marker" data-label="Marker" role="cell">
-                    {row.isCurrentTeam ? <small>Your team</small> : null}
-                  </span>
-                  <span className="standings-table__team" data-label="Team" role="cell">
-                    <img
-                      alt=""
-                      aria-hidden="true"
-                      decoding="async"
-                      loading="lazy"
-                      src={row.logoUrl || defaultTeamLogo}
-                    />
-                    <strong>{row.name}</strong>
-                  </span>
-                  <span data-label="GP" role="cell">{row.gamesPlayed}</span>
-                  <span data-label="W" role="cell">{row.wins}</span>
-                  <span data-label="L" role="cell">{row.losses}</span>
-                  <span data-label="T" role="cell">{row.ties}</span>
-                  <span data-label="Win %" role="cell">{Math.round(row.winPct * 100)}%</span>
-                  <span data-label="PF" role="cell">{row.pointsFor}</span>
-                  <span data-label="PA" role="cell">{row.pointsAgainst}</span>
-                  <span
-                    className={row.pointDifferential >= 0 ? 'standings-positive' : 'standings-negative'}
-                    data-label="Diff"
-                    role="cell"
-                  >
-                    {row.pointDifferential >= 0 ? `+${row.pointDifferential}` : row.pointDifferential}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
+        {sortedRows.map((row, index) => (
+          <div
+            key={`${row.clubSlug}-${row.teamSlug}`}
+            className={`standings-table__row ${row.isCurrentTeam ? 'standings-table__row--current' : ''}`}
+            role="row"
+          >
+            <span className="standings-table__rank" data-label="Rank" role="cell">#{index + 1}</span>
+            <span className="standings-table__marker" data-label="Marker" role="cell">
+              {row.isCurrentTeam ? <small>Your team</small> : null}
+            </span>
+            <span className="standings-table__team" data-label="Team" role="cell">
+              <img
+                alt=""
+                aria-hidden="true"
+                decoding="async"
+                loading="lazy"
+                src={row.logoUrl || defaultTeamLogo}
+              />
+              <strong>{row.name}</strong>
+            </span>
+            <span data-label="GP" role="cell">{row.gamesPlayed}</span>
+            <span data-label="W" role="cell">{row.wins}</span>
+            <span data-label="L" role="cell">{row.losses}</span>
+            <span data-label="Win %" role="cell">{Math.round(row.winPct * 100)}%</span>
+            <span data-label="PF" role="cell">{row.pointsFor}</span>
+            <span data-label="PA" role="cell">{row.pointsAgainst}</span>
+            <span
+              className={row.pointDifferential >= 0 ? 'standings-positive' : 'standings-negative'}
+              data-label="Diff"
+              role="cell"
+            >
+              {row.pointDifferential >= 0 ? `+${row.pointDifferential}` : row.pointDifferential}
+            </span>
+          </div>
         ))}
       </div>
     </div>
@@ -1568,16 +1579,18 @@ function ClubStandingsBoard({ loading, rows }) {
 
 function StandingsSummary({ clubStandingsLoading = false, clubStandingsRows = [], games, team }) {
   const standings = useMemo(() => buildStandingsSummary(games), [games]);
-  const totalDecisions = standings.wins + standings.losses + standings.ties;
-  const pointsFor = standings.opponents.reduce((total, row) => total + row.pointsFor, 0);
-  const pointsAgainst = standings.opponents.reduce((total, row) => total + row.pointsAgainst, 0);
-  const pointDifferential = pointsFor - pointsAgainst;
+  const opponentLogoByName = useMemo(
+    () =>
+      new Map(
+        clubStandingsRows.map((row) => [
+          normalizeStandingsTeamName(row.name),
+          row.logoUrl || defaultTeamLogo,
+        ]),
+      ),
+    [clubStandingsRows],
+  );
+  const totalDecisions = standings.wins + standings.losses;
   const winPercent = totalDecisions ? Math.round(Number(standings.winPct) * 100) : 0;
-  const resultSegments = [
-    { className: 'standings-record-bar__segment--wins', count: standings.wins, label: 'Wins' },
-    { className: 'standings-record-bar__segment--ties', count: standings.ties, label: 'Ties' },
-    { className: 'standings-record-bar__segment--losses', count: standings.losses, label: 'Losses' },
-  ];
 
   return (
     <div className="standings-summary">
@@ -1585,50 +1598,19 @@ function StandingsSummary({ clubStandingsLoading = false, clubStandingsRows = []
 
       {standings.completedGames.length > 0 ? (
         <>
-          <div className="standings-hero">
-            <div className="standings-hero__main">
-              <span className="standings-hero__label">Overall record · W-L-T</span>
-              <strong>{formatRecord(standings.wins, standings.losses, standings.ties)}</strong>
-              <span>{standings.completedGames.length} completed matchup{standings.completedGames.length === 1 ? '' : 's'}</span>
-            </div>
-
-            <div className="standings-metric-card standings-metric-card--win">
-              <span>Win rate</span>
-              <strong>{winPercent}%</strong>
-            </div>
-
-            <div className={`standings-metric-card ${pointDifferential >= 0 ? 'standings-metric-card--positive' : 'standings-metric-card--negative'}`}>
-              <span>Point diff</span>
-              <strong>{pointDifferential >= 0 ? `+${pointDifferential}` : pointDifferential}</strong>
-            </div>
-          </div>
-
-          <div className="standings-record-card">
-            <div className="standings-record-card__header">
-              <div>
-                <p className="eyebrow">Result mix</p>
-                <h2>How the season is trending</h2>
+          <div className="standings-hero standings-hero--combined">
+            <div className="standings-hero__main standings-hero__main--combined">
+              <div className="standings-hero__record">
+                <span className="standings-hero__label">Overall record</span>
+                <strong>{formatRecord(standings.wins, standings.losses)}</strong>
+                <span>
+                  W-L · {standings.completedGames.length} completed matchup{standings.completedGames.length === 1 ? '' : 's'}
+                </span>
               </div>
-              <span>{pointsFor} PF · {pointsAgainst} PA</span>
-            </div>
-
-            <div className="standings-record-bar" aria-label="Win loss tie result breakdown">
-              {resultSegments.map((segment) => (
-                segment.count > 0 ? (
-                  <span
-                    key={segment.label}
-                    aria-label={`${segment.label}: ${segment.count}`}
-                    className={`standings-record-bar__segment ${segment.className}`}
-                    style={{ width: `${(segment.count / totalDecisions) * 100}%` }}
-                  />
-                ) : null
-              ))}
-            </div>
-
-            <div className="standings-record-card__legend">
-              <span><i className="standings-dot standings-dot--wins" /> {standings.wins} wins</span>
-              <span><i className="standings-dot standings-dot--ties" /> {standings.ties} ties</span>
-              <span><i className="standings-dot standings-dot--losses" /> {standings.losses} losses</span>
+              <div className="standings-hero__metric">
+                <span>Win rate</span>
+                <strong>{winPercent}%</strong>
+              </div>
             </div>
           </div>
 
@@ -1640,7 +1622,7 @@ function StandingsSummary({ clubStandingsLoading = false, clubStandingsRows = []
               </div>
               <div className="standings-opponents__grid">
                 {standings.opponents.map((row) => {
-                  const rowPointDifferential = row.pointsFor - row.pointsAgainst;
+                  const opponentLogoUrl = opponentLogoByName.get(normalizeStandingsTeamName(row.opponent)) || defaultTeamLogo;
 
                   return (
                     <div key={row.opponent} className="standings-opponent-card">
@@ -1659,21 +1641,18 @@ function StandingsSummary({ clubStandingsLoading = false, clubStandingsRows = []
                           <span>{team?.name ?? 'Your team'}</span>
                         </div>
                         <div className="standings-scoreboard__score">
-                          <span>Score</span>
-                          <strong>{row.pointsFor}-{row.pointsAgainst}</strong>
+                          <span>Match result</span>
+                          <strong>{row.wins}-{row.losses}</strong>
                         </div>
                         <div className="standings-scoreboard__team standings-scoreboard__team--opponent">
-                          <div className="standings-scoreboard__opponent-badge">
-                            {buildPlayerInitials(row.opponent)}
-                          </div>
+                          <img
+                            alt={`${row.opponent} logo`}
+                            decoding="async"
+                            loading="lazy"
+                            src={opponentLogoUrl}
+                          />
                           <span>{row.opponent}</span>
                         </div>
-                      </div>
-                      <div className="standings-opponent-card__stats">
-                        <span>Record: {formatRecord(row.wins, row.losses, row.ties)} W-L-T</span>
-                        <span className={rowPointDifferential >= 0 ? 'standings-positive' : 'standings-negative'}>
-                          Point diff: {rowPointDifferential >= 0 ? `+${rowPointDifferential}` : rowPointDifferential}
-                        </span>
                       </div>
                     </div>
                   );
@@ -1842,18 +1821,72 @@ export function HelpFeedbackPage() {
 }
 
 export function ActivityPage() {
-  const activities = DEMO_ACTIVITY_ITEMS;
-  const activityClubName = DEMO_ACTIVITY_CLUB_NAME;
+  const { clubSlug, teamSlug } = useParams();
+  const { user } = useAuth();
+  const [activities, setActivities] = useState([]);
+  const [activityClubName, setActivityClubName] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadActivity() {
+      if (!user?.uid) {
+        setActivities([]);
+        setActivityClubName('');
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError('');
+
+      try {
+        const team = await getTeam(clubSlug, teamSlug);
+        const isApprovedClubTeam =
+          team?.affiliationStatus === 'approved' &&
+          team?.approvedClubSlug &&
+          team.approvedClubSlug !== 'independent';
+        const activityClubSlug = isApprovedClubTeam ? team.approvedClubSlug : clubSlug;
+        const nextActivities = await listClubActivity({
+          clubSlug: activityClubSlug,
+          limitCount: 75,
+          teamOnly: !isApprovedClubTeam,
+          teamSlug,
+          user,
+        });
+
+        if (!ignore) {
+          setActivities(nextActivities);
+          setActivityClubName(team?.approvedClubName || team?.clubName || activityClubSlug);
+        }
+      } catch (loadError) {
+        if (!ignore) {
+          setActivities([]);
+          setActivityClubName('');
+          setError(loadError.message ?? 'Unable to load recent activity.');
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadActivity();
+
+    return () => {
+      ignore = true;
+    };
+  }, [clubSlug, teamSlug, user?.uid]);
 
   return (
     <div className="page-grid activity-page">
       <section className="card activity-page__feed-card">
         <div className="activity-page__section-header">
           <div>
-            <p className="eyebrow activity-page__eyebrow">
-              Activity
-              <span>Demo</span>
-            </p>
+            <p className="eyebrow activity-page__eyebrow">Activity</p>
             <h2>Recent Activity</h2>
             <p>
               Latest team, competition, match, standings, and event updates
@@ -1862,7 +1895,13 @@ export function ActivityPage() {
           </div>
         </div>
 
-        {activities.length > 0 ? (
+        {error ? <div className="notice notice--error">{error}</div> : null}
+
+        {loading ? (
+          <div className="state-panel">
+            <p>Loading recent activity...</p>
+          </div>
+        ) : error ? null : activities.length > 0 ? (
           <div className="activity-feed">
             {activities.map((activity) => {
               const typeMeta = getActivityTypeMeta(activity.type);
@@ -2463,7 +2502,6 @@ export function ClubTeamsPage() {
       existing.gamesPlayedCount += countGamesPlayed(clubTeam.games ?? [], player?.id);
       existing.record = {
         losses: existing.record.losses + record.losses,
-        ties: existing.record.ties + record.ties,
         wins: existing.record.wins + record.wins,
       };
       existing.roles.add(role);
@@ -2706,9 +2744,6 @@ export function ClubTeamsPage() {
                           Captain: {clubTeam.captainNames?.length ? clubTeam.captainNames.join(', ') : 'TBD'}
                         </span>
                         <span>Members: {clubTeam.memberCount ?? 0}</span>
-                        {getVisibleTeamDivisionLabel(clubTeam) ? (
-                          <TeamDivisionLabel className="membership-card__division" value={clubTeam.teamDivision} />
-                        ) : null}
                         {canOpenChallengeAction ? (
                           <span className="membership-card__action">
                             <svg className="membership-card__action-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24">
@@ -2765,7 +2800,7 @@ export function ClubTeamsPage() {
                       <div className="team-member-card__stats club-player-card__stats">
                         <span className="team-member-card__stat team-member-card__stat--record">
                           <span><MemberStatIcon type="record" /> Overall Record</span>
-                          <strong>{clubPlayer.record.wins}-{clubPlayer.record.losses}-{clubPlayer.record.ties}</strong>
+                          <strong>{clubPlayer.record.wins}-{clubPlayer.record.losses}</strong>
                         </span>
                         <span className="team-member-card__stat team-member-card__stat--win-rate">
                           <span><MemberStatIcon type="winRate" /> Win Rate</span>
@@ -3244,7 +3279,7 @@ export function TeamMembersPage() {
           member.uid === user?.uid ? user?.displayName || 'You' : 'Pending roster link',
         ),
         isPendingLink: true,
-        record: { losses: 0, ties: 0, wins: 0 },
+        record: { losses: 0, wins: 0 },
         role: member.role,
         skillLevel: 'TBD',
         subtitle: member.role && member.role !== 'member' ? formatRoleLabel(member.role) : 'Account member only',
@@ -3346,7 +3381,7 @@ export function TeamMembersPage() {
                 <div className="team-member-card__stats">
                   <span className="team-member-card__stat team-member-card__stat--record">
                     <span><MemberStatIcon type="record" /> Record</span>
-                    <strong>{entry.record.wins}-{entry.record.losses}-{entry.record.ties}</strong>
+                    <strong>{entry.record.wins}-{entry.record.losses}</strong>
                   </span>
                   <span className="team-member-card__stat team-member-card__stat--skill">
                     <span><MemberStatIcon type="skill" /> Skill</span>
@@ -3558,7 +3593,6 @@ export function ProfilePage() {
     try {
       await saveUserPlayerProfile({
         headshotFile: form.headshotFile,
-        phone: form.phone,
         skillLevel: form.skillLevel,
         user,
       });
@@ -3622,7 +3656,6 @@ export function ProfilePage() {
       <section className="card">
         <p className="eyebrow">Profile</p>
         <h1>Your player profile</h1>
-        <p>Keep your team profile details current for captains and co-captains.</p>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
         {message ? <div className="notice notice--success">{message}</div> : null}
@@ -3667,18 +3700,6 @@ export function ProfilePage() {
                 </div>
               </div>
             </div>
-            <label className="field player-admin-form__phone-field">
-              <span>Mobile phone</span>
-              <input
-                autoComplete="tel"
-                inputMode="tel"
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
-                }
-                type="tel"
-                value={form.phone}
-              />
-            </label>
             <div className="player-admin-form__row">
               <label className="field">
                 <span>Skill level</span>
@@ -3942,10 +3963,6 @@ export function RosterPage() {
                       </div>
                     </div>
                     <div className="player-admin-form__row">
-                      <div className="field player-admin-form__phone-field">
-                        <span>Mobile phone</span>
-                        <div className="readonly-field">{selectedPlayer.phone || 'Not set'}</div>
-                      </div>
                       <div className="field">
                         <span>Skill level</span>
                         <div className="readonly-field">{selectedPlayer.skillLevel || 'Not set'}</div>
@@ -4029,14 +4046,15 @@ export function SchedulePage() {
       activeClubSlug && activeClubSlug !== 'independent'
         ? await listApprovedClubTeams(activeClubSlug).catch(() => [])
         : [];
+    const opponentTeamOptions = approvedTeamOptions.filter(
+      (team) => !(team.clubSlug === clubSlug && team.teamSlug === teamSlug),
+    );
 
     setGames(gameData);
     setMembership(membershipData);
     setPlayers(playerData.map((player) => ({ ...player, memberRole: roleByPlayerId.get(player.id) ?? '' })));
     setCourtOptions(buildCourtOptionsFromClub(activeClub));
-    setMatchTeamOptions(
-      approvedTeamOptions.filter((team) => !(team.clubSlug === clubSlug && team.teamSlug === teamSlug)),
-    );
+    setMatchTeamOptions(opponentTeamOptions);
     setTeamProfile({
       logoUrl: teamData?.logoUrl ?? '',
       name: teamData?.name ?? teamSlug,
@@ -4058,11 +4076,11 @@ export function SchedulePage() {
 
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const upcomingGames = useMemo(
-    () => games.filter((game) => !gameBelongsInPast(game, todayDateKey)),
+    () => sortGamesByMostRecent(games.filter((game) => !gameBelongsInPast(game, todayDateKey))),
     [games, todayDateKey],
   );
   const pastGames = useMemo(
-    () => games.filter((game) => gameBelongsInPast(game, todayDateKey)),
+    () => sortGamesByMostRecent(games.filter((game) => gameBelongsInPast(game, todayDateKey))),
     [games, todayDateKey],
   );
   const visibleGames = activeTab === 'past' ? pastGames : upcomingGames;
@@ -4259,9 +4277,19 @@ export function SchedulePage() {
               <form className="schedule-admin-form schedule-admin-form--compact" onSubmit={handleEditorSubmit}>
                 <div className="schedule-admin-form__main-fields">
                   <MatchupLabelField
-                    onChange={(nextOpponent) => setForm((current) => ({ ...current, opponent: nextOpponent }))}
+                    linkedTeamClubSlug={form.linkedTeamClubSlug}
+                    linkedTeamSlug={form.linkedTeamSlug}
+                    onChange={(selectedTeam) =>
+                      setForm((current) => ({
+                        ...current,
+                        linkedTeamClubSlug: selectedTeam?.clubSlug ?? '',
+                        linkedTeamName: selectedTeam?.name ?? '',
+                        linkedTeamSlug: selectedTeam?.teamSlug ?? '',
+                        opponent: selectedTeam?.name ?? '',
+                      }))
+                    }
+                    opponent={form.opponent}
                     teams={matchTeamOptions}
-                    value={form.opponent}
                   />
                 </div>
 
@@ -4478,23 +4506,48 @@ export function StandingsPage() {
   const [games, setGames] = useState([]);
   const [team, setTeam] = useState(null);
   const [error, setError] = useState('');
+  const [standingsUpdatedAt, setStandingsUpdatedAt] = useState('');
+  const standingsUpdateTimerRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
+    let initialSnapshotsRemaining = 0;
+    const gamesByTeamKey = new Map();
+    const unsubscribers = [];
+
+    function updateRows(teamsForStandings, currentTeamKey) {
+      setClubStandingsRows(buildClubStandingsRowsFromGames(teamsForStandings, gamesByTeamKey, currentTeamKey));
+      setGames(gamesByTeamKey.get(currentTeamKey) ?? []);
+    }
+
+    function noteLiveStandingsUpdate() {
+      const label = new Intl.DateTimeFormat('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+      }).format(new Date());
+
+      setStandingsUpdatedAt(label);
+
+      if (standingsUpdateTimerRef.current) {
+        window.clearTimeout(standingsUpdateTimerRef.current);
+      }
+
+      standingsUpdateTimerRef.current = window.setTimeout(() => {
+        setStandingsUpdatedAt('');
+      }, 8000);
+    }
 
     setClubStandingsLoading(true);
     setError('');
+    setStandingsUpdatedAt('');
 
-    Promise.all([
-      listGames(clubSlug, teamSlug),
-      getTeam(clubSlug, teamSlug),
-    ])
-      .then(async ([gameData, teamData]) => {
+    getTeam(clubSlug, teamSlug)
+      .then(async (teamData) => {
         if (cancelled) {
           return;
         }
 
-        setGames(gameData);
         setTeam(teamData);
 
         const approvedClubSlug =
@@ -4509,7 +4562,6 @@ export function StandingsPage() {
                 clubSlug,
                 logoUrl: teamData?.logoUrl ?? '',
                 name: teamData?.name ?? teamSlug,
-                teamDivision: teamData?.teamDivision ?? '',
                 teamSlug,
               },
             ];
@@ -4529,24 +4581,51 @@ export function StandingsPage() {
                 clubSlug,
                 logoUrl: teamData?.logoUrl ?? '',
                 name: teamData?.name ?? teamSlug,
-                teamDivision: teamData?.teamDivision ?? '',
                 teamSlug,
               },
             ];
 
-        const rows = await Promise.all(
-          teamsForStandings.map(async (clubTeam) => {
-            const teamGames =
-              clubTeam.clubSlug === clubSlug && clubTeam.teamSlug === teamSlug
-                ? gameData
-                : await listGames(clubTeam.clubSlug, clubTeam.teamSlug);
+        initialSnapshotsRemaining = teamsForStandings.length;
 
-            return buildClubStandingsRow(clubTeam, teamGames, currentTeamKey);
-          }),
-        );
+        teamsForStandings.forEach((clubTeam) => {
+          const key = `${clubTeam.clubSlug}/${clubTeam.teamSlug}`;
+          const unsubscribe = subscribeTeamGames(
+            { clubSlug: clubTeam.clubSlug, teamSlug: clubTeam.teamSlug },
+            (teamGames) => {
+              if (cancelled) {
+                return;
+              }
 
-        if (!cancelled) {
-          setClubStandingsRows(rows);
+              const wasLive = initialSnapshotsRemaining === 0;
+              gamesByTeamKey.set(key, teamGames);
+              updateRows(teamsForStandings, currentTeamKey);
+
+              if (initialSnapshotsRemaining > 0) {
+                initialSnapshotsRemaining -= 1;
+
+                if (initialSnapshotsRemaining === 0) {
+                  setClubStandingsLoading(false);
+                }
+
+                return;
+              }
+
+              if (wasLive) {
+                noteLiveStandingsUpdate();
+              }
+            },
+            (subscriptionError) => {
+              if (!cancelled) {
+                setError(subscriptionError.message ?? 'Unable to keep standings updated.');
+              }
+            },
+          );
+
+          unsubscribers.push(unsubscribe);
+        });
+
+        if (teamsForStandings.length === 0) {
+          setClubStandingsLoading(false);
         }
       })
       .catch((loadError) => {
@@ -4554,14 +4633,14 @@ export function StandingsPage() {
           setError(loadError.message ?? 'Unable to load standings yet.');
         }
       })
-      .finally(() => {
-        if (!cancelled) {
-          setClubStandingsLoading(false);
-        }
-      });
 
     return () => {
       cancelled = true;
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+
+      if (standingsUpdateTimerRef.current) {
+        window.clearTimeout(standingsUpdateTimerRef.current);
+      }
     };
   }, [clubSlug, teamSlug]);
 
@@ -4573,7 +4652,7 @@ export function StandingsPage() {
             <p className="eyebrow">Standings</p>
             <h1>Standings</h1>
             <p className="standings-page__copy">
-              See how your team ranks by division, with wins, losses, ties, scoring edge, and head-to-head results.
+              See how your team ranks across the club, with wins, losses, scoring edge, and head-to-head results.
             </p>
           </div>
           <img
@@ -4584,6 +4663,11 @@ export function StandingsPage() {
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
+        {standingsUpdatedAt ? (
+          <div className="notice notice--success standings-live-notice">
+            Standings updated from live match results at {standingsUpdatedAt}.
+          </div>
+        ) : null}
         <StandingsSummary
           clubStandingsLoading={clubStandingsLoading}
           clubStandingsRows={clubStandingsRows}
@@ -6706,7 +6790,6 @@ export function SettingsPage() {
       await updateTeamSettings({
         clubSlug,
         logoFile: form.logoFile,
-        teamDivision: form.teamDivision,
         teamName: form.teamName,
         teamSlug,
         user,
@@ -6908,7 +6991,7 @@ export function SettingsPage() {
             <div>
               <p className="eyebrow">Profile</p>
               <h2>{team?.name ? `${team.name} Profile` : 'Team Profile'}</h2>
-              <p>Upload your own custom logo and set your team division.</p>
+              <p>Upload your own custom logo and keep the team name current.</p>
             </div>
           </div>
 
@@ -6937,31 +7020,6 @@ export function SettingsPage() {
                       onChange={(event) => setForm((current) => ({ ...current, teamName: event.target.value }))}
                       value={form.teamName}
                     />
-                  </label>
-                  <label className="field">
-                    <span>Team division</span>
-                    <span className="team-division-field">
-                      <select
-                        onChange={(event) =>
-                          setForm((current) => ({
-                            ...current,
-                            teamDivision: event.target.value,
-                          }))
-                        }
-                        value={form.teamDivision}
-                      >
-                        {TEAM_DIVISION_OPTIONS.map((option) => (
-                          <option key={option.value || 'not-set'} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      <TeamDivisionLabel
-                        className="team-division-field__symbol"
-                        showLabel={false}
-                        value={form.teamDivision}
-                      />
-                    </span>
                   </label>
                   <button className="button settings-admin-save-button" disabled={saving} type="submit">
                     {saving ? 'Saving settings...' : hasUnsavedLogo ? 'Save Settings & Publish Logo' : 'Save Settings'}
@@ -7378,7 +7436,6 @@ export function ClubAffiliationAdminPage() {
       [
         player.fullName,
         player.email,
-        player.phone,
         player.sourceTeamName,
         player.sourceClubName,
       ]
@@ -8216,9 +8273,6 @@ export function ClubAffiliationAdminPage() {
                           : 'TBD'}
                       </span>
                       <span>Members: {teamSummary.memberCount}</span>
-                      {getVisibleTeamDivisionLabel(teamSummary) ? (
-                        <TeamDivisionLabel className="membership-card__division" value={teamSummary.teamDivision} />
-                      ) : null}
                       <div className="admin-team-card__actions">
                         <label className="button button--ghost">
                           {updatingTeamLogoId === `${teamSummary.clubSlug}-${teamSummary.teamSlug}`
@@ -8641,7 +8695,7 @@ export function ClubAffiliationAdminPage() {
                   <span>Find player</span>
                   <input
                     onChange={(event) => updatePlayerCopyForm('searchText', event.target.value)}
-                    placeholder="Search by name, email, phone, team, or club"
+                    placeholder="Search by name, email, team, or club"
                     value={playerCopyForm.searchText}
                   />
                 </label>

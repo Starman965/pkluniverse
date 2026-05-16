@@ -2140,59 +2140,6 @@ ul {
   font-size: 0.9rem;
 }
 
-.membership-card__division {
-  font-weight: 900;
-}
-
-.team-division-label {
-  display: inline-flex;
-  gap: 0.35rem;
-  align-items: center;
-  color: #f0c14b;
-}
-
-.team-division-label svg {
-  width: 1.05em;
-  height: 1.05em;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2.2;
-  flex: 0 0 auto;
-}
-
-.team-division-field {
-  display: grid;
-  grid-template-columns: minmax(0, 220px) 52px;
-  gap: 0.55rem;
-  align-items: stretch;
-  max-width: 100%;
-  min-width: 0;
-}
-
-.team-division-field select {
-  min-width: 0;
-}
-
-.team-division-field__symbol {
-  display: grid;
-  place-items: center;
-  min-width: 0;
-  min-height: 100%;
-  border-radius: 14px;
-  border: 1px solid rgba(240, 193, 75, 0.32);
-  background: rgba(240, 193, 75, 0.1);
-  color: #f0c14b;
-  font-size: 1.4rem;
-  font-weight: 900;
-}
-
-.team-division-field__symbol svg {
-  width: 1.35rem;
-  height: 1.35rem;
-}
-
 .membership-card__action {
   display: inline-flex;
   width: fit-content;
@@ -2924,6 +2871,10 @@ ul {
   align-items: stretch;
 }
 
+.standings-hero--combined {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .standings-hero__main,
 .standings-metric-card,
 .standings-record-card,
@@ -2943,18 +2894,46 @@ ul {
     rgba(255, 255, 255, 0.045);
 }
 
+.standings-hero__main--combined {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, auto);
+  gap: 1.5rem;
+  align-items: center;
+  padding: 1.15rem 1.25rem;
+}
+
 .standings-hero__label,
 .standings-metric-card span,
-.standings-hero__main span {
+.standings-hero__main span,
+.standings-hero__metric span {
   color: #9fb6d8;
   font-size: 0.88rem;
   font-weight: 700;
 }
 
-.standings-hero__main strong {
+.standings-hero__record {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.standings-hero__main strong,
+.standings-hero__metric strong {
   color: #ffffff;
   font-size: clamp(2rem, 6vw, 4rem);
   line-height: 1;
+}
+
+.standings-hero__metric {
+  display: grid;
+  gap: 0.35rem;
+  justify-items: end;
+  padding-left: 1.5rem;
+  border-left: 1px solid rgba(126, 161, 255, 0.18);
+  text-align: right;
+}
+
+.standings-hero__metric strong {
+  font-size: clamp(1.9rem, 5vw, 3.2rem);
 }
 
 .standings-metric-card {
@@ -3027,10 +3006,6 @@ ul {
   background: linear-gradient(90deg, #14b87f, #6ee7b7);
 }
 
-.standings-record-bar__segment--ties {
-  background: linear-gradient(90deg, #f0c14b, #f7dc83);
-}
-
 .standings-record-bar__segment--losses {
   background: linear-gradient(90deg, #d9785f, #ffb8a6);
 }
@@ -3054,10 +3029,6 @@ ul {
 
 .standings-dot--wins {
   background: #6ee7b7;
-}
-
-.standings-dot--ties {
-  background: #f0c14b;
 }
 
 .standings-dot--losses {
@@ -3092,32 +3063,6 @@ ul {
 
 .standings-league-card__header p:not(.eyebrow) {
   color: #c9d7ea;
-}
-
-.standings-division-stack {
-  display: grid;
-  gap: 1rem;
-}
-
-.standings-division {
-  display: grid;
-  gap: 0.65rem;
-}
-
-.standings-division__header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.standings-division__header > span:last-child {
-  color: #9fb6d8;
-  font-size: 0.84rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .standings-table {
@@ -5945,10 +5890,6 @@ ul {
   gap: 0.85rem;
 }
 
-.player-admin-form__phone-field {
-  max-width: 260px;
-}
-
 .profile-headshot-field {
   display: flex;
   gap: 1rem;
@@ -6202,7 +6143,7 @@ ul {
 
 .settings-admin-branding-grid {
   display: grid;
-  grid-template-columns: 160px minmax(0, 460px) minmax(0, 1fr);
+  grid-template-columns: minmax(150px, 180px) minmax(260px, 460px) minmax(220px, 360px);
   column-gap: 2rem;
   row-gap: 1.25rem;
   align-items: start;
@@ -6287,6 +6228,44 @@ ul {
 
 .settings-admin-form__file-input {
   display: none;
+}
+
+@media (max-width: 1100px) {
+  .settings-admin-branding-grid {
+    grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
+    column-gap: 1.5rem;
+  }
+
+  .settings-admin-logo-prompt {
+    grid-column: 1 / -1;
+    width: 100%;
+    max-width: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .settings-admin-branding-grid {
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
+  }
+
+  .settings-admin-branding-preview,
+  .settings-admin-branding-fields,
+  .settings-admin-logo-prompt {
+    width: 100%;
+    max-width: none;
+  }
+
+  .settings-admin-logo-preview {
+    width: min(100%, 180px);
+    height: auto;
+    aspect-ratio: 1;
+  }
+
+  .settings-admin-form__file-button,
+  .settings-admin-save-button {
+    width: 100%;
+  }
 }
 
 .settings-admin-members {
@@ -7362,11 +7341,6 @@ code {
     justify-self: start;
   }
 
-  .team-division-field {
-    grid-template-columns: minmax(0, 1fr) 48px;
-    width: 100%;
-  }
-
   .schedule-admin-match-card {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -7506,6 +7480,19 @@ code {
 
   .standings-hero {
     grid-template-columns: 1fr;
+  }
+
+  .standings-hero__main--combined {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .standings-hero__metric {
+    justify-items: start;
+    padding-top: 0.85rem;
+    padding-left: 0;
+    border-top: 1px solid rgba(126, 161, 255, 0.18);
+    border-left: 0;
+    text-align: left;
   }
 
   .standings-page__header {

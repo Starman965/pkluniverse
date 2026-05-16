@@ -235,7 +235,6 @@ function buildTeamNavSummary(members, games) {
   return {
     activeMemberCount,
     losses: standings.losses,
-    ties: standings.ties,
     winPct: completedCount ? Math.round(Number(standings.winPct) * 100) : 0,
     wins: standings.wins,
   };
@@ -255,7 +254,6 @@ export default function AppShell() {
   const [teamNavSummary, setTeamNavSummary] = useState({
     activeMemberCount: 0,
     losses: 0,
-    ties: 0,
     winPct: 0,
     wins: 0,
   });
@@ -350,7 +348,6 @@ export default function AppShell() {
       setTeamNavSummary({
         activeMemberCount: 0,
         losses: 0,
-        ties: 0,
         winPct: 0,
         wins: 0,
       });
@@ -385,7 +382,6 @@ export default function AppShell() {
         setTeamNavSummary({
           activeMemberCount: 0,
           losses: 0,
-          ties: 0,
           winPct: 0,
           wins: 0,
         });
@@ -536,8 +532,8 @@ export default function AppShell() {
                   Team Members: <strong>{teamNavSummary.activeMemberCount}</strong>
                 </span>
                 <span className="sidebar__team-stat">
-                  <strong>{teamNavSummary.wins}-{teamNavSummary.losses}{teamNavSummary.ties ? `-${teamNavSummary.ties}` : ''}</strong>
-                  W-L{teamNavSummary.ties ? '-T' : ''}
+                  <strong>{teamNavSummary.wins}-{teamNavSummary.losses}</strong>
+                  W-L
                 </span>
                 <span className="sidebar__team-stat">
                   <strong>{teamNavSummary.winPct}%</strong>
