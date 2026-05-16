@@ -970,7 +970,7 @@ service cloud.firestore {
         allow delete: if isPlatformAdmin();
 
         match /members/{uid} {
-          allow read: if isSelf(uid) || isTeamMember(clubId, teamId) || isAdminContext();
+          allow read: if isSelf(uid) || isTeamMember(clubId, teamId) || isAdminContext() || hasActiveApprovedTeamInClub(clubId);
           allow create: if isPlatformAdmin()
             || (
               signedIn()
@@ -994,7 +994,7 @@ service cloud.firestore {
         }
 
         match /players/{playerId} {
-          allow read: if isTeamMember(clubId, teamId) || isAdminContext();
+          allow read: if isTeamMember(clubId, teamId) || isAdminContext() || hasActiveApprovedTeamInClub(clubId);
           allow create: if safeSelfPlayerWrite(playerId, teamId) || isPlatformAdmin();
           allow update: if safeManagerPlayerTeamUpdate(clubId, teamId)
             || safeSelfPlayerProfileUpdate(playerId, clubId, teamId)

@@ -415,7 +415,6 @@ export default function AppShell() {
   const userDisplayName = currentPlayer?.fullName || user?.displayName || user?.email || 'Player';
   const userAvatarUrl = currentPlayer?.headshotUrl || user?.photoURL || '';
   const userInitial = userDisplayName.trim().charAt(0).toUpperCase() || 'P';
-  const manageMenuOpen = adminRoutes.some((route) => location.pathname.endsWith(`/${route.to}`));
 
   useEffect(() => {
     if (!challengeClubSlug || !clubSlug || !teamSlug) {
@@ -580,25 +579,17 @@ export default function AppShell() {
           {canManage ? (
             <div className="sidebar__nav-group">
               <p className="sidebar__nav-heading">Team Management</p>
-              <details className="sidebar__manage-menu" open={manageMenuOpen}>
-                <summary className={`nav-link sidebar__manage-summary ${manageMenuOpen ? 'nav-link--active' : ''}`}>
-                  <CaptainMenuIcon type="settings" />
-                  <span>Manage</span>
-                </summary>
-                <div className="sidebar__manage-list">
-                  {adminRoutes.map((route) => (
-                    <NavLink
-                      key={route.label}
-                      className={({ isActive }) => `nav-link sidebar__manage-link ${isActive ? 'nav-link--active' : ''}`}
-                      onClick={() => setMobileNavOpen(false)}
-                      to={route.to}
-                    >
-                      <CaptainMenuIcon type={route.icon} />
-                      <span>{route.label}</span>
-                    </NavLink>
-                  ))}
-                </div>
-              </details>
+              {adminRoutes.map((route) => (
+                <NavLink
+                  key={route.label}
+                  className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`}
+                  onClick={() => setMobileNavOpen(false)}
+                  to={route.to}
+                >
+                  <CaptainMenuIcon type={route.icon} />
+                  <span>{route.label}</span>
+                </NavLink>
+              ))}
             </div>
           ) : null}
         </nav>

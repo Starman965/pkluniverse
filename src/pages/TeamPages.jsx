@@ -325,6 +325,22 @@ function buildPlayerInitials(fullName) {
     .join('');
 }
 
+function getPlayerName(player, fallback = 'Player') {
+  const firstLast = [player?.firstName, player?.lastName].filter(Boolean).join(' ').trim();
+  return player?.fullName || player?.displayName || firstLast || player?.email || fallback;
+}
+
+function getCommunityPlayerKey(player) {
+  return getCommunityPlayerKeys(player)[0] ?? getPlayerName(player).toLowerCase().replace(/\s+/g, '-');
+}
+
+function getCommunityPlayerKeys(player) {
+  const nameKey = getPlayerName(player).toLowerCase().replace(/\s+/g, '-');
+  return [player?.uid, player?.email?.toLowerCase(), nameKey]
+    .map((value) => (value ?? '').trim())
+    .filter(Boolean);
+}
+
 function getVisibleMatchScores(game) {
   const scores = Array.isArray(game?.matchScores) ? game.matchScores : [];
   const hasThirdSet = scores[2]?.teamScore !== null || scores[2]?.opponentScore !== null;
@@ -424,6 +440,7 @@ function MatchCardScoreRow({
   aggregateScore,
   fallbackLogoUrl,
   isOpponent = false,
+  isWinner = false,
   name,
   players = [],
   scores,
@@ -457,11 +474,6 @@ function MatchCardScoreRow({
                     )}
                   </span>
                   <strong>{player.fullName || 'Player'}</strong>
-                  {player.memberRole === 'captain' ? (
-                    <span className="match-card-score-row__captain-badge" title="Captain">
-                      C
-                    </span>
-                  ) : null}
                 </span>
               </span>
             ))
@@ -470,7 +482,9 @@ function MatchCardScoreRow({
           )}
         </div>
       </div>
-      <span className="match-card-score-row__aggregate">{aggregateScore ?? '-'}</span>
+      <span className={`match-card-score-row__aggregate ${isWinner ? 'match-card-score-row__aggregate--winner' : ''}`}>
+        {aggregateScore ?? '-'}
+      </span>
       {scores.map((score, index) => {
         const winner = getSetWinner(score);
         const value = isOpponent ? score.opponentScore : score.teamScore;
@@ -520,6 +534,12 @@ function ScheduleMatchCard({
   const opponentName = game.opponent || 'Opponent TBD';
   const opponentPlayers = game.linkedRosterPlayers ?? [];
   const matchTitle = `${homeTeamName || 'Team'} VS ${opponentName} | ${matchTypeLabel} Match`;
+  const teamAggregateScore = Number(game.teamScore);
+  const opponentAggregateScore = Number(game.opponentScore);
+  const hasAggregateWinner =
+    Number.isFinite(teamAggregateScore) &&
+    Number.isFinite(opponentAggregateScore) &&
+    teamAggregateScore !== opponentAggregateScore;
 
   return (
     <article className="schedule-match-card schedule-match-card--scoreboard">
@@ -532,6 +552,7 @@ function ScheduleMatchCard({
         <MatchCardScoreRow
           aggregateScore={game.teamScore}
           fallbackLogoUrl={homeLogoUrl}
+          isWinner={hasAggregateWinner && teamAggregateScore > opponentAggregateScore}
           name={homeTeamName || 'Team'}
           players={homePlayers}
           scores={scores}
@@ -540,6 +561,7 @@ function ScheduleMatchCard({
           aggregateScore={game.opponentScore}
           fallbackLogoUrl={game.linkedTeamLogoUrl}
           isOpponent
+          isWinner={hasAggregateWinner && opponentAggregateScore > teamAggregateScore}
           name={opponentName}
           players={opponentPlayers}
           scores={scores}
@@ -551,10 +573,6 @@ function ScheduleMatchCard({
           <span>
             <ClockIcon />
             {formatMatchFooterDate(game)}
-          </span>
-          <span className="match-card-footer__legend">
-            <span className="match-card-score-row__captain-badge" aria-hidden="true">C</span>
-            Captain
           </span>
         </div>
         <div className="match-card-footer__details">
@@ -774,11 +792,20 @@ function NewsAuthorAvatar({ name, photoUrl = '' }) {
   );
 }
 
+const NEWS_REACTION_OPTIONS = [
+  { emoji: '👍', label: 'Like', type: 'like' },
+  { emoji: '👎', label: 'Disagree', type: 'thumbsDown' },
+  { emoji: '❤️', label: 'Love', type: 'love' },
+  { emoji: '🙌', label: 'Celebrate', type: 'thumbsUp' },
+  { emoji: '😂', label: 'Laugh', type: 'laugh' },
+  { emoji: '😢', label: 'Sad', type: 'cry' },
+  { emoji: '😡', label: 'Angry', type: 'angry' },
+];
+
 function NewsFeed({
   canModerate = false,
   commentDrafts = {},
   commentEditDraft = '',
-  currentTeamSlug = '',
   currentUser,
   deletingCommentId = '',
   deletingPostId = '',
@@ -815,6 +842,10 @@ function NewsFeed({
         const canManagePost = canModerate || post.authorUid === currentUser?.uid;
         const isEditingPost = editingPostId === post.id;
         const userReaction = post.reactions?.find((reaction) => reaction.uid === currentUser?.uid);
+        const reactionCounts = (post.reactions ?? []).reduce((counts, reaction) => {
+          counts[reaction.type] = (counts[reaction.type] ?? 0) + 1;
+          return counts;
+        }, {});
 
         return (
           <article key={post.id} className="news-feed-card">
@@ -826,9 +857,6 @@ function NewsFeed({
                   <span>{formatNewsPostDate(post)}</span>
                 </div>
               </div>
-              {post.teamSlug && post.teamSlug !== currentTeamSlug ? (
-                <span className="news-feed-card__badge">{post.teamName || 'Club post'}</span>
-              ) : null}
             </div>
 
             {isEditingPost ? (
@@ -869,7 +897,6 @@ function NewsFeed({
             ) : (
               <>
                 <div className="news-feed-card__body">
-                  <h2 className="news-feed-card__title">{post.title}</h2>
                   {post.body ? <p className="news-feed-card__text">{post.body}</p> : null}
                   {post.linkUrl ? (
                     <p className="news-feed-card__text">
@@ -884,26 +911,44 @@ function NewsFeed({
                 </div>
 
                 <div className="news-feed-card__actions">
-                  <button
-                    className={`news-feed-card__reaction ${userReaction?.type === 'like' ? 'news-feed-card__reaction--active' : ''}`}
-                    disabled={!currentUser?.uid || reactingPostId === post.id}
-                    onClick={() => onReactionToggle?.(post, 'like')}
-                    type="button"
-                  >
-                    Like ({post.reactionCount ?? 0})
-                  </button>
-                  {canManagePost ? (
-                    <div className="news-feed-card__manage">
-                      <button className="news-feed-card__action" onClick={() => onEditPost?.(post)} type="button">
-                        Edit
-                      </button>
+                  <div className="news-reaction-picker" aria-label="React to post">
+                    {NEWS_REACTION_OPTIONS.map((reaction) => (
                       <button
-                        className="news-feed-card__action"
-                        disabled={deletingPostId === post.id}
-                        onClick={() => onDeletePost?.(post)}
+                        key={reaction.type}
+                        aria-label={`${reaction.label} reaction`}
+                        className={`news-reaction-button ${userReaction?.type === reaction.type ? 'news-reaction-button--active' : ''}`}
+                        disabled={!currentUser?.uid || reactingPostId === post.id}
+                        onClick={() => onReactionToggle?.(post, reaction.type)}
+                        title={reaction.label}
                         type="button"
                       >
-                        {deletingPostId === post.id ? 'Deleting...' : 'Delete'}
+                        <span aria-hidden="true">{reaction.emoji}</span>
+                        {reactionCounts[reaction.type] ? (
+                          <small>{reactionCounts[reaction.type]}</small>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                  {canManagePost ? (
+                    <div className="news-feed-card__manage">
+                      <button
+                        aria-label="Edit post"
+                        className="news-icon-button"
+                        onClick={() => onEditPost?.(post)}
+                        title="Edit post"
+                        type="button"
+                      >
+                        <PencilIcon />
+                      </button>
+                      <button
+                        aria-label="Delete post"
+                        className="news-icon-button news-icon-button--danger"
+                        disabled={deletingPostId === post.id}
+                        onClick={() => onDeletePost?.(post)}
+                        title="Delete post"
+                        type="button"
+                      >
+                        <TrashIcon />
                       </button>
                     </div>
                   ) : null}
@@ -942,16 +987,24 @@ function NewsFeed({
                           <p>{comment.body}</p>
                           {canManageComment ? (
                             <div className="news-feed-icon-actions">
-                              <button className="news-feed-card__action" onClick={() => onEditComment?.(comment)} type="button">
-                                Edit
-                              </button>
                               <button
-                                className="news-feed-card__action"
-                                disabled={deletingCommentId === comment.id}
-                                onClick={() => onDeleteComment?.(post, comment)}
+                                aria-label="Edit comment"
+                                className="news-icon-button"
+                                onClick={() => onEditComment?.(comment)}
+                                title="Edit comment"
                                 type="button"
                               >
-                                {deletingCommentId === comment.id ? 'Deleting...' : 'Delete'}
+                                <PencilIcon />
+                              </button>
+                              <button
+                                aria-label="Delete comment"
+                                className="news-icon-button news-icon-button--danger"
+                                disabled={deletingCommentId === comment.id}
+                                onClick={() => onDeleteComment?.(post, comment)}
+                                title="Delete comment"
+                                type="button"
+                              >
+                                <TrashIcon />
                               </button>
                             </div>
                           ) : null}
@@ -968,8 +1021,14 @@ function NewsFeed({
                   placeholder="Write a comment..."
                   value={commentDrafts[post.id] ?? ''}
                 />
-                <button disabled={!currentUser?.uid || !(commentDrafts[post.id] ?? '').trim()} type="submit">
-                  Post
+                <button
+                  aria-label="Send comment"
+                  className="news-feed-comment-submit"
+                  disabled={!currentUser?.uid || !(commentDrafts[post.id] ?? '').trim()}
+                  title="Send comment"
+                  type="submit"
+                >
+                  <SendIcon />
                 </button>
               </form>
             </div>
@@ -1080,6 +1139,14 @@ function TrashIcon() {
     <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
       <path d="M7 8h10l-.7 12H7.7L7 8z" />
       <path d="M9 5h6l.7 1.5H20V8H4V6.5h4.3L9 5z" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path d="M3.5 20.2 21 12 3.5 3.8 3 10l10 2-10 2 .5 6.2z" />
     </svg>
   );
 }
@@ -4683,6 +4750,10 @@ export function NewsPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
   const imageInputId = `news-image-${clubSlug}-${teamSlug}`;
+  const [communityLoading, setCommunityLoading] = useState(true);
+  const [communityPlayers, setCommunityPlayers] = useState([]);
+  const [communityRankings, setCommunityRankings] = useState([]);
+  const [communityTeams, setCommunityTeams] = useState([]);
   const [newsPosts, setNewsPosts] = useState([]);
   const [membership, setMembership] = useState(null);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
@@ -4715,6 +4786,92 @@ export function NewsPage() {
 
     setMembership(membershipData);
     setIsAppAdmin(platformAdmin);
+  }
+
+  async function loadCommunityOverview() {
+    if (user?.uid) {
+      await setLastActiveTeam({ clubSlug, teamSlug, uid: user.uid });
+    }
+
+    const teamData = await getTeam(clubSlug, teamSlug);
+    const activeClubSlug =
+      teamData?.affiliationStatus === 'approved' && teamData?.approvedClubSlug
+        ? teamData.approvedClubSlug
+        : clubSlug;
+    const teams =
+      activeClubSlug && activeClubSlug !== 'independent'
+        ? await listApprovedClubTeams(activeClubSlug)
+        : [
+            {
+              clubSlug,
+              logoUrl: teamData?.logoUrl ?? '',
+              name: teamData?.name ?? teamSlug,
+              teamSlug,
+            },
+          ];
+    const teamEntries = await Promise.all(
+      teams.map(async (clubTeam) => {
+        const [members, players, games] = await Promise.all([
+          listTeamMembers(clubTeam.clubSlug, clubTeam.teamSlug).catch(() => []),
+          listPlayers(clubTeam.clubSlug, clubTeam.teamSlug).catch(() => []),
+          listGames(clubTeam.clubSlug, clubTeam.teamSlug).catch(() => []),
+        ]);
+        const playersById = new Map(players.map((player) => [player.id, player]));
+        const rosterPlayers = members
+          .filter((member) => member.status !== 'inactive')
+          .map((member) => playersById.get(member.playerId || member.uid))
+          .filter(Boolean);
+        const displayedPlayers = (rosterPlayers.length ? rosterPlayers : players)
+          .filter((player) => player.active !== false)
+          .slice(0, TEAM_MEMBER_LIMIT);
+        const completedMatchCount = buildStandingsSummary(games).completedGames.length;
+
+        return {
+          games,
+          players,
+          team: {
+            ...clubTeam,
+            matchesPlayed: completedMatchCount,
+            rosterPlayers: displayedPlayers,
+          },
+        };
+      }),
+    );
+    const playerAliasKeys = new Map();
+    const playerCardsByKey = new Map();
+    teamEntries.forEach(({ games, players, team }) => {
+      players
+        .filter((player) => player.active !== false)
+        .forEach((player) => {
+          const identityKeys = getCommunityPlayerKeys(player);
+          const playerKey = identityKeys.map((key) => playerAliasKeys.get(key)).find(Boolean) ?? getCommunityPlayerKey(player);
+          const existingPlayer = playerCardsByKey.get(playerKey);
+          const gamesPlayed = countGamesPlayed(games, player.id);
+          identityKeys.forEach((key) => {
+            playerAliasKeys.set(key, playerKey);
+          });
+
+          playerCardsByKey.set(playerKey, {
+            gamesPlayed: Math.max(existingPlayer?.gamesPlayed ?? 0, gamesPlayed),
+            headshotUrl: existingPlayer?.headshotUrl || player.headshotUrl || player.photoURL || '',
+            id: playerKey,
+            name: existingPlayer?.name || getPlayerName(player),
+            teamNames: [...new Set([...(existingPlayer?.teamNames ?? []), team.name].filter(Boolean))],
+          });
+        });
+    });
+    const playerCards = Array.from(playerCardsByKey.values())
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const currentTeamKey = `${clubSlug}/${teamSlug}`;
+    const rankingRows = sortStandingsRows(
+      teamEntries.map(({ games, team }) => buildClubStandingsRow(team, games, currentTeamKey)),
+    ).slice(0, 3);
+
+    return {
+      players: playerCards,
+      rankings: rankingRows,
+      teams: teamEntries.map((entry) => entry.team).sort((left, right) => left.name.localeCompare(right.name)),
+    };
   }
 
   useEffect(() => {
@@ -4756,6 +4913,37 @@ export function NewsPage() {
       unsubscribe?.();
     };
   }, [clubSlug, teamSlug, user?.email, user?.uid]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    setCommunityLoading(true);
+    loadCommunityOverview()
+      .then(({ players, rankings, teams }) => {
+        if (!ignore) {
+          setCommunityTeams(teams);
+          setCommunityPlayers(players);
+          setCommunityRankings(rankings);
+        }
+      })
+      .catch((loadError) => {
+        if (!ignore) {
+          setError(loadError.message ?? 'Unable to load the community directory.');
+          setCommunityTeams([]);
+          setCommunityPlayers([]);
+          setCommunityRankings([]);
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setCommunityLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [clubSlug, teamSlug, user?.uid]);
 
   useEffect(() => (
     () => {
@@ -5046,19 +5234,16 @@ export function NewsPage() {
 
   return (
     <div className="page-grid news-page">
-      <section className="card">
+      <aside className="card home-news-card">
         <NewsFeedIntro
-          copy="Share photos, team happenings, drills, practice notes, match moments, shout-outs, and pickleball community updates with everyone in the club."
+          copy="Share photos, practice notes, match moments, and club updates."
           title="Community Feed"
         />
-
-        {error ? <div className="notice notice--error">{error}</div> : null}
-        {message ? <div className="notice notice--success">{message}</div> : null}
 
         {isComposerOpen ? (
           <form className="news-composer" onSubmit={handleSubmit}>
             <label className="field">
-              <span>What&apos;s happening in the pickleball community?</span>
+              <span>What&apos;s happening?</span>
               <textarea
                 onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))}
                 placeholder="Share a photo, practice note, drill idea, match recap, shout-out, or community update..."
@@ -5106,7 +5291,7 @@ export function NewsPage() {
               onClick={() => setIsComposerOpen(true)}
               type="button"
             >
-              What&apos;s happening in the pickleball community?
+              What&apos;s happening?
             </button>
             <button className="button" onClick={() => setIsComposerOpen(true)} type="button">
               Create Post
@@ -5144,6 +5329,137 @@ export function NewsPage() {
           savingCommentId={savingCommentId}
           savingPostId={savingPostId}
         />
+      </aside>
+
+      <section className="card home-community-card">
+        <div className="news-feed-intro">
+          <div className="news-feed-intro__content">
+            <p className="eyebrow">Home</p>
+            <h1>Community Directory</h1>
+            <p className="news-feed-intro__copy">Browse teams and players in your club community.</p>
+          </div>
+        </div>
+
+        {error ? <div className="notice notice--error">{error}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
+
+        {communityLoading ? (
+          <div className="state-panel">
+            <p>Loading community directory...</p>
+          </div>
+        ) : (
+          <div className="home-community">
+            <section className="home-rankings-card" aria-label="Top team rankings">
+              <div className="home-rankings-card__header">
+                <div>
+                  <p className="eyebrow">Top 3</p>
+                  <h2>Team Rankings</h2>
+                </div>
+                <Link className="home-rankings-card__link" to="../standings">
+                  View standings
+                </Link>
+              </div>
+              {communityRankings.length > 0 ? (
+                <div className="home-rankings-list">
+                  {communityRankings.map((row, index) => (
+                    <article key={`${row.clubSlug}-${row.teamSlug}`} className="home-ranking-row">
+                      <span className="home-ranking-row__rank">#{index + 1}</span>
+                      <img alt={`${row.name} logo`} src={row.logoUrl || defaultTeamLogo} />
+                      <div className="home-ranking-row__team">
+                        <strong>{row.name}</strong>
+                        <span>{formatRecord(row.wins, row.losses)} W-L</span>
+                      </div>
+                      <span className="home-ranking-row__rate">
+                        {Math.round(Number(row.winPct) * 100)}%
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="notice notice--info">Rankings appear after teams are listed.</div>
+              )}
+            </section>
+
+            <section className="home-community-section">
+              <div className="home-community-section__header">
+                <div>
+                  <h2>Team Directory</h2>
+                </div>
+                <span>{communityTeams.length} team{communityTeams.length === 1 ? '' : 's'}</span>
+              </div>
+              {communityTeams.length > 0 ? (
+                <div className="home-team-grid">
+                  {communityTeams.map((clubTeam) => (
+                    <article key={`${clubTeam.clubSlug}-${clubTeam.teamSlug}`} className="home-team-card">
+                      <img
+                        alt={`${clubTeam.name} logo`}
+                        className="home-team-card__logo"
+                        src={clubTeam.logoUrl || defaultTeamLogo}
+                      />
+                      <div className="home-team-card__body">
+                        <div className="home-team-card__header">
+                          <h3>{clubTeam.name}</h3>
+                          <span>{clubTeam.matchesPlayed} match{clubTeam.matchesPlayed === 1 ? '' : 'es'} played</span>
+                        </div>
+                        <div className="home-team-card__players">
+                          {clubTeam.rosterPlayers.length > 0 ? (
+                            clubTeam.rosterPlayers.map((player) => (
+                              <div key={player.id} className="home-team-card__player">
+                                {player.headshotUrl ? (
+                                  <img alt={`${getPlayerName(player)} headshot`} src={player.headshotUrl} />
+                                ) : (
+                                  <span>{buildPlayerInitials(getPlayerName(player))}</span>
+                                )}
+                                <strong>{getPlayerName(player)}</strong>
+                              </div>
+                            ))
+                          ) : (
+                            <span>Roster pending</span>
+                          )}
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="notice notice--info">No teams are listed yet.</div>
+              )}
+            </section>
+
+            <section className="home-community-section">
+              <div className="home-community-section__header">
+                <div>
+                  <h2>Player Directory</h2>
+                </div>
+                <span>{communityPlayers.length} player{communityPlayers.length === 1 ? '' : 's'}</span>
+              </div>
+              {communityPlayers.length > 0 ? (
+                <div className="home-player-grid">
+                  {communityPlayers.map((player) => (
+                    <article key={player.id} className="home-player-card">
+                      {player.headshotUrl ? (
+                        <img alt={`${player.name} headshot`} className="home-player-card__avatar" src={player.headshotUrl} />
+                      ) : (
+                        <div className="home-player-card__avatar home-player-card__avatar--initials">
+                          {buildPlayerInitials(player.name)}
+                        </div>
+                      )}
+                      <div>
+                        <strong>{player.name}</strong>
+                        <span>
+                          {player.gamesPlayed} game{player.gamesPlayed === 1 ? '' : 's'} played ·{' '}
+                          {player.teamNames.length} team{player.teamNames.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="notice notice--info">No players are listed yet.</div>
+              )}
+            </section>
+          </div>
+        )}
       </section>
     </div>
   );
@@ -5409,7 +5725,7 @@ export function NewsroomPage() {
             selectedPostId={editingPostId}
           />
         ) : (
-          <NewsFeed currentTeamSlug={teamSlug} newsPosts={newsPosts} />
+          <NewsFeed newsPosts={newsPosts} />
         )}
       </section>
 
@@ -5755,6 +6071,9 @@ export function ChallengesPage() {
       setForm(createEmptyChallengeForm());
       setEditingChallengeId('');
       setMessage(editingChallengeId ? 'Challenge updated.' : '');
+      if (!editingChallengeId) {
+        setPostedChallengeTab('proposed');
+      }
       setChallengeFormOpen(false);
       await loadChallengeData();
     } catch (submitError) {
@@ -6492,11 +6811,6 @@ export function ChallengesPage() {
                       <span>{formatChallengeTime(selectedIncomingChallenge)}</span>
                       <span>{normalizeMatchPlayerCount(selectedIncomingChallenge.playersNeeded)} Players</span>
                     </div>
-                    {selectedIncomingChallenge.notes ? (
-                      <p className="challenge-inbox-card__note">“{selectedIncomingChallenge.notes}”</p>
-                    ) : (
-                      <p className="challenge-inbox-card__note">No captain note was included.</p>
-                    )}
                     {canManage ? (
                       <div className="challenge-inbox-card__actions">
                         {renderAcceptSinglesSelector(selectedIncomingChallenge)}
