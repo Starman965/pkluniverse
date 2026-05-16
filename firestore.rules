@@ -596,7 +596,6 @@ service cloud.firestore {
           'createdByPlayerName',
           'isoDate',
           'location',
-          'notes',
           'playersNeeded',
           'targetTeamClubSlug',
           'targetTeamName',

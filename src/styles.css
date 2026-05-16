@@ -1512,9 +1512,15 @@ ul {
 .challenge-form-dialog > .schedule-admin-card {
   position: relative;
   z-index: 1;
-  width: min(100%, 920px);
+  width: min(100%, 860px);
   max-height: min(88vh, 900px);
   overflow: auto;
+}
+
+.challenge-form-dialog__close {
+  min-height: 34px;
+  padding: 0.38rem 0.7rem;
+  font-size: 0.84rem;
 }
 
 .match-form-dialog {
@@ -1843,6 +1849,7 @@ ul {
 }
 
 .challenge-form__target {
+  flex: 1 1 260px;
   min-width: min(100%, 260px);
 }
 
@@ -1857,15 +1864,18 @@ ul {
 }
 
 .challenge-form__date {
-  width: 190px;
+  flex: 1 1 170px;
+  max-width: 190px;
 }
 
 .challenge-form__time {
-  width: 250px;
+  flex: 1 1 240px;
+  max-width: 250px;
 }
 
 .challenge-form__players-needed {
-  width: 150px;
+  flex: 0 1 150px;
+  max-width: 150px;
 }
 
 .challenge-form__tbd {
@@ -1901,11 +1911,8 @@ ul {
 }
 
 .challenge-form__location {
-  max-width: 460px;
-}
-
-.challenge-form__notes {
-  max-width: 760px;
+  flex: 0 1 150px;
+  max-width: 150px;
 }
 
 .challenge-form__submit {
@@ -1962,6 +1969,77 @@ ul {
     grid-row: auto;
     width: auto;
     min-width: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .challenge-form-dialog {
+    align-items: stretch;
+    justify-items: stretch;
+    padding: 0.5rem;
+  }
+
+  .challenge-form-dialog > .schedule-admin-card {
+    width: 100%;
+    max-height: calc(100vh - 1rem);
+    border-radius: 18px;
+    padding: 0.85rem;
+  }
+
+  .challenge-form-dialog .schedule-admin-card__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .challenge-form-dialog__close {
+    flex: 0 0 auto;
+    width: auto;
+    padding-inline: 0.65rem;
+  }
+
+  .challenge-form__section {
+    padding: 0.75rem;
+  }
+
+  .challenge-form {
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .challenge-form > * {
+    min-width: 0;
+  }
+
+  .challenge-form__audience-row,
+  .challenge-form__date-time-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .challenge-form__type,
+  .challenge-form__target,
+  .challenge-form__date,
+  .challenge-form__time,
+  .challenge-form__players-needed,
+  .challenge-form__location,
+  .challenge-form__singles-player,
+  .challenge-form__tbd {
+    width: 100%;
+    max-width: none;
+  }
+
+  .challenge-time-selectors {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 0.85fr);
+  }
+
+  .challenge-form__actions,
+  .challenge-form__submit {
+    width: 100%;
+  }
+
+  .challenge-form__actions .button {
+    width: 100%;
   }
 }
 
@@ -5292,7 +5370,8 @@ ul {
 }
 
 .match-card-score-row__identity {
-  display: flex;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
   gap: 0.75rem;
   min-width: 0;
@@ -5309,7 +5388,77 @@ ul {
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
 }
 
-.match-card-score-row__identity strong {
+.match-card-score-row__players {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.match-card-score-row__player-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.match-card-score-row__player {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.match-card-score-row__player-separator {
+  color: rgba(201, 215, 234, 0.42);
+  font-weight: 900;
+}
+
+.match-card-score-row__player-avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: rgba(255, 202, 87, 0.14);
+  border: 1px solid rgba(255, 202, 87, 0.22);
+  color: #f5d67a;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.match-card-score-row__player-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.match-card-score-row__captain-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: linear-gradient(180deg, #ffe52d 0%, #f2bd15 100%);
+  color: #162033;
+  font-size: 0.64rem;
+  font-weight: 900;
+  line-height: 18px;
+  font-family: Arial, Helvetica, sans-serif;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+.match-card-score-row__player .match-card-score-row__captain-badge {
+  color: #162033;
+}
+
+.match-card-score-row__players strong {
   overflow: hidden;
   color: #e8f0ff;
   font-size: 0.92rem;
@@ -5348,6 +5497,27 @@ ul {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+}
+
+.match-card-footer__details {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.match-card-footer__legend {
+  color: #9fb6d8;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.match-card-footer__legend .match-card-score-row__captain-badge {
+  width: 15px;
+  height: 15px;
+  color: #162033;
+  font-size: 0.56rem;
+  line-height: 15px;
 }
 
 .match-card-footer__icon {

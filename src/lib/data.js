@@ -2818,7 +2818,6 @@ function normalizeChallenge(entry, challengeClubSlug) {
     id: entry.id,
     isoDate: data.isoDate ?? '',
     location: data.location ?? '',
-    notes: data.notes ?? '',
     playersNeeded: normalizedPlayersNeeded,
     status: data.status ?? 'open',
     targetTeamClubSlug: data.targetTeamClubSlug ?? '',
@@ -2953,7 +2952,6 @@ export async function createChallenge({
   dateTbd = false,
   isoDate = '',
   location = '',
-  notes = '',
   playersNeeded = 2,
   targetTeam = null,
   teamSlug,
@@ -2985,7 +2983,6 @@ export async function createChallenge({
   const normalizedVisibility = visibility === 'targeted' ? 'targeted' : 'open';
   const trimmedIsoDate = isoDate.trim();
   const trimmedLocation = location.trim();
-  const trimmedNotes = notes.trim();
   const trimmedTimeLabel = timeLabel.trim();
   const normalizedDateTbd = dateTbd === true;
   const normalizedPlayersNeeded = normalizeMatchPlayerCount(playersNeeded);
@@ -3047,7 +3044,6 @@ export async function createChallenge({
     homeGameId: '',
     isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
     location: trimmedLocation || 'Location TBD',
-    notes: trimmedNotes,
     playersNeeded: normalizedPlayersNeeded,
     status: 'open',
     targetTeamClubSlug: target?.clubSlug ?? '',
@@ -3116,7 +3112,6 @@ export async function createChallenge({
         dateTbd: normalizedDateTbd,
         isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
         location: challengeLocation,
-        notes: trimmedNotes,
         playersNeeded: normalizedPlayersNeeded,
         timeLabel: challengeTimeLabel,
       },
@@ -3134,7 +3129,6 @@ export async function updateChallenge({
   dateTbd = false,
   isoDate = '',
   location = '',
-  notes = '',
   playersNeeded = 2,
   targetTeam = null,
   teamSlug,
@@ -3173,7 +3167,6 @@ export async function updateChallenge({
   const normalizedVisibility = visibility === 'targeted' ? 'targeted' : 'open';
   const trimmedIsoDate = isoDate.trim();
   const trimmedLocation = location.trim();
-  const trimmedNotes = notes.trim();
   const trimmedTimeLabel = timeLabel.trim();
   const normalizedDateTbd = dateTbd === true;
   const normalizedPlayersNeeded = normalizeMatchPlayerCount(playersNeeded);
@@ -3215,7 +3208,6 @@ export async function updateChallenge({
     dateTbd: normalizedDateTbd,
     isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
     location: trimmedLocation || 'Location TBD',
-    notes: trimmedNotes,
     playersNeeded: normalizedPlayersNeeded,
     targetTeamClubSlug: target?.clubSlug ?? '',
     targetTeamName: target?.name ?? '',
@@ -3518,7 +3510,6 @@ export async function acceptChallenge({ acceptedByPlayerId = '', challengeId, ch
       awayGameId,
       isoDate: challenge.dateTbd ? '' : challenge.isoDate,
       location: challenge.location || 'Location TBD',
-      notes: challenge.notes || '',
       playersNeeded: normalizeMatchPlayerCount(challenge.playersNeeded),
       timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
     },
@@ -3682,7 +3673,6 @@ export async function cancelChallenge({ challengeId, challengeClubSlug, clubSlug
         dateTbd: challenge.dateTbd,
         isoDate: challenge.dateTbd ? '' : challenge.isoDate,
         location: challenge.location || 'Location TBD',
-        notes: challenge.notes || '',
         playersNeeded: normalizeMatchPlayerCount(challenge.playersNeeded),
         timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
       },

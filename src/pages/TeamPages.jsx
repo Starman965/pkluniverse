@@ -168,7 +168,6 @@ function createEmptyChallengeForm() {
     isoDate: '',
     location: '',
     minute: '00',
-    notes: '',
     period: 'AM',
     playersNeeded: 2,
     createdByPlayerId: '',
@@ -438,7 +437,32 @@ function MatchCardScoreRow({
           }}
           src={fallbackLogoUrl || defaultTeamLogo}
         />
-        <strong>{sortedPlayers.length ? sortedPlayers.map((player) => player.fullName || 'Player').join(' / ') : name}</strong>
+        <div className="match-card-score-row__players">
+          {sortedPlayers.length ? (
+            sortedPlayers.map((player, index) => (
+              <span key={player.id || player.fullName} className="match-card-score-row__player-group">
+                {index > 0 ? <span className="match-card-score-row__player-separator">|</span> : null}
+                <span className="match-card-score-row__player">
+                  <span className="match-card-score-row__player-avatar">
+                    {player.headshotUrl ? (
+                      <img alt="" decoding="async" src={player.headshotUrl} />
+                    ) : (
+                      buildPlayerInitials(player.fullName || 'Player')
+                    )}
+                  </span>
+                  <strong>{player.fullName || 'Player'}</strong>
+                  {player.memberRole === 'captain' ? (
+                    <span className="match-card-score-row__captain-badge" title="Captain">
+                      C
+                    </span>
+                  ) : null}
+                </span>
+              </span>
+            ))
+          ) : (
+            <strong>{name}</strong>
+          )}
+        </div>
       </div>
       <span className="match-card-score-row__aggregate">{aggregateScore ?? '-'}</span>
       {scores.map((score, index) => {
@@ -517,14 +541,22 @@ function ScheduleMatchCard({
       </div>
 
       <div className="match-card-footer">
-        <span>
-          <ClockIcon />
-          {formatMatchFooterDate(game)}
-        </span>
-        <span>
-          <CourtIcon />
-          {getMatchCourtLabel(game.location)}
-        </span>
+        <div className="match-card-footer__details">
+          <span>
+            <ClockIcon />
+            {formatMatchFooterDate(game)}
+          </span>
+          <span className="match-card-footer__legend">
+            <span className="match-card-score-row__captain-badge" aria-hidden="true">C</span>
+            Captain
+          </span>
+        </div>
+        <div className="match-card-footer__details">
+          <span>
+            <CourtIcon />
+            {getMatchCourtLabel(game.location)}
+          </span>
+        </div>
       </div>
 
     </article>
@@ -5422,7 +5454,6 @@ function createChallengeFormFromChallenge(challenge) {
     isoDate: challenge.dateTbd === true ? '' : challenge.isoDate ?? '',
     location: challenge.location && challenge.location !== 'Location TBD' ? challenge.location : '',
     minute: challenge.dateTbd === true ? '00' : match?.[2] ?? '00',
-    notes: challenge.notes ?? '',
     period: challenge.dateTbd === true ? 'AM' : match?.[3]?.toUpperCase() ?? 'AM',
     playersNeeded: normalizeMatchPlayerCount(challenge.playersNeeded),
     createdByPlayerId: challenge.createdByPlayerId ?? '',
@@ -5619,7 +5650,6 @@ export function ChallengesPage() {
         dateTbd: form.dateTbd,
         isoDate: form.isoDate,
         location: form.location,
-        notes: form.notes,
         playersNeeded: form.playersNeeded,
         targetTeam: form.visibility === 'targeted' ? selectedTargetTeam : null,
         teamSlug,
@@ -5862,7 +5892,6 @@ export function ChallengesPage() {
               ) : null}
             </div>
           ) : null}
-          {challenge.notes ? <p className="challenge-card__notes">“{challenge.notes}”</p> : null}
           {actions || (challenge.status === 'accepted' && scheduleGameId) ? (
             <div className="challenge-card__actions">
               {challenge.status === 'accepted' && scheduleGameId ? (
@@ -6088,7 +6117,7 @@ export function ChallengesPage() {
                         : 'Send a challenge directly to another team in your club network.'}
                     </p>
                   </div>
-                  <button className="button button--ghost" onClick={handleCancelEditChallenge} type="button">
+                  <button className="button button--ghost challenge-form-dialog__close" onClick={handleCancelEditChallenge} type="button">
                     Close
                   </button>
                 </div>
@@ -6243,6 +6272,23 @@ export function ChallengesPage() {
                           ))}
                         </select>
                       </label>
+                      <label className="field challenge-form__location">
+                        <span>Court</span>
+                        <select
+                          onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
+                          value={form.location}
+                        >
+                          <option value="">Court TBD</option>
+                          {form.location && !challengeCourtOptions.some((court) => court.value === form.location) ? (
+                            <option value={form.location}>{form.location}</option>
+                          ) : null}
+                          {challengeCourtOptions.map((court) => (
+                            <option key={court.value} value={court.value}>
+                              {court.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     </div>
                     {normalizeMatchPlayerCount(form.playersNeeded) === 1 ? (
                       <label className="field challenge-form__singles-player">
@@ -6266,33 +6312,8 @@ export function ChallengesPage() {
                         Your team needs two active members before sending a doubles challenge.
                       </div>
                     ) : null}
-                    <label className="field challenge-form__location">
-                      <span>Court</span>
-                      <select
-                        onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
-                        value={form.location}
-                      >
-                        <option value="">Court TBD</option>
-                        {form.location && !challengeCourtOptions.some((court) => court.value === form.location) ? (
-                          <option value={form.location}>{form.location}</option>
-                        ) : null}
-                        {challengeCourtOptions.map((court) => (
-                          <option key={court.value} value={court.value}>
-                            {court.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
                   </div>
 
-                  <label className="field challenge-form__notes">
-                    <span>Message to other captain</span>
-                    <textarea
-                      onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-                      placeholder="Optional details, preferred format, or scheduling notes"
-                      value={form.notes}
-                    />
-                  </label>
                   <div className="challenge-form__actions">
                     {editingChallengeId ? (
                       <button
@@ -8952,7 +8973,6 @@ export function ClubAffiliationAdminPage() {
                         <span>Court(s): {challenge.location || 'TBD'}</span>
                         <span>ID: {challenge.id}</span>
                       </div>
-                      {challenge.notes ? <p className="challenge-card__notes">{challenge.notes}</p> : null}
                       <div className="challenge-card__actions">
                         <button
                           className="button button--danger"
