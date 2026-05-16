@@ -2182,7 +2182,6 @@ function ClubEventsPanel({ clubName = '', clubSlug, managerToolsLabel = 'Club ma
   return (
     <div className="club-events-panel">
       {eventError ? <div className="notice notice--error">{eventError}</div> : null}
-      {eventMessage ? <div className="notice notice--success">{eventMessage}</div> : null}
 
       {managerView ? (
         <section className="schedule-admin-card club-events-manager-card">
@@ -3416,7 +3415,6 @@ export function TeamMembersPage() {
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        {message ? <div className="notice notice--success">{message}</div> : null}
 
         {teamCards.length > 0 ? (
           <div className="team-members-grid">
@@ -3725,7 +3723,6 @@ export function ProfilePage() {
         <h1>Your player profile</h1>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        {message ? <div className="notice notice--success">{message}</div> : null}
 
         {!loading && !membership ? (
           <div className="notice notice--info">You are not currently a member of this team.</div>
@@ -3885,35 +3882,42 @@ export function RosterPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
   const [players, setPlayers] = useState([]);
+  const [members, setMembers] = useState([]);
   const [membership, setMembership] = useState(null);
-  const [selectedPlayerId, setSelectedPlayerId] = useState('');
   const [updatingPlayerId, setUpdatingPlayerId] = useState('');
+  const [updatingUid, setUpdatingUid] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   const canManage = canManageRole(membership?.role);
-  const selectedPlayerIndex = Math.max(
-    0,
-    players.findIndex((player) => player.id === selectedPlayerId),
+  const canManageMembership = isCaptainRole(membership?.role);
+  const memberByPlayerId = useMemo(
+    () => new Map(members.filter((member) => member.playerId).map((member) => [member.playerId, member])),
+    [members],
   );
-  const selectedPlayer = players[selectedPlayerIndex] ?? null;
+  const memberByUid = useMemo(
+    () => new Map(members.map((member) => [member.uid, member])),
+    [members],
+  );
+  const playerCards = useMemo(
+    () => players.map((player) => ({
+      member: memberByPlayerId.get(player.id) ?? memberByUid.get(player.uid),
+      player,
+    })),
+    [memberByPlayerId, memberByUid, players],
+  );
 
   async function loadRosterData() {
-    const [playerData, membershipData] = await Promise.all([
+    const [playerData, memberData, membershipData] = await Promise.all([
       listPlayers(clubSlug, teamSlug),
+      listTeamMembers(clubSlug, teamSlug),
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
 
     setPlayers(playerData);
+    setMembers(memberData);
     setMembership(membershipData);
-    setSelectedPlayerId((current) => {
-      if (current && playerData.some((player) => player.id === current)) {
-        return current;
-      }
-
-      return playerData[0]?.id ?? '';
-    });
   }
 
   useEffect(() => {
@@ -3928,17 +3932,6 @@ export function RosterPage() {
         setLoading(false);
       });
   }, [clubSlug, teamSlug, user?.uid]);
-
-  function moveSelection(direction) {
-    if (!players.length) {
-      return;
-    }
-
-    const nextIndex = Math.min(Math.max(selectedPlayerIndex + direction, 0), players.length - 1);
-    setSelectedPlayerId(players[nextIndex]?.id ?? '');
-    setError('');
-    setMessage('');
-  }
 
   async function handleDropPlayer(player) {
     if (!player) {
@@ -3963,13 +3956,33 @@ export function RosterPage() {
         uid: player.uid ?? '',
         user,
       });
-      setSelectedPlayerId('');
       setMessage('Player dropped from the team.');
       await loadRosterData();
     } catch (updateError) {
       setError(updateError.message ?? 'Unable to drop that player right now.');
     } finally {
       setUpdatingPlayerId('');
+    }
+  }
+
+  async function handleRoleChange(memberRecord, nextRole, playerName) {
+    setUpdatingUid(memberRecord.uid);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateTeamMemberRole({
+        clubSlug,
+        role: nextRole,
+        targetUid: memberRecord.uid,
+        teamSlug,
+      });
+      setMessage(`${playerName || 'Player'} role updated to ${formatRoleLabel(nextRole).toLowerCase()}.`);
+      await loadRosterData();
+    } catch (updateError) {
+      setError(updateError.message ?? 'Unable to update that team role.');
+    } finally {
+      setUpdatingUid('');
     }
   }
 
@@ -3980,75 +3993,114 @@ export function RosterPage() {
         <h1>Manage Players</h1>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        {message ? <div className="notice notice--success">{message}</div> : null}
 
         {canManage ? (
           <>
-            {players.length > 0 ? (
-              <div className="game-rosters-page__pager">
-                <button
-                  className="choice-button"
-                  disabled={selectedPlayerIndex <= 0}
-                  onClick={() => moveSelection(-1)}
-                  type="button"
-                >
-                  Previous
-                </button>
-                <span className="game-rosters-page__pager-label">
-                  Player {selectedPlayerIndex + 1} of {players.length}
-                </span>
-                <button
-                  className="choice-button"
-                  disabled={selectedPlayerIndex >= players.length - 1}
-                  onClick={() => moveSelection(1)}
-                  type="button"
-                >
-                  Next
-                </button>
-              </div>
-            ) : null}
-
-            <section className="schedule-admin-card">
+            <section className="schedule-admin-card roster-management-card">
               <div className="schedule-admin-card__header">
                 <div>
-                  <h2>{selectedPlayer?.fullName || 'No player selected'}</h2>
-                  {!selectedPlayer ? <p>Share the team join code to add the first player.</p> : null}
+                  <h2>Team roster</h2>
+                  <p>Review each player, update co-captain access, or remove players from this team.</p>
                 </div>
+                <span className="team-members-card__count">
+                  {players.length} player{players.length === 1 ? '' : 's'}
+                </span>
               </div>
 
-              {selectedPlayer ? (
-                <div className="schedule-admin-form">
-                  <div className="player-admin-form__readonly-profile">
-                    <div className="player-admin-form__row">
-                      <div className="field">
-                        <span>First name</span>
-                        <div className="readonly-field">{selectedPlayer.firstName || 'Not set'}</div>
-                      </div>
-                      <div className="field">
-                        <span>Last name</span>
-                        <div className="readonly-field">{selectedPlayer.lastName || 'Not set'}</div>
-                      </div>
-                    </div>
-                    <div className="player-admin-form__row">
-                      <div className="field">
-                        <span>Skill level</span>
-                        <div className="readonly-field">{selectedPlayer.skillLevel || 'Not set'}</div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="player-admin-form__primary-actions">
-                    <button
-                      className="button button--danger"
-                      disabled={updatingPlayerId === selectedPlayer.id}
-                      onClick={() => handleDropPlayer(selectedPlayer)}
-                      type="button"
-                    >
-                      {updatingPlayerId === selectedPlayer.id ? 'Dropping...' : 'Drop from Team'}
-                    </button>
-                  </div>
+              {playerCards.length > 0 ? (
+                <div className="roster-player-grid">
+                  {playerCards.map(({ member, player }) => {
+                    const displayName = player.fullName || player.email || 'Unnamed player';
+                    const role = member?.role ?? 'member';
+                    const canEditRole =
+                      canManageMembership &&
+                      member &&
+                      role !== 'captain' &&
+                      member.uid !== user?.uid;
+                    const roleLockLabel =
+                      role === 'captain'
+                        ? 'Locked primary captain'
+                        : canManageMembership
+                          ? member?.uid === user?.uid
+                            ? 'You cannot change your own role here'
+                            : 'Role controls unavailable until this roster entry is linked'
+                          : 'Only the captain can change team roles';
+
+                    return (
+                      <article key={player.id} className={`member-role-card roster-player-card member-role-card--${role}`}>
+                        <div className="member-role-card__avatar roster-player-card__avatar">
+                          {player.headshotUrl ? (
+                            <img alt="" src={player.headshotUrl} />
+                          ) : (
+                            buildPlayerInitials(displayName)
+                          )}
+                        </div>
+                        <div className="member-role-card__body">
+                          <div className="member-admin__header">
+                            <div className="member-role-card__identity">
+                              <strong>{displayName}</strong>
+                              <span>{player.email || member?.uid || 'No email on file'}</span>
+                            </div>
+                            <span className={`status-badge member-role-card__badge member-role-card__badge--${role}`}>
+                              {formatRoleLabel(role)}
+                            </span>
+                          </div>
+
+                          <div className="roster-player-card__details">
+                            <span>
+                              <small>First name</small>
+                              <strong>{player.firstName || 'Not set'}</strong>
+                            </span>
+                            <span>
+                              <small>Last name</small>
+                              <strong>{player.lastName || 'Not set'}</strong>
+                            </span>
+                            <span>
+                              <small>Skill level</small>
+                              <strong>{player.skillLevel || 'Not set'}</strong>
+                            </span>
+                          </div>
+
+                          {canEditRole ? (
+                            <div className="member-role-card__actions" aria-label={`Change role for ${displayName}`}>
+                              <button
+                                className={`choice-button ${role === 'member' ? 'choice-button--active' : ''}`}
+                                disabled={updatingUid === member.uid}
+                                onClick={() => handleRoleChange(member, 'member', displayName)}
+                                type="button"
+                              >
+                                {updatingUid === member.uid && role === 'coCaptain' ? 'Saving...' : 'Member'}
+                              </button>
+                              <button
+                                className={`choice-button ${role === 'coCaptain' ? 'choice-button--active' : ''}`}
+                                disabled={updatingUid === member.uid}
+                                onClick={() => handleRoleChange(member, 'coCaptain', displayName)}
+                                type="button"
+                              >
+                                {updatingUid === member.uid && role === 'member' ? 'Saving...' : 'Co-captain'}
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="member-role-card__locked">{roleLockLabel}</div>
+                          )}
+
+                          <div className="roster-player-card__actions">
+                            <button
+                              className="button button--danger"
+                              disabled={updatingPlayerId === player.id}
+                              onClick={() => handleDropPlayer(player)}
+                              type="button"
+                            >
+                              {updatingPlayerId === player.id ? 'Dropping...' : 'Drop from Team'}
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               ) : (
-                <p>No players have joined yet.</p>
+                <p>Share the team join code to add the first player.</p>
               )}
             </section>
           </>
@@ -4312,7 +4364,6 @@ export function SchedulePage() {
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        {message ? <div className="notice notice--success">{message}</div> : null}
 
         {isEditorOpen ? (
           <div
@@ -4730,11 +4781,6 @@ export function StandingsPage() {
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        {standingsUpdatedAt ? (
-          <div className="notice notice--success standings-live-notice">
-            Standings updated from live match results at {standingsUpdatedAt}.
-          </div>
-        ) : null}
         <StandingsSummary
           clubStandingsLoading={clubStandingsLoading}
           clubStandingsRows={clubStandingsRows}
@@ -5341,7 +5387,6 @@ export function NewsPage() {
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        {message ? <div className="notice notice--success">{message}</div> : null}
 
         {communityLoading ? (
           <div className="state-panel">
@@ -5646,7 +5691,6 @@ export function NewsroomPage() {
         />
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        {message ? <div className="notice notice--success">{message}</div> : null}
 
         {canManage ? (
           <div className="newsroom-toolbar">
@@ -6428,7 +6472,6 @@ export function ChallengesPage() {
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        {message ? <div className="notice notice--success">{message}</div> : null}
 
         {loading ? (
           <div className="state-panel">
@@ -6965,13 +7008,11 @@ export function SettingsPage() {
   const { user } = useAuth();
   const [team, setTeam] = useState(null);
   const [members, setMembers] = useState([]);
-  const [players, setPlayers] = useState([]);
   const [membership, setMembership] = useState(null);
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [creatingCrop, setCreatingCrop] = useState(false);
-  const [updatingUid, setUpdatingUid] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [form, setForm] = useState(createEmptyTeamSettingsForm());
@@ -6983,8 +7024,6 @@ export function SettingsPage() {
   const [cropPixels, setCropPixels] = useState(null);
 
   const canManage = canManageRole(membership?.role);
-  const canManageMembership = isCaptainRole(membership?.role);
-  const playerMap = useMemo(() => new Map(players.map((player) => [player.id, player])), [players]);
   const displayedLogoUrl = logoPreviewUrl || team?.logoUrl || defaultTeamLogo;
   const isTeamArchived = team?.status === 'archived';
   const canManageActiveTeam = canManage && !isTeamArchived;
@@ -7020,14 +7059,10 @@ export function SettingsPage() {
       getTeam(clubSlug, teamSlug),
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
-    const [memberData, playerData] = await Promise.all([
-      listTeamMembers(clubSlug, teamSlug),
-      listPlayers(clubSlug, teamSlug),
-    ]);
+    const memberData = await listTeamMembers(clubSlug, teamSlug);
 
     setTeam(teamData);
     setMembers(memberData);
-    setPlayers(playerData);
     setMembership(membershipData);
     setForm(createEmptyTeamSettingsForm(teamData ?? {}));
     replaceLogoPreview('');
@@ -7177,29 +7212,6 @@ export function SettingsPage() {
     }
   }
 
-  async function handleRoleChange(memberRecord, nextRole) {
-    setUpdatingUid(memberRecord.uid);
-    setError('');
-    setMessage('');
-
-    try {
-      await updateTeamMemberRole({
-        clubSlug,
-        role: nextRole,
-        targetUid: memberRecord.uid,
-        teamSlug,
-      });
-      setMessage(
-        `${memberRecord.uid === user?.uid ? 'Your' : 'Member'} role updated to ${formatRoleLabel(nextRole).toLowerCase()}.`,
-      );
-      await loadSettingsData();
-    } catch (updateError) {
-      setError(updateError.message ?? 'Unable to update that team role.');
-    } finally {
-      setUpdatingUid('');
-    }
-  }
-
   async function handleArchiveTeam() {
     const confirmed = window.confirm(
       `Archive ${team?.name || 'this team'}? Players will no longer use this as an active team, and new joins will be disabled. Team history will be kept.`,
@@ -7237,7 +7249,7 @@ export function SettingsPage() {
             <p className="eyebrow">Admin tools</p>
             <h1>Team Settings</h1>
             <p>
-              Manage team branding, join code settings, and member roles from one shared admin workspace.
+              Manage team branding and join code settings from one shared admin workspace.
             </p>
           </div>
           <span className="settings-admin-member-pill">
@@ -7246,7 +7258,6 @@ export function SettingsPage() {
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
-        {message ? <div className="notice notice--success">{message}</div> : null}
 
         <div className="settings-admin-overview">
           <div className="detail-grid">
@@ -7355,90 +7366,6 @@ export function SettingsPage() {
               Captains and co-captains can edit team settings. Your current role is{' '}
               <strong>{membership?.role ?? 'member'}</strong>.
             </div>
-          )}
-        </section>
-
-        <section className="schedule-admin-card">
-          <div className="schedule-admin-card__header">
-            <div>
-              <p className="eyebrow">Member access</p>
-              <h2>Team roles</h2>
-              <p>Review memberships and promote or demote co-captains from the same admin page.</p>
-            </div>
-          </div>
-
-          {members.length > 0 ? (
-            <div className="entity-list settings-admin-members">
-              {members.map((memberRecord) => {
-                const player = playerMap.get(memberRecord.playerId);
-                const displayName = player?.fullName || player?.email || memberRecord.uid;
-                const secondary = player?.email || memberRecord.uid;
-                const canEdit =
-                  canManageMembership &&
-                  memberRecord.role !== 'captain' &&
-                  memberRecord.uid !== user?.uid;
-
-                return (
-                  <div key={memberRecord.uid} className={`member-role-card member-role-card--${memberRecord.role}`}>
-                    <div className="member-role-card__avatar">{buildPlayerInitials(displayName)}</div>
-                    <div className="member-role-card__body">
-                      <div className="member-admin__header">
-                        <div className="member-role-card__identity">
-                          <strong>{displayName}</strong>
-                          <span>{secondary}</span>
-                        </div>
-                        <span className={`status-badge member-role-card__badge member-role-card__badge--${memberRecord.role}`}>
-                          {formatRoleLabel(memberRecord.role)}
-                        </span>
-                      </div>
-
-                      <p className="member-role-card__description">
-                        {memberRecord.role === 'captain'
-                          ? 'Primary team owner with full captain controls.'
-                          : memberRecord.role === 'coCaptain'
-                            ? 'Can help manage roster, schedule, player info, news, settings, and challenges.'
-                            : 'Standard player access for team pages, availability, schedule, news, and standings.'}
-                      </p>
-
-                      {canEdit ? (
-                        <div className="member-role-card__actions" aria-label={`Change role for ${displayName}`}>
-                          <button
-                            className={`choice-button ${memberRecord.role === 'member' ? 'choice-button--active' : ''}`}
-                            disabled={updatingUid === memberRecord.uid}
-                            onClick={() => handleRoleChange(memberRecord, 'member')}
-                            type="button"
-                          >
-                            {updatingUid === memberRecord.uid && memberRecord.role === 'coCaptain'
-                              ? 'Saving...'
-                              : 'Member'}
-                          </button>
-                          <button
-                            className={`choice-button ${memberRecord.role === 'coCaptain' ? 'choice-button--active' : ''}`}
-                            disabled={updatingUid === memberRecord.uid}
-                            onClick={() => handleRoleChange(memberRecord, 'coCaptain')}
-                            type="button"
-                          >
-                            {updatingUid === memberRecord.uid && memberRecord.role === 'member'
-                              ? 'Saving...'
-                              : 'Co-captain'}
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="member-role-card__locked">
-                          {memberRecord.role === 'captain'
-                            ? 'Locked primary captain'
-                            : canManageMembership
-                              ? 'You cannot change your own role here'
-                              : 'Only the captain can change team roles'}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p>No team members found yet.</p>
           )}
         </section>
 
