@@ -1517,6 +1517,31 @@ ul {
   overflow: auto;
 }
 
+.match-form-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.match-form-dialog__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(3, 8, 14, 0.72);
+  cursor: pointer;
+}
+
+.match-form-dialog > .schedule-admin-card {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 760px);
+  max-height: min(88vh, 820px);
+  overflow: auto;
+}
+
 .challenge-inbox-nav,
 .challenge-inbox-count {
   display: inline-flex;
@@ -5003,9 +5028,16 @@ ul {
 }
 
 .schedule-page__header {
-  display: grid;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 1rem;
+}
+
+.schedule-page__header > .button {
+  flex: 0 0 auto;
 }
 
 .schedule-page__header-copy {
@@ -5569,6 +5601,10 @@ ul {
 
 .schedule-admin-form__players-needed-field {
   max-width: 160px;
+}
+
+.schedule-admin-form__court-field {
+  max-width: 150px;
 }
 
 .schedule-admin-form__status-score-row {

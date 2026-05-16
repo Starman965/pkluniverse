@@ -682,6 +682,288 @@ function buildNewsExcerpt(body, maxLength = 140) {
   return `${text.slice(0, maxLength).trimEnd()}...`;
 }
 
+function NewsFeedIntro({ copy, eyebrow = 'News Feed', title }) {
+  return (
+    <div className="news-feed-intro">
+      <div className="news-feed-intro__content">
+        <p className="eyebrow">{eyebrow}</p>
+        <h1>{title}</h1>
+        <p className="news-feed-intro__copy">{copy}</p>
+      </div>
+    </div>
+  );
+}
+
+function NewsAuthorAvatar({ name, photoUrl = '' }) {
+  return (
+    <span className="news-feed-card__avatar">
+      {photoUrl ? <img alt="" decoding="async" src={photoUrl} /> : buildPlayerInitials(name || 'Teammate')}
+    </span>
+  );
+}
+
+function NewsFeed({
+  canModerate = false,
+  commentDrafts = {},
+  commentEditDraft = '',
+  currentTeamSlug = '',
+  currentUser,
+  deletingCommentId = '',
+  deletingPostId = '',
+  editingCommentId = '',
+  editingPostId = '',
+  newsPosts = [],
+  onCancelCommentEdit,
+  onCancelPostEdit,
+  onCommentChange,
+  onCommentEditChange,
+  onCommentSubmit,
+  onDeleteComment,
+  onDeletePost,
+  onEditComment,
+  onEditPost,
+  onPostEditChange,
+  onPostEditImageSelected,
+  onReactionToggle,
+  onSaveCommentEdit,
+  onSavePostEdit,
+  postEditDraft = '',
+  postEditImagePreviewUrl = '',
+  reactingPostId = '',
+  savingCommentId = '',
+  savingPostId = '',
+}) {
+  if (!newsPosts.length) {
+    return <div className="notice notice--info">No community posts yet.</div>;
+  }
+
+  return (
+    <div className="news-feed">
+      {newsPosts.map((post) => {
+        const canManagePost = canModerate || post.authorUid === currentUser?.uid;
+        const isEditingPost = editingPostId === post.id;
+        const userReaction = post.reactions?.find((reaction) => reaction.uid === currentUser?.uid);
+
+        return (
+          <article key={post.id} className="news-feed-card">
+            <div className="news-feed-card__header">
+              <div className="news-feed-card__author">
+                <NewsAuthorAvatar name={post.authorName} photoUrl={post.authorPhotoUrl} />
+                <div>
+                  <strong>{post.authorName || 'Teammate'}</strong>
+                  <span>{formatNewsPostDate(post)}</span>
+                </div>
+              </div>
+              {post.teamSlug && post.teamSlug !== currentTeamSlug ? (
+                <span className="news-feed-card__badge">{post.teamName || 'Club post'}</span>
+              ) : null}
+            </div>
+
+            {isEditingPost ? (
+              <form className="news-edit-form" onSubmit={(event) => {
+                event.preventDefault();
+                onSavePostEdit?.(post);
+              }}>
+                <label className="field news-form__full">
+                  <span>Edit post</span>
+                  <textarea
+                    onChange={(event) => onPostEditChange?.(event.target.value)}
+                    rows={4}
+                    value={postEditDraft}
+                  />
+                </label>
+                <label className="news-composer__file">
+                  Change Image
+                  <input
+                    accept="image/*"
+                    onChange={(event) => onPostEditImageSelected?.(event.target.files?.[0] ?? null)}
+                    type="file"
+                  />
+                </label>
+                {postEditImagePreviewUrl ? (
+                  <div className="news-composer__preview">
+                    <img alt="Selected post" src={postEditImagePreviewUrl} />
+                  </div>
+                ) : null}
+                <div className="news-edit-form__actions">
+                  <button className="button" disabled={savingPostId === post.id} type="submit">
+                    {savingPostId === post.id ? 'Saving...' : 'Save Post'}
+                  </button>
+                  <button className="button button--ghost" onClick={onCancelPostEdit} type="button">
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <div className="news-feed-card__body">
+                  <h2 className="news-feed-card__title">{post.title}</h2>
+                  {post.body ? <p className="news-feed-card__text">{post.body}</p> : null}
+                  {post.linkUrl ? (
+                    <p className="news-feed-card__text">
+                      <a href={post.linkUrl} rel="noreferrer" target="_blank">{post.linkUrl}</a>
+                    </p>
+                  ) : null}
+                  {post.imageUrl ? (
+                    <div className="news-feed-card__image-wrap">
+                      <img alt="" className="news-feed-card__image" src={post.imageUrl} />
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="news-feed-card__actions">
+                  <button
+                    className={`news-feed-card__reaction ${userReaction?.type === 'like' ? 'news-feed-card__reaction--active' : ''}`}
+                    disabled={!currentUser?.uid || reactingPostId === post.id}
+                    onClick={() => onReactionToggle?.(post, 'like')}
+                    type="button"
+                  >
+                    Like ({post.reactionCount ?? 0})
+                  </button>
+                  {canManagePost ? (
+                    <div className="news-feed-card__manage">
+                      <button className="news-feed-card__action" onClick={() => onEditPost?.(post)} type="button">
+                        Edit
+                      </button>
+                      <button
+                        className="news-feed-card__action"
+                        disabled={deletingPostId === post.id}
+                        onClick={() => onDeletePost?.(post)}
+                        type="button"
+                      >
+                        {deletingPostId === post.id ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            )}
+
+            <div className="news-feed-comments">
+              {(post.comments ?? []).map((comment) => {
+                const canManageComment = canModerate || comment.authorUid === currentUser?.uid;
+                const isEditingComment = editingCommentId === comment.id;
+
+                return (
+                  <div key={comment.id} className="news-feed-comment">
+                    <NewsAuthorAvatar name={comment.authorName} photoUrl={comment.authorPhotoUrl} />
+                    <div className="news-feed-comment__body">
+                      <strong>{comment.authorName || 'Teammate'}</strong>
+                      {isEditingComment ? (
+                        <form className="news-feed-comment-form" onSubmit={(event) => {
+                          event.preventDefault();
+                          onSaveCommentEdit?.(post, comment);
+                        }}>
+                          <input
+                            onChange={(event) => onCommentEditChange?.(event.target.value)}
+                            value={commentEditDraft}
+                          />
+                          <button disabled={savingCommentId === comment.id} type="submit">
+                            Save
+                          </button>
+                          <button onClick={onCancelCommentEdit} type="button">
+                            Cancel
+                          </button>
+                        </form>
+                      ) : (
+                        <>
+                          <p>{comment.body}</p>
+                          {canManageComment ? (
+                            <div className="news-feed-icon-actions">
+                              <button className="news-feed-card__action" onClick={() => onEditComment?.(comment)} type="button">
+                                Edit
+                              </button>
+                              <button
+                                className="news-feed-card__action"
+                                disabled={deletingCommentId === comment.id}
+                                onClick={() => onDeleteComment?.(post, comment)}
+                                type="button"
+                              >
+                                {deletingCommentId === comment.id ? 'Deleting...' : 'Delete'}
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              <form className="news-feed-comment-form" onSubmit={(event) => onCommentSubmit?.(event, post)}>
+                <input
+                  onChange={(event) => onCommentChange?.(post.id, event.target.value)}
+                  placeholder="Write a comment..."
+                  value={commentDrafts[post.id] ?? ''}
+                />
+                <button disabled={!currentUser?.uid || !(commentDrafts[post.id] ?? '').trim()} type="submit">
+                  Post
+                </button>
+              </form>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function NewsroomAdminList({
+  deletingId = '',
+  emptyMessage = 'No news posts published yet.',
+  newsPosts = [],
+  onDelete,
+  onEdit,
+  selectedPostId = '',
+}) {
+  if (!newsPosts.length) {
+    return <div className="notice notice--info">{emptyMessage}</div>;
+  }
+
+  return (
+    <div className="newsroom-list">
+      {newsPosts.map((post) => (
+        <article
+          key={post.id}
+          className={`newsroom-post-row ${selectedPostId === post.id ? 'newsroom-post-row--active' : ''}`}
+        >
+          <button className="newsroom-post-row__main" onClick={() => onEdit?.(post)} type="button">
+            <div className="newsroom-post-row__top">
+              <div>
+                <p className="newsroom-post-row__meta">{formatNewsPostDate(post)}</p>
+                <h3 className="newsroom-post-row__title">{post.title}</h3>
+              </div>
+              <div className="newsroom-post-row__chips">
+                {post.imageUrl ? <span className="newsroom-post-row__chip newsroom-post-row__chip--active">Image</span> : null}
+                {post.linkUrl ? <span className="newsroom-post-row__chip">Link</span> : null}
+              </div>
+            </div>
+            <p className="newsroom-post-row__excerpt">{buildNewsExcerpt(post.body)}</p>
+          </button>
+          <div className="newsroom-post-row__footer">
+            <span className="newsroom-post-row__date">
+              {post.commentCount ?? 0} comments · {post.reactionCount ?? 0} reactions
+            </span>
+            <div className="newsroom-post-row__actions">
+              <button className="button button--ghost" onClick={() => onEdit?.(post)} type="button">
+                Edit
+              </button>
+              <button
+                className="button button--danger"
+                disabled={deletingId === post.id}
+                onClick={() => onDelete?.(post)}
+                type="button"
+              >
+                {deletingId === post.id ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 async function downloadNewsImage(post) {
   if (!post.imageUrl) {
     return;
@@ -1064,18 +1346,25 @@ function TimePickerField({ disabled = false, onChange, value }) {
   );
 }
 
-function MatchupLabelField({ onChange, value }) {
+function MatchupLabelField({ onChange, teams = [], value }) {
+  const hasExistingUnlistedValue = value && !teams.some((team) => team.name === value);
+
   return (
     <label className="field">
-      <span>Matchup label</span>
-      <div className="matchup-label-input">
-        <span>VS:</span>
-        <input
-          onChange={(event) => onChange(event.target.value)}
-          placeholder="Enter Opponents name or Match Title"
-          value={value}
-        />
-      </div>
+      <span>Opponent team</span>
+      <select
+        disabled={teams.length === 0 && !hasExistingUnlistedValue}
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      >
+        <option value="">Choose opponent team</option>
+        {hasExistingUnlistedValue ? <option value={value}>{value}</option> : null}
+        {teams.map((team) => (
+          <option key={`${team.clubSlug}/${team.teamSlug}`} value={team.name}>
+            {team.name}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }
@@ -3665,6 +3954,7 @@ export function SchedulePage() {
   const [membership, setMembership] = useState(null);
   const [players, setPlayers] = useState([]);
   const [courtOptions, setCourtOptions] = useState([]);
+  const [matchTeamOptions, setMatchTeamOptions] = useState([]);
   const [teamProfile, setTeamProfile] = useState({ logoUrl: '', name: '' });
   const [activeTab, setActiveTab] = useState('upcoming');
   const [editorMode, setEditorMode] = useState('');
@@ -3678,8 +3968,10 @@ export function SchedulePage() {
   const [scoreForm, setScoreForm] = useState(createScoreEntryDraft());
 
   const canManage = canManageRole(membership?.role);
-  const isEditorOpen = editorMode === 'edit';
-  const editingGame = isEditorOpen ? games.find((game) => game.id === editingGameId) ?? null : null;
+  const isCreateEditorOpen = editorMode === 'create';
+  const isEditEditorOpen = editorMode === 'edit';
+  const isEditorOpen = isCreateEditorOpen || isEditEditorOpen;
+  const editingGame = isEditEditorOpen ? games.find((game) => game.id === editingGameId) ?? null : null;
   const scoringGame = scoreEditorGameId ? games.find((game) => game.id === scoreEditorGameId) ?? null : null;
 
   async function loadScheduleData() {
@@ -3701,11 +3993,18 @@ export function SchedulePage() {
         ? teamData.approvedClubSlug
         : clubSlug;
     const activeClub = clubData.find((club) => club.slug === activeClubSlug) ?? null;
+    const approvedTeamOptions =
+      activeClubSlug && activeClubSlug !== 'independent'
+        ? await listApprovedClubTeams(activeClubSlug).catch(() => [])
+        : [];
 
     setGames(gameData);
     setMembership(membershipData);
     setPlayers(playerData.map((player) => ({ ...player, memberRole: roleByPlayerId.get(player.id) ?? '' })));
     setCourtOptions(buildCourtOptionsFromClub(activeClub));
+    setMatchTeamOptions(
+      approvedTeamOptions.filter((team) => !(team.clubSlug === clubSlug && team.teamSlug === teamSlug)),
+    );
     setTeamProfile({
       logoUrl: teamData?.logoUrl ?? '',
       name: teamData?.name ?? teamSlug,
@@ -3735,6 +4034,15 @@ export function SchedulePage() {
     [games, todayDateKey],
   );
   const visibleGames = activeTab === 'past' ? pastGames : upcomingGames;
+
+  function openCreateEditor() {
+    setEditorMode('create');
+    setScoreEditorGameId('');
+    setEditingGameId('');
+    setForm(createEmptyScheduleAdminForm());
+    setError('');
+    setMessage('');
+  }
 
   function openEditEditor(game) {
     setEditorMode('edit');
@@ -3787,7 +4095,7 @@ export function SchedulePage() {
   async function handleEditorSubmit(event) {
     event.preventDefault();
 
-    if (!editingGame) {
+    if (isEditEditorOpen && !editingGame) {
       return;
     }
 
@@ -3799,12 +4107,15 @@ export function SchedulePage() {
       await saveGame({
         ...form,
         clubSlug,
-        gameId: editingGame.id,
+        gameId: editingGame?.id,
         teamSlug,
         user,
       });
-      setMessage('Matchup updated.');
+      setMessage(isCreateEditorOpen ? 'Match created.' : 'Matchup updated.');
       closeEditor();
+      if (isCreateEditorOpen) {
+        setActiveTab('upcoming');
+      }
       await loadScheduleData();
     } catch (submitError) {
       setError(submitError.message ?? 'Unable to save that matchup.');
@@ -3876,44 +4187,51 @@ export function SchedulePage() {
               See scheduled matches, scores, and the rostered player or pair for each matchup.
             </p>
           </div>
+          {canManage ? (
+            <button className="button" onClick={openCreateEditor} type="button">
+              Create Match
+            </button>
+          ) : null}
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
         {message ? <div className="notice notice--success">{message}</div> : null}
 
-        {isEditorOpen && editingGame ? (
-          <section className="schedule-admin-card schedule-admin-card--editor">
-            <div className="schedule-admin-card__header">
-              <div>
-                <h2>Edit {editingGame.opponent || 'match'}</h2>
-                <p>Update the match date, time, court, players needed, and opponent label.</p>
+        {isEditorOpen ? (
+          <div
+            className="match-form-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={isCreateEditorOpen ? 'Create match' : 'Edit match'}
+          >
+            <button
+              aria-label="Close match form"
+              className="match-form-dialog__backdrop"
+              onClick={closeEditor}
+              type="button"
+            />
+            <section className="schedule-admin-card schedule-admin-card--editor">
+              <div className="schedule-admin-card__header">
+                <div>
+                  <h2>{isCreateEditorOpen ? 'Create Match' : `Edit ${editingGame?.opponent || 'match'}`}</h2>
+                  <p>
+                    {isCreateEditorOpen
+                      ? 'Add a match directly when captains have already coordinated the details.'
+                      : 'Update the match date, time, court, players needed, and opponent label.'}
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <form className="schedule-admin-form schedule-admin-form--compact" onSubmit={handleEditorSubmit}>
-              <div className="schedule-admin-form__main-fields">
-                <MatchupLabelField
-                  onChange={(nextOpponent) => setForm((current) => ({ ...current, opponent: nextOpponent }))}
-                  value={form.opponent}
-                />
-                <label className="field">
-                  <span>Court</span>
-                  <select
-                    onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
-                    value={form.location}
-                  >
-                    <option value="">Court TBD</option>
-                    {form.location && !courtOptions.some((court) => court.value === form.location) ? (
-                      <option value={form.location}>{form.location}</option>
-                    ) : null}
-                    {courtOptions.map((court) => (
-                      <option key={court.value} value={court.value}>
-                        {court.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+              {error ? <div className="notice notice--error">{error}</div> : null}
+
+              <form className="schedule-admin-form schedule-admin-form--compact" onSubmit={handleEditorSubmit}>
+                <div className="schedule-admin-form__main-fields">
+                  <MatchupLabelField
+                    onChange={(nextOpponent) => setForm((current) => ({ ...current, opponent: nextOpponent }))}
+                    teams={matchTeamOptions}
+                    value={form.opponent}
+                  />
+                </div>
 
               <label className="checkbox-field schedule-admin-form__tbd">
                 <input
@@ -3969,18 +4287,36 @@ export function SchedulePage() {
                     ))}
                   </select>
                 </label>
+                <label className="field schedule-admin-form__court-field">
+                  <span>Court</span>
+                  <select
+                    onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
+                    value={form.location}
+                  >
+                    <option value="">Court TBD</option>
+                    {form.location && !courtOptions.some((court) => court.value === form.location) ? (
+                      <option value={form.location}>{form.location}</option>
+                    ) : null}
+                    {courtOptions.map((court) => (
+                      <option key={court.value} value={court.value}>
+                        {court.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
 
-              <div className="schedule-admin-form__actions">
-                <button className="button" disabled={saving} type="submit">
-                  {saving ? 'Saving...' : 'Save Match'}
-                </button>
-                <button className="button button--ghost" onClick={closeEditor} type="button">
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </section>
+                <div className="schedule-admin-form__actions">
+                  <button className="button" disabled={saving} type="submit">
+                    {saving ? 'Saving...' : isCreateEditorOpen ? 'Create Match' : 'Save Match'}
+                  </button>
+                  <button className="button button--ghost" onClick={closeEditor} type="button">
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
         ) : null}
 
         {scoringGame ? (
