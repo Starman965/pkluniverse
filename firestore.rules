@@ -691,12 +691,6 @@ service cloud.firestore {
         && playersNeeded in [1, 2];
     }
 
-    function challengeGameHasResult() {
-      return resource.data.matchStatus == 'completed'
-        || (resource.data.keys().hasAny(['teamScore']) && resource.data.teamScore is number)
-        || (resource.data.keys().hasAny(['opponentScore']) && resource.data.opponentScore is number);
-    }
-
     function safeLinkedManualGameCreate(clubId, teamId) {
       return signedIn()
         && request.resource.data.source == 'manual'
@@ -706,6 +700,15 @@ service cloud.firestore {
         && request.resource.data.playersNeeded in [1, 2]
         && !(request.resource.data.linkedTeamClubSlug == clubId && request.resource.data.linkedTeamSlug == teamId)
         && isManager(request.resource.data.linkedTeamClubSlug, request.resource.data.linkedTeamSlug);
+    }
+
+    function safeLinkedGameMirrorDelete() {
+      return signedIn()
+        && resource.data.linkedTeamClubSlug is string
+        && resource.data.linkedTeamSlug is string
+        && resource.data.linkedGameId is string
+        && (!resource.data.keys().hasAny(['source']) || resource.data.source in ['manual', 'challenge'])
+        && isManager(resource.data.linkedTeamClubSlug, resource.data.linkedTeamSlug);
     }
 
     function safeLinkedGameUpdate(clubId, teamId) {
@@ -719,22 +722,6 @@ service cloud.firestore {
         && request.resource.data.source == resource.data.source
         && request.resource.data.playersNeeded in [1, 2]
         && !(resource.data.linkedTeamClubSlug == clubId && resource.data.linkedTeamSlug == teamId)
-        && isManager(resource.data.linkedTeamClubSlug, resource.data.linkedTeamSlug);
-    }
-
-    function safeManagerGameDelete(clubId, teamId) {
-      return isManager(clubId, teamId)
-        && (
-          resource.data.source != 'challenge'
-          || !challengeGameHasResult()
-        );
-    }
-
-    function safeLinkedChallengeGameDelete() {
-      return resource.data.source == 'challenge'
-        && !challengeGameHasResult()
-        && resource.data.linkedTeamClubSlug is string
-        && resource.data.linkedTeamSlug is string
         && isManager(resource.data.linkedTeamClubSlug, resource.data.linkedTeamSlug);
     }
 
@@ -1019,7 +1006,7 @@ service cloud.firestore {
             || safeLinkedGameUpdate(clubId, teamId)
             || safeSelfAvailabilityUpdate(clubId, teamId)
             || safeSelfRosterRemoval(clubId, teamId);
-          allow delete: if isPlatformAdmin() || safeManagerGameDelete(clubId, teamId) || safeLinkedChallengeGameDelete();
+          allow delete: if isPlatformAdmin() || isManager(clubId, teamId) || safeLinkedGameMirrorDelete();
         }
 
         match /newsPosts/{postId} {

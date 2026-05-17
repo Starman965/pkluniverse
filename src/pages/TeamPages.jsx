@@ -23,6 +23,7 @@ import {
   canManageClub,
   createClub,
   createChallenge,
+  deleteActivityLog,
   deleteClub,
   deleteChallengeAsAdmin,
   deleteClubEvent,
@@ -1134,6 +1135,15 @@ function PencilIcon() {
   );
 }
 
+/** Score lines — suggests entering per-game results */
+function EnterScoresIcon() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path d="M5 5h14a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm0 6h14a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1a1 1 0 0 1 1-1zm0 6h10a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1a1 1 0 0 1 1-1z" />
+    </svg>
+  );
+}
+
 function TrashIcon() {
   return (
     <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
@@ -1843,34 +1853,6 @@ export function HelpFeedbackPage() {
           Contact Dave on WhatsApp or by phone at <a href="tel:+19259806777">925-980-6777</a>, or email{' '}
           <a href="mailto:demandgendave@gmail.com">demandgendave@gmail.com</a>.
         </p>
-      </section>
-
-      <section className="help-grid">
-        <article className="schedule-admin-card help-card">
-          <div>
-            <p className="eyebrow">Captains</p>
-            <h2>When to reach out</h2>
-          </div>
-          <ul className="help-list">
-            <li>Team setup, roster, or player invite questions</li>
-            <li>Club challenges, scheduling, scores, or availability issues</li>
-            <li>Club affiliation questions</li>
-            <li>Ideas that would make captain work easier</li>
-          </ul>
-        </article>
-
-        <article className="schedule-admin-card help-card">
-          <div>
-            <p className="eyebrow">Players</p>
-            <h2>Good things to send</h2>
-          </div>
-          <ul className="help-list">
-            <li>Login or join-team problems</li>
-            <li>Profile, availability, or schedule questions</li>
-            <li>Something that feels confusing or hard to find</li>
-            <li>Bug reports or error messages</li>
-          </ul>
-        </article>
       </section>
 
       <section className="schedule-admin-card help-card help-card--wide">
@@ -2886,7 +2868,7 @@ export function ClubTeamsPage() {
             ) : null}
           </>
         ) : (
-          <p>No other approved teams are connected to this club yet.</p>
+          <p>No other club teams are connected here yet.</p>
         )}
       </section>
 
@@ -4134,6 +4116,8 @@ export function SchedulePage() {
   const [form, setForm] = useState(createEmptyScheduleAdminForm());
   const [scoreEditorGameId, setScoreEditorGameId] = useState('');
   const [scoreForm, setScoreForm] = useState(createScoreEntryDraft());
+  const [deletingGameId, setDeletingGameId] = useState('');
+  const [deleteConfirmGame, setDeleteConfirmGame] = useState(null);
 
   const canManage = canManageRole(membership?.role);
   const isCreateEditorOpen = editorMode === 'create';
@@ -4342,6 +4326,34 @@ export function SchedulePage() {
       setError(submitError.message ?? 'Unable to save those scores.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function confirmDeleteMatch() {
+    const game = deleteConfirmGame;
+
+    if (!game) {
+      return;
+    }
+
+    setDeletingGameId(game.id);
+    setError('');
+
+    try {
+      await deleteGame({ clubSlug, gameId: game.id, teamSlug, user });
+      setDeleteConfirmGame(null);
+      if (scoreEditorGameId === game.id) {
+        closeScoreEditor();
+      }
+      if (editingGameId === game.id) {
+        closeEditor();
+      }
+      await loadScheduleData();
+    } catch (deleteError) {
+      setError(deleteError.message ?? 'Unable to delete that match.');
+      setDeleteConfirmGame(null);
+    } finally {
+      setDeletingGameId('');
     }
   }
 
@@ -4560,21 +4572,31 @@ export function SchedulePage() {
         ) : null}
 
         {games.length > 0 ? (
-          <div className="availability-tabs" aria-label="Schedule views">
-            <button
-              className={`availability-tabs__button ${activeTab === 'upcoming' ? 'availability-tabs__button--active' : ''}`}
-              onClick={() => setActiveTab('upcoming')}
-              type="button"
-            >
-              Upcoming ({upcomingGames.length})
-            </button>
-            <button
-              className={`availability-tabs__button ${activeTab === 'past' ? 'availability-tabs__button--active' : ''}`}
-              onClick={() => setActiveTab('past')}
-              type="button"
-            >
-              Past ({pastGames.length})
-            </button>
+          <div className="schedule-view-tabs-row">
+            <div className="availability-tabs" aria-label="Schedule views">
+              <button
+                className={`availability-tabs__button ${activeTab === 'upcoming' ? 'availability-tabs__button--active' : ''}`}
+                onClick={() => setActiveTab('upcoming')}
+                type="button"
+              >
+                Upcoming ({upcomingGames.length})
+              </button>
+              <button
+                className={`availability-tabs__button ${activeTab === 'past' ? 'availability-tabs__button--active' : ''}`}
+                onClick={() => setActiveTab('past')}
+                type="button"
+              >
+                Past ({pastGames.length})
+              </button>
+            </div>
+            {canManage ? (
+              <p className="schedule-view-tabs-row__hint">
+                <span className="schedule-view-tabs-row__hint-icon" aria-hidden="true">
+                  <EnterScoresIcon />
+                </span>
+                <span>Click this icon on a match to enter scores.</span>
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -4589,11 +4611,36 @@ export function SchedulePage() {
                   actions={
                     canManage ? (
                       <>
-                        <button className="button" onClick={() => openEditEditor(game)} type="button">
-                          Edit Match
+                        <button
+                          aria-label={`Enter scores for match vs ${game.opponent || 'opponent'}`}
+                          className="news-icon-button news-icon-button--primary"
+                          onClick={() => openScoreEditor(game)}
+                          title="Enter match scores"
+                          type="button"
+                        >
+                          <EnterScoresIcon />
                         </button>
-                        <button className="button" onClick={() => openScoreEditor(game)} type="button">
-                          Enter Scores
+                        <button
+                          aria-label={`Edit match vs ${game.opponent || 'opponent'}`}
+                          className="news-icon-button"
+                          onClick={() => openEditEditor(game)}
+                          title="Edit match"
+                          type="button"
+                        >
+                          <PencilIcon />
+                        </button>
+                        <button
+                          aria-label={`Delete match vs ${game.opponent || 'opponent'}`}
+                          className="news-icon-button news-icon-button--danger"
+                          disabled={deletingGameId === game.id}
+                          onClick={() => {
+                            setError('');
+                            setDeleteConfirmGame(game);
+                          }}
+                          title="Delete match"
+                          type="button"
+                        >
+                          <TrashIcon />
                         </button>
                       </>
                     ) : null
@@ -4612,6 +4659,55 @@ export function SchedulePage() {
           <p>{activeTab === 'past' ? 'No past matchups yet.' : 'No upcoming matchups yet.'}</p>
         )}
       </section>
+
+      {deleteConfirmGame ? (
+        <div
+          className="club-challenge-dialog club-challenge-dialog--layered"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-match-dialog-title"
+        >
+          <button
+            aria-label="Close delete match confirmation"
+            className="club-challenge-dialog__backdrop"
+            disabled={Boolean(deletingGameId)}
+            onClick={() => setDeleteConfirmGame(null)}
+            type="button"
+          />
+          <div className="club-challenge-dialog__panel">
+            <p className="eyebrow">Matches</p>
+            <h2 id="delete-match-dialog-title">
+              Delete match vs {deleteConfirmGame.opponent || 'this opponent'}?
+            </h2>
+            <p>
+              For linked club matches, scores are removed on both teams&rsquo; schedules. Standings update from what
+              remains on the schedule.
+              {deleteConfirmGame.source === 'challenge' ? (
+                <> The club challenge will be marked cancelled.</>
+              ) : null}{' '}
+              This cannot be undone.
+            </p>
+            <div className="club-challenge-dialog__actions">
+              <button
+                className="button button--ghost"
+                disabled={Boolean(deletingGameId)}
+                onClick={() => setDeleteConfirmGame(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="button button--danger"
+                disabled={Boolean(deletingGameId)}
+                onClick={() => void confirmDeleteMatch()}
+                type="button"
+              >
+                {deletingGameId ? 'Deleting…' : 'Delete match'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
     </div>
   );
@@ -6443,10 +6539,10 @@ export function ChallengesPage() {
           }
         : {
             actionLabel: canManage ? 'Challenge a Team' : '',
-            body: 'Send a challenge to another approved team when you are ready to schedule a match.',
+            body: 'Choose a club opponent, then propose date, court, and format. The other captain can accept or decline.',
             eyebrow: 'Ready to Compete',
             onAction: handleOpenChallengeForm,
-            title: 'No active team challenges right now',
+            title: 'Challenge a team and lock in your next match',
           };
   return (
     <div className="page-grid schedule-admin-page">
@@ -6455,7 +6551,7 @@ export function ChallengesPage() {
           <div>
             <p className="eyebrow">Competition</p>
             <h1>Competition Hub</h1>
-            <p>Everything you need to compete and win.</p>
+            <p>Send a challenge to another team in your club when you are ready to schedule a match.</p>
           </div>
           {canManage ? (
             <button
@@ -6618,7 +6714,7 @@ export function ChallengesPage() {
                     </div>
                     {form.visibility === 'targeted' && eligibleTeams.length === 0 ? (
                       <div className="notice notice--info challenge-form__hint">
-                        No other approved teams are available in this club yet.
+                        No other club teams are available to challenge here yet.
                       </div>
                     ) : null}
                   </div>
@@ -6884,6 +6980,42 @@ export function ChallengesPage() {
               )}
             </section>
 
+            <section className="schedule-admin-card" id="competition-hub-directory">
+              <div className="schedule-admin-card__header">
+                <div>
+                  <p className="eyebrow">Directory</p>
+                  <h2>Open club challenges</h2>
+                  <p>Browse open club-wide challenges that your team can accept.</p>
+                </div>
+              </div>
+              {openClubChallenges.length > 0 ? (
+                <div className="challenge-grid">
+                  {openClubChallenges.map((challenge) =>
+                    renderChallengeCard(
+                      challenge,
+                      canManage ? (
+                        <>
+                          {renderAcceptSinglesSelector(challenge)}
+                          <button
+                            className="button"
+                            disabled={isAcceptDisabled(challenge)}
+                            onClick={() => handleAcceptChallenge(challenge)}
+                            title={getAcceptDisabledReason(challenge)}
+                            type="button"
+                          >
+                            {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept Challenge'}
+                          </button>
+                          {renderAcceptRequirementNotice(challenge)}
+                        </>
+                      ) : null,
+                    ),
+                  )}
+                </div>
+              ) : (
+                <div className="notice notice--info">No open club challenges exist right now.</div>
+              )}
+            </section>
+
             <section className="schedule-admin-card" id="competition-hub-sent">
               <div className="schedule-admin-card__header">
                 <div>
@@ -6958,42 +7090,6 @@ export function ChallengesPage() {
                 </>
               ) : (
                 <div className="notice notice--info">This team has not sent any challenges yet.</div>
-              )}
-            </section>
-
-            <section className="schedule-admin-card" id="competition-hub-directory">
-              <div className="schedule-admin-card__header">
-                <div>
-                  <p className="eyebrow">Directory</p>
-                  <h2>Open club challenges</h2>
-                  <p>Browse open club-wide challenges that your team can accept.</p>
-                </div>
-              </div>
-              {openClubChallenges.length > 0 ? (
-                <div className="challenge-grid">
-                  {openClubChallenges.map((challenge) =>
-                    renderChallengeCard(
-                      challenge,
-                      canManage ? (
-                        <>
-                          {renderAcceptSinglesSelector(challenge)}
-                          <button
-                            className="button"
-                            disabled={isAcceptDisabled(challenge)}
-                            onClick={() => handleAcceptChallenge(challenge)}
-                            title={getAcceptDisabledReason(challenge)}
-                            type="button"
-                          >
-                            {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept Challenge'}
-                          </button>
-                          {renderAcceptRequirementNotice(challenge)}
-                        </>
-                      ) : null,
-                    ),
-                  )}
-                </div>
-              ) : (
-                <div className="notice notice--info">No open club challenges exist right now.</div>
               )}
             </section>
           </div>
@@ -7330,10 +7426,6 @@ export function SettingsPage() {
                     className="settings-admin-logo-preview"
                     src={displayedLogoUrl}
                   />
-                  <label className="button button--ghost settings-admin-form__file-button">
-                    <input accept="image/*" className="settings-admin-form__file-input" onChange={handleLogoSelection} type="file" />
-                    Change Logo
-                  </label>
                   {hasUnsavedLogo ? (
                     <p className="settings-admin-unsaved-logo">New logo selected. Save settings to publish it.</p>
                   ) : null}
@@ -7346,9 +7438,15 @@ export function SettingsPage() {
                       value={form.teamName}
                     />
                   </label>
-                  <button className="button settings-admin-save-button" disabled={saving} type="submit">
-                    {saving ? 'Saving settings...' : hasUnsavedLogo ? 'Save Settings & Publish Logo' : 'Save Settings'}
-                  </button>
+                  <div className="settings-admin-form__logo-actions">
+                    <label className="button button--ghost settings-admin-form__file-button">
+                      <input accept="image/*" className="settings-admin-form__file-input" onChange={handleLogoSelection} type="file" />
+                      Change Logo
+                    </label>
+                    <button className="button settings-admin-save-button" disabled={saving} type="submit">
+                      {saving ? 'Saving settings...' : hasUnsavedLogo ? 'Save Settings & Publish Logo' : 'Save Settings'}
+                    </button>
+                  </div>
                 </div>
                 <div className="settings-admin-logo-prompt">
                   <strong>Need help with a team logo?</strong>
@@ -7486,6 +7584,7 @@ export function ClubAffiliationAdminPage() {
   const [adminActivity, setAdminActivity] = useState([]);
   const [activityFilters, setActivityFilters] = useState(createEmptyActivityFilters());
   const [loadingAdminActivity, setLoadingAdminActivity] = useState(false);
+  const [deletingActivityId, setDeletingActivityId] = useState('');
   const [selectedAdminEventsClubSlug, setSelectedAdminEventsClubSlug] = useState('');
   const [loadingAdminPlayers, setLoadingAdminPlayers] = useState(false);
   const [copyingPlayers, setCopyingPlayers] = useState(false);
@@ -7828,6 +7927,28 @@ export function ClubAffiliationAdminPage() {
       setError(resetErr.message ?? 'Unable to reset test data.');
     } finally {
       setResettingFirestoreTestData(false);
+    }
+  }
+
+  async function handleDeleteAdminActivity(activity) {
+    if (!activity?.id) {
+      return;
+    }
+
+    if (!window.confirm('Remove this activity log entry? This cannot be undone.')) {
+      return;
+    }
+
+    setDeletingActivityId(activity.id);
+    setError('');
+
+    try {
+      await deleteActivityLog({ activityId: activity.id, user });
+      setAdminActivity((current) => current.filter((item) => item.id !== activity.id));
+    } catch (deleteErr) {
+      setError(deleteErr.message ?? 'Unable to delete that activity entry.');
+    } finally {
+      setDeletingActivityId('');
     }
   }
 
@@ -9153,9 +9274,21 @@ export function ClubAffiliationAdminPage() {
                             <span className="status-badge">{typeMeta.label}</span>
                             <h3>{activity.description}</h3>
                           </div>
-                          <time dateTime={activity.timestampMs ? new Date(activity.timestampMs).toISOString() : undefined}>
-                            {formatActivityTimestamp(activity.timestampMs)}
-                          </time>
+                          <div className="admin-activity-item__header-aside">
+                            <time dateTime={activity.timestampMs ? new Date(activity.timestampMs).toISOString() : undefined}>
+                              {formatActivityTimestamp(activity.timestampMs)}
+                            </time>
+                            <button
+                              aria-label="Delete activity log entry"
+                              className="news-icon-button news-icon-button--danger"
+                              disabled={deletingActivityId === activity.id}
+                              onClick={() => void handleDeleteAdminActivity(activity)}
+                              title="Delete log entry"
+                              type="button"
+                            >
+                              <TrashIcon />
+                            </button>
+                          </div>
                         </div>
                         <div className="admin-activity-item__meta">
                           <span>Club: {metadata.clubName || activity.clubId || 'Unknown'}</span>

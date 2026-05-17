@@ -2141,22 +2141,6 @@ export async function joinTeamByCode({ code, user }) {
         clubName: activityClubName,
         playerId,
         playerName: user.displayName || user.email || 'A player',
-        source: 'join_code',
-        teamId: teamSlug,
-        teamName: teamName ?? teamSlug,
-      },
-      targetId: playerId,
-      teamId: teamSlug,
-      type: ACTIVITY_TYPES.PLAYER_ADDED,
-    });
-
-    await logActivityBestEffort({
-      actorId: user.uid,
-      clubId: activityClubSlug,
-      metadata: {
-        clubName: activityClubName,
-        playerId,
-        playerName: user.displayName || user.email || 'A player',
         role: nextRole,
         teamId: teamSlug,
         teamName: teamName ?? teamSlug,
@@ -2834,7 +2818,7 @@ async function getApprovedChallengeTeam({ challengeClubSlug, teamClubSlug, teamS
   }
 
   if (team.affiliationStatus !== 'approved' || team.approvedClubSlug !== challengeClubSlug) {
-    throw new Error('Challenges are only available for approved teams in the same club.');
+    throw new Error('Challenges are only available for teams in the same club.');
   }
 
   return {
@@ -3946,6 +3930,10 @@ export function formatActivity(activity) {
     case ACTIVITY_TYPES.TEAM_CREATED:
       return `${teamLabel(metadata.teamName)} was created`;
     case ACTIVITY_TYPES.PLAYER_ADDED:
+      if (metadata.source === 'team_creation') {
+        return `${metadata.playerName || 'A player'} became captain of ${teamLabel(metadata.teamName)}`;
+      }
+
       return `${metadata.playerName || 'A player'} was added to ${teamLabel(metadata.teamName)}`;
     case ACTIVITY_TYPES.PLAYER_JOINED_TEAM:
       return `${metadata.playerName || 'A player'} joined ${teamLabel(metadata.teamName)}`;
@@ -4038,6 +4026,22 @@ export async function listAdminActivity({
       ...activity,
       description: formatActivity(activity),
     }));
+}
+
+export async function deleteActivityLog({ activityId, user }) {
+  requireDb();
+
+  const trimmedId = activityId?.trim?.() ?? '';
+
+  if (!trimmedId) {
+    throw new Error('Choose an activity entry to delete.');
+  }
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only the app admin can delete activity.');
+  }
+
+  await deleteDoc(doc(db, 'activityLogs', trimmedId));
 }
 
 export async function listClubActivity({ clubSlug, limitCount = 75, teamOnly = false, teamSlug = '', user } = {}) {
@@ -4770,12 +4774,18 @@ export async function saveGame({
   return nextGameId;
 }
 
-function gameHasScore(game) {
+/** Confirms the opponent's game doc links back to this team's game (avoids deleting an unrelated doc). */
+function manualMirrorPointsBack(linkedSnapshot, clubSlug, teamSlug, gameId) {
+  if (!linkedSnapshot.exists()) {
+    return false;
+  }
+
+  const mirrorData = linkedSnapshot.data();
+
   return (
-    game.matchStatus === 'completed' ||
-    game.teamScore !== null ||
-    game.opponentScore !== null ||
-    normalizeMatchScores(game.matchScores).length > 0
+    (mirrorData.linkedTeamClubSlug ?? '') === clubSlug &&
+    (mirrorData.linkedTeamSlug ?? '') === teamSlug &&
+    (mirrorData.linkedGameId ?? '') === gameId
   );
 }
 
@@ -4802,46 +4812,58 @@ export async function deleteGame({ clubSlug, gameId, teamSlug, user }) {
     teamScore: normalizeNullableNumber(gameSnapshot.data().teamScore),
   };
 
+  const linkedTeamClubSlug = (game.linkedTeamClubSlug ?? '').trim();
+  const linkedTeamSlug = (game.linkedTeamSlug ?? '').trim();
+  const linkedGameId = (game.linkedGameId ?? '').trim();
+  const hasLinkedAppTeam = Boolean(linkedTeamClubSlug && linkedTeamSlug && linkedGameId);
+  const linkedGameRef = hasLinkedAppTeam
+    ? doc(db, 'clubs', linkedTeamClubSlug, 'teams', linkedTeamSlug, 'games', linkedGameId)
+    : null;
+
   if (game.source !== 'challenge') {
-    await deleteDoc(gameRef);
+    if (!hasLinkedAppTeam) {
+      await deleteDoc(gameRef);
+      return;
+    }
+
+    const linkedGameSnapshot = await getDoc(linkedGameRef);
+    const batch = writeBatch(db);
+    batch.delete(gameRef);
+
+    if (manualMirrorPointsBack(linkedGameSnapshot, clubSlug, teamSlug, gameId)) {
+      batch.delete(linkedGameRef);
+    }
+
+    await batch.commit();
     return;
   }
 
-  if (gameHasScore(game)) {
-    throw new Error('Completed challenge matches cannot be deleted. Contact the app admin if this result needs correction.');
-  }
-
-  if (!game.challengeClubSlug || !game.challengeId || !game.linkedGameId || !game.linkedTeamClubSlug || !game.linkedTeamSlug) {
+  if (!game.challengeClubSlug || !game.challengeId || !hasLinkedAppTeam) {
     throw new Error('This challenge match is missing linked schedule details. Contact the app admin before deleting it.');
   }
 
-  const linkedGameRef = doc(db, 'clubs', game.linkedTeamClubSlug, 'teams', game.linkedTeamSlug, 'games', game.linkedGameId);
   const challengeRef = doc(db, 'clubs', game.challengeClubSlug, 'challenges', game.challengeId);
   const [linkedGameSnapshot, challengeSnapshot] = await Promise.all([
     getDoc(linkedGameRef),
     getDoc(challengeRef),
   ]);
-  const linkedGameData = linkedGameSnapshot.exists() ? linkedGameSnapshot.data() : null;
-
-  if (
-    linkedGameData &&
-    gameHasScore({
-      matchStatus: linkedGameData.matchStatus ?? 'scheduled',
-      opponentScore: normalizeNullableNumber(linkedGameData.opponentScore),
-      teamScore: normalizeNullableNumber(linkedGameData.teamScore),
-    })
-  ) {
-    throw new Error('Completed challenge matches cannot be deleted. Contact the app admin if this result needs correction.');
-  }
 
   const batch = writeBatch(db);
   batch.delete(gameRef);
 
   if (linkedGameSnapshot.exists()) {
-    batch.delete(linkedGameRef);
+    const lgData = linkedGameSnapshot.data();
+    const pointsBack =
+      (lgData.linkedTeamClubSlug ?? '') === clubSlug &&
+      (lgData.linkedTeamSlug ?? '') === teamSlug &&
+      (lgData.linkedGameId ?? '') === gameId;
+
+    if (pointsBack) {
+      batch.delete(linkedGameRef);
+    }
   }
 
-  if (challengeSnapshot.exists()) {
+  if (challengeSnapshot.exists() && challengeSnapshot.data()?.status === 'accepted') {
     batch.update(challengeRef, {
       cancelledAt: serverTimestamp(),
       homeGameId: '',
