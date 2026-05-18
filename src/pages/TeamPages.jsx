@@ -60,6 +60,7 @@ import {
   reviewClubAffiliationRequest,
   rotateTeamJoinCode,
   saveGame,
+  saveGamePairings,
   saveNewsPost,
   savePlayer,
   saveClubEvent,
@@ -116,6 +117,7 @@ function createScheduleAdminDraft(game) {
   return {
     dateTbd: game.dateTbd === true,
     isoDate: game.isoDate ?? '',
+    linkedRosterPlayerIds: (game.linkedRosterPlayers ?? []).map((player) => player.id).filter(Boolean),
     location: game.location ?? '',
     linkedTeamClubSlug: game.linkedTeamClubSlug ?? '',
     linkedTeamName: game.linkedTeamName ?? '',
@@ -125,6 +127,7 @@ function createScheduleAdminDraft(game) {
     opponent: game.opponent ?? '',
     opponentScore: game.opponentScore ?? '',
     playersNeeded: normalizeMatchPlayerCount(game.playersNeeded),
+    rosterPlayerIds: [...(game.rosterPlayerIds ?? [])],
     teamScore: game.teamScore ?? '',
     timeLabel: game.dateTbd === true || timeLabel === 'Time TBD' ? '' : timeLabel,
   };
@@ -154,6 +157,7 @@ function createEmptyScheduleAdminForm() {
   return {
     dateTbd: true,
     isoDate: '',
+    linkedRosterPlayerIds: [],
     linkedTeamClubSlug: '',
     linkedTeamName: '',
     linkedTeamSlug: '',
@@ -163,6 +167,7 @@ function createEmptyScheduleAdminForm() {
     opponent: '',
     opponentScore: '',
     playersNeeded: 2,
+    rosterPlayerIds: [],
     teamScore: '',
     timeLabel: '',
   };
@@ -1187,6 +1192,7 @@ function MemberStatIcon({ type }) {
 function createEmptyTeamSettingsForm(team = {}) {
   return {
     logoFile: null,
+    openToChallenges: team.openToChallenges === true,
     teamName: team.name ?? '',
   };
 }
@@ -1502,6 +1508,59 @@ function MatchupLabelField({ linkedTeamClubSlug = '', linkedTeamSlug = '', onCha
         ))}
       </select>
     </label>
+  );
+}
+
+function ScheduleMatchLineupPicker({ disabled, hint, label, max, onChange, players, selectedIds }) {
+  const sorted = useMemo(() => {
+    return [...players].sort((left, right) =>
+      (left.fullName || '').localeCompare(right.fullName || '', undefined, { sensitivity: 'base' }),
+    );
+  }, [players]);
+
+  function togglePlayer(playerId) {
+    const next = new Set(selectedIds);
+
+    if (next.has(playerId)) {
+      next.delete(playerId);
+    } else if (next.size < max) {
+      next.add(playerId);
+    }
+
+    onChange(Array.from(next));
+  }
+
+  return (
+    <fieldset className="schedule-admin-form__lineup">
+      <legend>{label}</legend>
+      <p className="schedule-admin-form__lineup-hint">{hint}</p>
+      {sorted.length ? (
+        <ul className="schedule-admin-form__lineup-list">
+          {sorted.map((player) => {
+            const checked = selectedIds.includes(player.id);
+            const maxedOut = !checked && selectedIds.length >= max;
+
+            return (
+              <li key={player.id}>
+                <label
+                  className={`schedule-admin-form__lineup-option${maxedOut ? ' schedule-admin-form__lineup-option--maxed' : ''}`}
+                >
+                  <input
+                    checked={checked}
+                    disabled={disabled || maxedOut}
+                    onChange={() => togglePlayer(player.id)}
+                    type="checkbox"
+                  />
+                  <span>{player.fullName || 'Player'}</span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="schedule-admin-form__lineup-empty">No players on this roster yet.</p>
+      )}
+    </fieldset>
   );
 }
 
@@ -4118,6 +4177,7 @@ export function SchedulePage() {
   const [scoreForm, setScoreForm] = useState(createScoreEntryDraft());
   const [deletingGameId, setDeletingGameId] = useState('');
   const [deleteConfirmGame, setDeleteConfirmGame] = useState(null);
+  const [linkedMatchPlayers, setLinkedMatchPlayers] = useState([]);
 
   const canManage = canManageRole(membership?.role);
   const isCreateEditorOpen = editorMode === 'create';
@@ -4176,6 +4236,31 @@ export function SchedulePage() {
         setLoading(false);
       });
   }, [clubSlug, teamSlug, user?.uid]);
+
+  useEffect(() => {
+    if (!isEditorOpen || !form.linkedTeamClubSlug || !form.linkedTeamSlug) {
+      setLinkedMatchPlayers([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    listPlayers(form.linkedTeamClubSlug, form.linkedTeamSlug)
+      .then((rows) => {
+        if (!cancelled) {
+          setLinkedMatchPlayers(rows);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLinkedMatchPlayers([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditorOpen, form.linkedTeamClubSlug, form.linkedTeamSlug]);
 
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const upcomingGames = useMemo(
@@ -4257,13 +4342,42 @@ export function SchedulePage() {
     setMessage('');
 
     try {
-      await saveGame({
+      const savedGameId = await saveGame({
         ...form,
         clubSlug,
         gameId: editingGame?.id,
         teamSlug,
         user,
       });
+
+      const homeRosterIds = form.rosterPlayerIds.slice(0, form.playersNeeded);
+      const homePairings = [{ courtLabel: 'Court 1', playerIds: homeRosterIds }];
+
+      await saveGamePairings({
+        clubSlug,
+        gameId: savedGameId,
+        pairings: homePairings,
+        rosterPlayerIds: homeRosterIds,
+        teamSlug,
+      });
+
+      const isLinkedOpponent = Boolean(form.linkedTeamClubSlug && form.linkedTeamSlug);
+      const mirrorGameId =
+        editingGame?.linkedGameId ||
+        (isLinkedOpponent ? `manual-${savedGameId}-${form.linkedTeamSlug}` : '');
+
+      if (isLinkedOpponent && mirrorGameId) {
+        const awayRosterIds = form.linkedRosterPlayerIds.slice(0, form.playersNeeded);
+
+        await saveGamePairings({
+          clubSlug: form.linkedTeamClubSlug,
+          gameId: mirrorGameId,
+          pairings: [{ courtLabel: 'Court 1', playerIds: awayRosterIds }],
+          rosterPlayerIds: awayRosterIds,
+          teamSlug: form.linkedTeamSlug,
+        });
+      }
+
       setMessage(isCreateEditorOpen ? 'Match created.' : 'Matchup updated.');
       closeEditor();
       if (isCreateEditorOpen) {
@@ -4365,7 +4479,7 @@ export function SchedulePage() {
             <p className="eyebrow">Schedule</p>
             <h1>Matches</h1>
             <p className="schedule-page__copy">
-              See scheduled matches, scores, and the rostered player or pair for each matchup.
+              See scheduled matches, scores, and who is rostered for each matchup.
             </p>
           </div>
           {canManage ? (
@@ -4396,8 +4510,8 @@ export function SchedulePage() {
                   <h2>{isCreateEditorOpen ? 'Create Match' : `Edit ${editingGame?.opponent || 'match'}`}</h2>
                   <p>
                     {isCreateEditorOpen
-                      ? 'Add a match directly when captains have already coordinated the details.'
-                      : 'Update the match date, time, court, players needed, and opponent label.'}
+                      ? 'Add a match when details are set. Pick who is playing so names show on match cards.'
+                      : 'Update the matchup, court, lineup, and opponent.'}
                   </p>
                 </div>
               </div>
@@ -4412,6 +4526,8 @@ export function SchedulePage() {
                     onChange={(selectedTeam) =>
                       setForm((current) => ({
                         ...current,
+                        linkedRosterPlayerIds:
+                          selectedTeam?.clubSlug && selectedTeam?.teamSlug ? current.linkedRosterPlayerIds : [],
                         linkedTeamClubSlug: selectedTeam?.clubSlug ?? '',
                         linkedTeamName: selectedTeam?.name ?? '',
                         linkedTeamSlug: selectedTeam?.teamSlug ?? '',
@@ -4465,9 +4581,15 @@ export function SchedulePage() {
                 <label className="field schedule-admin-form__players-needed-field">
                   <span>Players needed</span>
                   <select
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, playersNeeded: Number(event.target.value) }))
-                    }
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      setForm((current) => ({
+                        ...current,
+                        linkedRosterPlayerIds: current.linkedRosterPlayerIds.slice(0, next),
+                        playersNeeded: next,
+                        rosterPlayerIds: current.rosterPlayerIds.slice(0, next),
+                      }));
+                    }}
                     value={form.playersNeeded}
                   >
                     {MATCH_PLAYER_COUNT_OPTIONS.map((count) => (
@@ -4495,6 +4617,28 @@ export function SchedulePage() {
                   </select>
                 </label>
               </div>
+
+              <ScheduleMatchLineupPicker
+                disabled={saving}
+                hint={`Choose up to ${form.playersNeeded} from ${teamProfile.name || 'your team'}. Names show on your match cards.`}
+                label={`${teamProfile.name || 'Your team'} lineup`}
+                max={form.playersNeeded}
+                onChange={(ids) => setForm((current) => ({ ...current, rosterPlayerIds: ids }))}
+                players={players}
+                selectedIds={form.rosterPlayerIds}
+              />
+
+              {form.linkedTeamClubSlug && form.linkedTeamSlug ? (
+                <ScheduleMatchLineupPicker
+                  disabled={saving}
+                  hint={`Choose up to ${form.playersNeeded} from ${form.opponent || 'the opponent'}. Their names appear on your schedule when both teams use PKL Universe.`}
+                  label={`${form.opponent || 'Opponent'} lineup`}
+                  max={form.playersNeeded}
+                  onChange={(ids) => setForm((current) => ({ ...current, linkedRosterPlayerIds: ids }))}
+                  players={linkedMatchPlayers}
+                  selectedIds={form.linkedRosterPlayerIds}
+                />
+              ) : null}
 
                 <div className="schedule-admin-form__actions">
                   <button className="button" disabled={saving} type="submit">
@@ -6245,6 +6389,26 @@ export function ChallengesPage() {
     setChallengeFormOpen(true);
   }
 
+  function handleStartChallengeToTeam(targetTeam) {
+    if (
+      !canManage ||
+      !targetTeam ||
+      (targetTeam.clubSlug === clubSlug && targetTeam.teamSlug === teamSlug)
+    ) {
+      return;
+    }
+
+    setForm({
+      ...createEmptyChallengeForm(),
+      targetTeamKey: `${targetTeam.clubSlug}:${targetTeam.teamSlug}`,
+      visibility: 'targeted',
+    });
+    setEditingChallengeId('');
+    setError('');
+    setMessage(`Send a challenge to ${targetTeam.name}.`);
+    setChallengeFormOpen(true);
+  }
+
   function handleScrollToSection(sectionId) {
     requestAnimationFrame(() => {
       document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -6502,6 +6666,32 @@ export function ChallengesPage() {
     ['cancelled', 'declined'].includes(challenge.status),
   );
   const openClubChallenges = clubChallenges.filter((challenge) => challenge.status === 'open');
+  const teamsOpenToChallenges = useMemo(() => {
+    const others = eligibleTeams.filter((eligibleTeam) => eligibleTeam.openToChallenges);
+    const selfOpen = team?.openToChallenges === true;
+    const selfCard = selfOpen
+      ? {
+          clubSlug,
+          logoUrl: team?.logoUrl ?? '',
+          name: team?.name ?? teamSlug,
+          openToChallenges: true,
+          teamSlug,
+        }
+      : null;
+    const othersNoDup = others.filter(
+      (t) => !(t.clubSlug === clubSlug && t.teamSlug === teamSlug),
+    );
+    const merged = selfCard ? [selfCard, ...othersNoDup] : [...othersNoDup];
+    merged.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+    return merged;
+  }, [clubSlug, eligibleTeams, team, teamSlug]);
+  const teamsOpenToChallengesCount = teamsOpenToChallenges.length;
+  const otherTeamsOpenToChallengesCount = useMemo(
+    () => eligibleTeams.filter((eligibleTeam) => eligibleTeam.openToChallenges).length,
+    [eligibleTeams],
+  );
+  const hasOtherTeamsOpenToChallenges = otherTeamsOpenToChallengesCount > 0;
+  const directoryOnlySelfOpen = teamsOpenToChallengesCount > 0 && !hasOtherTeamsOpenToChallenges;
   const visiblePostedChallenges =
     postedChallengeTab === 'accepted'
       ? acceptedPostedChallenges
@@ -6509,7 +6699,6 @@ export function ChallengesPage() {
         ? closedPostedChallenges
         : proposedPostedChallenges;
   const pendingSentChallengeCount = proposedPostedChallenges.length;
-  const openClubChallengeCount = openClubChallenges.length;
   const emptyHeroState =
     pendingSentChallengeCount > 0
       ? {
@@ -6527,17 +6716,23 @@ export function ChallengesPage() {
             pendingSentChallengeCount === 1 ? '' : 's'
           } waiting for a response`,
         }
-      : openClubChallengeCount > 0
+      : hasOtherTeamsOpenToChallenges
         ? {
-            actionLabel: 'View Open Challenges',
-            body: 'Review club-wide challenges from teams looking to play.',
-            eyebrow: 'Open Challenges Available',
+            actionLabel: "See who's ready",
+            body: "Your team might be in this list too. Scroll down, tap another crew's logo, and invite them to play.",
+            eyebrow: 'Pick your matchup',
             onAction: () => handleScrollToSection('competition-hub-directory'),
-            title: `${openClubChallengeCount} open club challenge${
-              openClubChallengeCount === 1 ? '' : 's'
-            } available`,
+            title: `${teamsOpenToChallengesCount} team${teamsOpenToChallengesCount === 1 ? '' : 's'} ready to hear from you`,
           }
-        : {
+        : directoryOnlySelfOpen
+          ? {
+              actionLabel: "See who's ready",
+              body: "You're on the board—nice. When more teams join in, they'll show up below. Until then, Challenge a Team works for anyone in the club.",
+              eyebrow: 'Your crew is on the list',
+              onAction: () => handleScrollToSection('competition-hub-directory'),
+              title: "You're inviting challenges",
+            }
+          : {
             actionLabel: canManage ? 'Challenge a Team' : '',
             body: 'Choose a club opponent, then propose date, court, and format. The other captain can accept or decline.',
             eyebrow: 'Ready to Compete',
@@ -6671,25 +6866,29 @@ export function ChallengesPage() {
                   <div className="challenge-form__section">
                     <div className="challenge-form__section-copy">
                       <h3>Who do you want to play?</h3>
-                      <p>Choose a specific team first. Open club challenges are available for broader matching.</p>
+                      <p>
+                        Choose a team below, or pick a logo from the directory of teams that opted in to challenges.
+                      </p>
                     </div>
                     <div className="challenge-form__audience-row">
-                      <label className="field challenge-form__type">
-                        <span>Challenge type</span>
-                        <select
-                          onChange={(event) =>
-                            setForm((current) => ({
-                              ...current,
-                              targetTeamKey: event.target.value === 'open' ? '' : current.targetTeamKey,
-                              visibility: event.target.value,
-                            }))
-                          }
-                          value={form.visibility}
-                        >
-                          <option value="targeted">Specific team challenge</option>
-                          <option value="open">Open to club</option>
-                        </select>
-                      </label>
+                      {editingChallengeId && form.visibility === 'open' ? (
+                        <label className="field challenge-form__type">
+                          <span>Challenge type</span>
+                          <select
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                targetTeamKey: event.target.value === 'open' ? '' : current.targetTeamKey,
+                                visibility: event.target.value,
+                              }))
+                            }
+                            value={form.visibility}
+                          >
+                            <option value="targeted">Specific team challenge</option>
+                            <option value="open">Open to club (legacy)</option>
+                          </select>
+                        </label>
+                      ) : null}
                       {form.visibility === 'targeted' ? (
                         <div className="field challenge-form__target">
                           <label>
@@ -6705,6 +6904,7 @@ export function ChallengesPage() {
                                   value={`${eligibleTeam.clubSlug}:${eligibleTeam.teamSlug}`}
                                 >
                                   {eligibleTeam.name}
+                                  {eligibleTeam.openToChallenges ? ' · Open to challenges' : ''}
                                 </option>
                               ))}
                             </select>
@@ -6983,37 +7183,94 @@ export function ChallengesPage() {
             <section className="schedule-admin-card" id="competition-hub-directory">
               <div className="schedule-admin-card__header">
                 <div>
-                  <p className="eyebrow">Directory</p>
-                  <h2>Open club challenges</h2>
-                  <p>Browse open club-wide challenges that your team can accept.</p>
+                  <p className="eyebrow">Ready to play</p>
+                  <h2>Who wants a game?</h2>
+                  <p>
+                    Every team here is inviting someone to challenge them—you might see your own squad too. When
+                    you&apos;re ready, tap another team&apos;s logo and send the invite.
+                  </p>
                 </div>
               </div>
-              {openClubChallenges.length > 0 ? (
-                <div className="challenge-grid">
-                  {openClubChallenges.map((challenge) =>
-                    renderChallengeCard(
-                      challenge,
-                      canManage ? (
-                        <>
-                          {renderAcceptSinglesSelector(challenge)}
-                          <button
-                            className="button"
-                            disabled={isAcceptDisabled(challenge)}
-                            onClick={() => handleAcceptChallenge(challenge)}
-                            title={getAcceptDisabledReason(challenge)}
-                            type="button"
-                          >
-                            {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept Challenge'}
-                          </button>
-                          {renderAcceptRequirementNotice(challenge)}
-                        </>
-                      ) : null,
-                    ),
-                  )}
+              {teamsOpenToChallengesCount > 0 ? (
+                <div className="challenge-team-directory" role="list">
+                  {teamsOpenToChallenges.map((opponentTeam) => {
+                    const isDirectorySelf =
+                      opponentTeam.clubSlug === clubSlug && opponentTeam.teamSlug === teamSlug;
+                    const directoryDisabled = !canManage || isDirectorySelf;
+                    const directoryTitle = isDirectorySelf
+                      ? `${opponentTeam.name} is your team — you're on the list so others know you're up for a game`
+                      : canManage
+                        ? `Challenge ${opponentTeam.name}`
+                        : 'Captains can challenge this team';
+
+                    return (
+                    <div className="challenge-team-directory__item" key={`${opponentTeam.clubSlug}:${opponentTeam.teamSlug}`} role="listitem">
+                      <button
+                        className={`challenge-team-directory__button${isDirectorySelf ? ' challenge-team-directory__button--self' : ''}`}
+                        disabled={directoryDisabled}
+                        onClick={() => handleStartChallengeToTeam(opponentTeam)}
+                        title={directoryTitle}
+                        type="button"
+                      >
+                        <span className="challenge-team-directory__logo-wrap">
+                          <img
+                            alt=""
+                            className="challenge-team-directory__logo"
+                            decoding="async"
+                            onError={(event) => {
+                              event.currentTarget.onerror = null;
+                              event.currentTarget.src = defaultTeamLogo;
+                            }}
+                            src={opponentTeam.logoUrl || defaultTeamLogo}
+                          />
+                        </span>
+                        <span className="challenge-team-directory__name">
+                          {opponentTeam.name}
+                          {isDirectorySelf ? (
+                            <span className="challenge-team-directory__you-badge"> Your team</span>
+                          ) : null}
+                        </span>
+                      </button>
+                    </div>
+                    );
+                  })}
                 </div>
               ) : (
-                <div className="notice notice--info">No open club challenges exist right now.</div>
+                <div className="notice notice--info">
+                  Nobody else has raised their hand yet. Ask your captain to flip on &ldquo;Open to challenges&rdquo; in Team
+                  Settings if you want your crew on this list—or jump straight to Challenge a Team.
+                </div>
               )}
+              {openClubChallenges.length > 0 ? (
+                <>
+                  <h3 className="challenge-team-directory__legacy-heading">Older open challenge posts</h3>
+                  <p className="challenge-team-directory__legacy-copy">
+                    These club-wide listings were created before the directory. You can still accept one below.
+                  </p>
+                  <div className="challenge-grid">
+                    {openClubChallenges.map((challenge) =>
+                      renderChallengeCard(
+                        challenge,
+                        canManage ? (
+                          <>
+                            {renderAcceptSinglesSelector(challenge)}
+                            <button
+                              className="button"
+                              disabled={isAcceptDisabled(challenge)}
+                              onClick={() => handleAcceptChallenge(challenge)}
+                              title={getAcceptDisabledReason(challenge)}
+                              type="button"
+                            >
+                              {updatingChallengeId === challenge.id ? 'Accepting...' : 'Accept Challenge'}
+                            </button>
+                            {renderAcceptRequirementNotice(challenge)}
+                          </>
+                        ) : null,
+                      ),
+                    )}
+                  </div>
+                </>
+              ) : null}
             </section>
 
             <section className="schedule-admin-card" id="competition-hub-sent">
@@ -7235,6 +7492,7 @@ export function SettingsPage() {
       await updateTeamSettings({
         clubSlug,
         logoFile: form.logoFile,
+        openToChallenges: form.openToChallenges,
         teamName: form.teamName,
         teamSlug,
         user,
@@ -7437,6 +7695,22 @@ export function SettingsPage() {
                       onChange={(event) => setForm((current) => ({ ...current, teamName: event.target.value }))}
                       value={form.teamName}
                     />
+                  </label>
+                  <label className="checkbox-field settings-admin-open-challenges">
+                    <input
+                      checked={form.openToChallenges}
+                      onChange={(event) =>
+                        setForm((current) => ({ ...current, openToChallenges: event.target.checked }))
+                      }
+                      type="checkbox"
+                    />
+                    <span>
+                      <strong>Open to challenges</strong>
+                      <small>
+                        When on, your team logo appears in the Competition Hub so other captains can challenge you
+                        directly.
+                      </small>
+                    </span>
                   </label>
                   <div className="settings-admin-form__logo-actions">
                     <label className="button button--ghost settings-admin-form__file-button">

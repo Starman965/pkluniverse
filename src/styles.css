@@ -3120,6 +3120,104 @@ ul {
   }
 }
 
+.challenge-team-directory {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 0.85rem 0.65rem;
+  margin-top: 0.25rem;
+}
+
+.challenge-team-directory__item {
+  min-width: 0;
+}
+
+.challenge-team-directory__button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.65rem 0.4rem 0.55rem;
+  border: 1px solid rgba(126, 161, 255, 0.2);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top, rgba(126, 161, 255, 0.12), transparent 55%),
+    rgba(12, 22, 38, 0.85);
+  color: #e8f1ff;
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.12s ease;
+}
+
+.challenge-team-directory__button:hover:not(:disabled) {
+  border-color: rgba(240, 193, 75, 0.45);
+  transform: translateY(-1px);
+}
+
+.challenge-team-directory__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.challenge-team-directory__logo-wrap {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+  background: linear-gradient(145deg, rgba(8, 17, 29, 0.96) 0%, rgba(12, 24, 40, 0.96) 100%);
+  box-shadow: inset 0 0 0 1px rgba(126, 161, 255, 0.2);
+}
+
+.challenge-team-directory__logo {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+  border-radius: 999px;
+}
+
+.challenge-team-directory__name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.25;
+  padding: 0 0.15rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.challenge-team-directory__button--self {
+  border-color: rgba(240, 193, 75, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(240, 193, 75, 0.12);
+}
+
+.challenge-team-directory__you-badge {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #f5d877;
+}
+
+.challenge-team-directory__legacy-heading {
+  margin: 1.5rem 0 0.35rem;
+  font-size: 1.02rem;
+  color: #e8f1ff;
+}
+
+.challenge-team-directory__legacy-copy {
+  margin: 0 0 0.85rem;
+  font-size: 0.86rem;
+  color: #9fb6d8;
+  line-height: 1.45;
+}
+
 .challenge-grid {
   display: grid;
   gap: 1rem;
@@ -7503,6 +7601,64 @@ ul {
   max-width: 150px;
 }
 
+.schedule-admin-form__lineup {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.schedule-admin-form__lineup legend {
+  padding: 0;
+  margin-bottom: 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e8f0ff;
+}
+
+.schedule-admin-form__lineup-hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.82rem;
+  color: #9fb6d8;
+  line-height: 1.4;
+}
+
+.schedule-admin-form__lineup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.schedule-admin-form__lineup-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #dbe7fb;
+  cursor: pointer;
+}
+
+.schedule-admin-form__lineup-option--maxed {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.schedule-admin-form__lineup-option input {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.schedule-admin-form__lineup-empty {
+  margin: 0;
+  font-size: 0.86rem;
+  color: #8aa0c2;
+}
+
 .schedule-admin-form__status-score-row {
   display: grid;
   gap: 0.9rem;
@@ -8004,6 +8160,37 @@ ul {
   gap: 0.9rem;
   max-width: 460px;
   min-width: 0;
+}
+
+.settings-admin-open-challenges {
+  align-items: flex-start;
+  width: 100%;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgba(126, 161, 255, 0.22);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settings-admin-open-challenges input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.2rem;
+}
+
+.settings-admin-open-challenges span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.settings-admin-open-challenges strong {
+  color: #ffffff;
+  font-size: 0.95rem;
+}
+
+.settings-admin-open-challenges small {
+  color: #9fb6d8;
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .settings-admin-form__logo-field {

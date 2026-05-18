@@ -895,6 +895,7 @@ service cloud.firestore {
               'logoUrl',
               'memberCount',
               'name',
+              'openToChallenges',
               'publicSlug',
               'requestedClubName',
               'requestedClubSlug',

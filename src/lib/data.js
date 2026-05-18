@@ -1910,6 +1910,7 @@ export async function createTeam({ teamName, user }) {
     logoUrl: '',
     memberCount: 1,
     name: trimmedName,
+    openToChallenges: true,
     publicSlug,
     requestedClubName: '',
     requestedClubSlug: '',
@@ -2356,6 +2357,7 @@ async function syncTeamNameReferences({ clubSlug, teamName, teamSlug, user }) {
 export async function updateTeamSettings({
   clubSlug,
   logoFile,
+  openToChallenges = false,
   status = 'active',
   teamName,
   teamSlug,
@@ -2391,6 +2393,7 @@ export async function updateTeamSettings({
     logoPath: uploadedLogo?.logoPath ?? currentTeam.logoPath ?? '',
     logoUrl: uploadedLogo?.logoUrl ?? currentTeam.logoUrl ?? '',
     name: normalizedName,
+    openToChallenges: openToChallenges === true,
     publicSlug: slugify(normalizedName),
     status,
     updatedAt: serverTimestamp(),
@@ -2727,6 +2730,7 @@ export async function listApprovedClubTeams(clubSlug) {
           id: entry.id,
           logoUrl: data.logoUrl ?? '',
           name: data.name ?? entry.id,
+          openToChallenges: data.openToChallenges === true,
           status: data.status ?? 'active',
           teamSlug,
         };
