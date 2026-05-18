@@ -7,3 +7,4 @@ dist-*-check*/
 .env.local
 .env.*.local
 vite.config.js.timestamp-*.mjs
+vite-dev*.log
