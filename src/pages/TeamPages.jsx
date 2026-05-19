@@ -2042,7 +2042,7 @@ export function ActivityPage() {
           </div>
         ) : (
           <div className="notice notice--info">
-            No activity has been recorded for this team yet. New team, player, challenge, and match updates will appear here.
+            No activity has occurred yet. New team, player, challenge, and match updates will appear here.
           </div>
         )}
       </section>
