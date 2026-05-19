@@ -1403,6 +1403,42 @@ function updateAvailableDays(currentDays = [], dayId, checked) {
   return PLAYER_AVAILABLE_DAYS.filter((day) => nextDays.has(day.id)).map((day) => day.id);
 }
 
+function PlayerWeeklyAvailabilityReadout({
+  availableDays = [],
+  legend = 'Best days to play',
+  compactLabels = false,
+}) {
+  const selectedDayIds = new Set(Array.isArray(availableDays) ? availableDays : []);
+  const hasSelection = PLAYER_AVAILABLE_DAYS.some((day) => selectedDayIds.has(day.id));
+
+  return (
+    <fieldset className="field checkbox-fieldset weekly-availability weekly-availability--readonly">
+      <legend>{legend}</legend>
+      <div
+        className="checkbox-grid"
+        role="group"
+        aria-label={hasSelection ? legend : `${legend}: none selected yet`}
+      >
+        {PLAYER_AVAILABLE_DAYS.map((day) => {
+          const isSelected = selectedDayIds.has(day.id);
+          const label = compactLabels ? day.label.slice(0, 3) : day.label;
+
+          return (
+            <div
+              key={day.id}
+              className={`checkbox-option ${isSelected ? 'checkbox-option--selected' : ''}`}
+              title={compactLabels ? day.label : undefined}
+            >
+              <span>{label}</span>
+            </div>
+          );
+        })}
+      </div>
+      {!hasSelection ? <p className="weekly-availability__empty-note">No days selected yet.</p> : null}
+    </fieldset>
+  );
+}
+
 const TIME_PICKER_HOURS = Array.from({ length: 12 }, (_, index) => String(index + 1));
 const TIME_PICKER_MINUTES = ['00', '15', '30', '45'];
 const TIME_PICKER_PERIODS = ['AM', 'PM'];
@@ -4107,6 +4143,12 @@ export function RosterPage() {
                               <strong>{player.skillLevel || 'Not set'}</strong>
                             </span>
                           </div>
+
+                          <PlayerWeeklyAvailabilityReadout
+                            availableDays={player.availableDays}
+                            compactLabels
+                            legend="Best days to play"
+                          />
 
                           {canEditRole ? (
                             <div className="member-role-card__actions" aria-label={`Change role for ${displayName}`}>

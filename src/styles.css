@@ -2450,6 +2450,48 @@ textarea {
   transform: translateY(-1px);
 }
 
+.weekly-availability--readonly {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.weekly-availability--readonly .checkbox-option {
+  cursor: default;
+  pointer-events: none;
+}
+
+.weekly-availability--readonly .checkbox-option:hover {
+  transform: none;
+}
+
+.weekly-availability__empty-note {
+  margin: 0.35rem 0 0;
+  color: #93acd8;
+  font-size: 0.82rem;
+}
+
+.roster-player-card .weekly-availability {
+  margin-top: 0.15rem;
+}
+
+.roster-player-card .weekly-availability legend {
+  color: #93acd8;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.roster-player-card .weekly-availability .checkbox-option {
+  min-height: 46px;
+  padding: 0.45rem 0.35rem;
+}
+
+.roster-player-card .weekly-availability .checkbox-option span {
+  font-size: 0.78rem;
+}
+
 .time-picker {
   display: grid;
   gap: 0.6rem;
