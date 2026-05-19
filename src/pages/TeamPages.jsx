@@ -79,6 +79,9 @@ import {
 import blackhawkPickleballCourts from '../../blackhawk_pickleball_courts.webp';
 import defaultTeamLogo from '../../default_team_logo.webp';
 
+/** Match scoring structure — keep in sync with score entry (best of three games). */
+const MATCH_FORMAT_LABEL = 'Match Format: Best 2 out of 3 games.';
+
 function canManageRole(role) {
   return role === 'captain' || role === 'coCaptain';
 }
@@ -575,18 +578,21 @@ function ScheduleMatchCard({
       </div>
 
       <div className="match-card-footer">
-        <div className="match-card-footer__details">
-          <span>
-            <ClockIcon />
-            {formatMatchFooterDate(game)}
-          </span>
+        <div className="match-card-footer__primary">
+          <div className="match-card-footer__details">
+            <span>
+              <ClockIcon />
+              {formatMatchFooterDate(game)}
+            </span>
+          </div>
+          <div className="match-card-footer__details">
+            <span>
+              <CourtIcon />
+              {getMatchCourtLabel(game.location)}
+            </span>
+          </div>
         </div>
-        <div className="match-card-footer__details">
-          <span>
-            <CourtIcon />
-            {getMatchCourtLabel(game.location)}
-          </span>
-        </div>
+        <p className="match-card-footer__format">{MATCH_FORMAT_LABEL}</p>
       </div>
 
     </article>
@@ -4238,7 +4244,7 @@ export function SchedulePage() {
   }, [clubSlug, teamSlug, user?.uid]);
 
   useEffect(() => {
-    if (!isEditorOpen || !form.linkedTeamClubSlug || !form.linkedTeamSlug) {
+    if (!isEditorOpen || !isCreateEditorOpen || !form.linkedTeamClubSlug || !form.linkedTeamSlug) {
       setLinkedMatchPlayers([]);
       return;
     }
@@ -4260,7 +4266,7 @@ export function SchedulePage() {
     return () => {
       cancelled = true;
     };
-  }, [isEditorOpen, form.linkedTeamClubSlug, form.linkedTeamSlug]);
+  }, [isEditorOpen, isCreateEditorOpen, form.linkedTeamClubSlug, form.linkedTeamSlug]);
 
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const upcomingGames = useMemo(
@@ -4366,7 +4372,7 @@ export function SchedulePage() {
         editingGame?.linkedGameId ||
         (isLinkedOpponent ? `manual-${savedGameId}-${form.linkedTeamSlug}` : '');
 
-      if (isLinkedOpponent && mirrorGameId) {
+      if (isLinkedOpponent && mirrorGameId && isCreateEditorOpen) {
         const awayRosterIds = form.linkedRosterPlayerIds.slice(0, form.playersNeeded);
 
         await saveGamePairings({
@@ -4511,7 +4517,7 @@ export function SchedulePage() {
                   <p>
                     {isCreateEditorOpen
                       ? 'Add a match when details are set. Pick who is playing so names show on match cards.'
-                      : 'Update the matchup, court, lineup, and opponent.'}
+                      : 'Update date, time, court, and your lineup. Opposing captains set who plays on their side.'}
                   </p>
                 </div>
               </div>
@@ -4618,6 +4624,8 @@ export function SchedulePage() {
                 </label>
               </div>
 
+              <p className="schedule-admin-form__match-format-note">{MATCH_FORMAT_LABEL}</p>
+
               <ScheduleMatchLineupPicker
                 disabled={saving}
                 hint={`Choose up to ${form.playersNeeded} from ${teamProfile.name || 'your team'}. Names show on your match cards.`}
@@ -4628,7 +4636,7 @@ export function SchedulePage() {
                 selectedIds={form.rosterPlayerIds}
               />
 
-              {form.linkedTeamClubSlug && form.linkedTeamSlug ? (
+              {isCreateEditorOpen && form.linkedTeamClubSlug && form.linkedTeamSlug ? (
                 <ScheduleMatchLineupPicker
                   disabled={saving}
                   hint={`Choose up to ${form.playersNeeded} from ${form.opponent || 'the opponent'}. Their names appear on your schedule when both teams use PKL Universe.`}
@@ -7032,6 +7040,7 @@ export function ChallengesPage() {
                         </select>
                       </label>
                     </div>
+                    <p className="challenge-form__match-format">{MATCH_FORMAT_LABEL}</p>
                     {normalizeMatchPlayerCount(form.playersNeeded) === 1 ? (
                       <label className="field challenge-form__singles-player">
                         <span>Who will play singles?</span>
@@ -7186,8 +7195,8 @@ export function ChallengesPage() {
                   <p className="eyebrow">Ready to play</p>
                   <h2>Who wants a game?</h2>
                   <p>
-                    Every team here is inviting someone to challenge them—you might see your own squad too. When
-                    you&apos;re ready, tap another team&apos;s logo and send the invite.
+                    The teams shown here are seeking to be challenged by other teams. Click their logo to initiate a
+                    challenge.
                   </p>
                 </div>
               </div>

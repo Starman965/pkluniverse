@@ -3381,6 +3381,13 @@ ul {
   max-width: 520px;
 }
 
+.challenge-form__match-format {
+  margin: 0;
+  color: #aabbd4;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
 .challenge-form__date {
   flex: 1 1 170px;
   max-width: 190px;
@@ -7183,18 +7190,37 @@ ul {
     linear-gradient(180deg, rgba(13, 29, 48, 0.96) 0%, rgba(10, 23, 39, 0.94) 100%);
 }
 
-.match-card-scoreboard__topline,
+.match-card-scoreboard__topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #d9e7fb;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
 .match-card-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-top: 0.25rem;
+  color: #c9d7ea;
+  font-size: 0.86rem;
+}
+
+.match-card-footer__primary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
 }
 
-.match-card-scoreboard__topline {
-  color: #d9e7fb;
-  font-size: 0.95rem;
-  font-weight: 700;
+.match-card-footer__format {
+  margin: 0;
+  color: #aabbd4;
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 
@@ -7321,12 +7347,6 @@ ul {
 
 .match-card-score-row__set--won {
   color: #ffffff;
-}
-
-.match-card-footer {
-  padding-top: 0.25rem;
-  color: #c9d7ea;
-  font-size: 0.86rem;
 }
 
 .match-card-footer span {
@@ -7599,6 +7619,13 @@ ul {
 
 .schedule-admin-form__court-field {
   max-width: 150px;
+}
+
+.schedule-admin-form__match-format-note {
+  margin: 0;
+  color: #aabbd4;
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
 .schedule-admin-form__lineup {
