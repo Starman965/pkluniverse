@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -13,7 +13,14 @@ import {
   listTeamMembers,
   setLastActiveTeam,
   subscribeChallengeHub,
+  subscribeTeamGames,
 } from '../lib/data';
+import {
+  buildScheduleAttentionLabel,
+  countScheduleAttentionGames,
+  getScheduleLastViewedMs,
+  getTodayDateKey,
+} from '../lib/scheduleAttention';
 import { resolvePlayerAvatarUrl, resolveProfileAvatarUrl } from '../lib/profilePhotos';
 import defaultTeamLogo from '../../default_team_logo.webp';
 import pklUniverseWideLogo from '../../pkl_universe_wide_logo.webp';
@@ -132,6 +139,12 @@ export default function AppShell() {
     wins: 0,
   });
   const [incomingChallengeCount, setIncomingChallengeCount] = useState(0);
+  const [scheduleAttention, setScheduleAttention] = useState({
+    needsSchedulingCount: 0,
+    newScheduledCount: 0,
+    total: 0,
+  });
+  const scheduleGamesRef = useRef([]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [teamRefreshKey, setTeamRefreshKey] = useState(0);
 
@@ -206,12 +219,60 @@ export default function AppShell() {
       setTeamRefreshKey((current) => current + 1);
     }
 
+    function handleScheduleViewed() {
+      if (!clubSlug || !teamSlug) {
+        return;
+      }
+
+      setScheduleAttention(
+        countScheduleAttentionGames(
+          scheduleGamesRef.current,
+          getScheduleLastViewedMs(clubSlug, teamSlug),
+          getTodayDateKey(),
+        ),
+      );
+    }
+
     window.addEventListener('team-updated', handleTeamUpdated);
+    window.addEventListener('schedule-viewed', handleScheduleViewed);
 
     return () => {
       window.removeEventListener('team-updated', handleTeamUpdated);
+      window.removeEventListener('schedule-viewed', handleScheduleViewed);
     };
-  }, []);
+  }, [clubSlug, teamSlug]);
+
+  useEffect(() => {
+    if (!clubSlug || !teamSlug) {
+      scheduleGamesRef.current = [];
+      setScheduleAttention({
+        needsSchedulingCount: 0,
+        newScheduledCount: 0,
+        total: 0,
+      });
+      return undefined;
+    }
+
+    const recomputeAttention = (games) => {
+      scheduleGamesRef.current = games;
+      setScheduleAttention(
+        countScheduleAttentionGames(
+          games,
+          getScheduleLastViewedMs(clubSlug, teamSlug),
+          getTodayDateKey(),
+        ),
+      );
+    };
+
+    return subscribeTeamGames({ clubSlug, teamSlug }, recomputeAttention, () => {
+      scheduleGamesRef.current = [];
+      setScheduleAttention({
+        needsSchedulingCount: 0,
+        newScheduledCount: 0,
+        total: 0,
+      });
+    });
+  }, [clubSlug, teamSlug]);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -313,6 +374,7 @@ export default function AppShell() {
       player: currentPlayer ?? {},
     });
   const userInitial = userDisplayName.trim().charAt(0).toUpperCase() || 'P';
+  const scheduleAttentionLabel = buildScheduleAttentionLabel(scheduleAttention);
 
   useEffect(() => {
     if (!challengeClubSlug || !clubSlug || !teamSlug) {
@@ -456,6 +518,14 @@ export default function AppShell() {
                 {route.icon === 'competition' && incomingChallengeCount > 0 ? (
                   <span className="nav-link__badge" aria-label={`${incomingChallengeCount} open challenges received`}>
                     {incomingChallengeCount > 9 ? '9+' : incomingChallengeCount}
+                  </span>
+                ) : null}
+                {route.icon === 'matches' && scheduleAttention.total > 0 ? (
+                  <span
+                    className="nav-link__badge nav-link__badge--schedule"
+                    aria-label={scheduleAttentionLabel || `${scheduleAttention.total} matches need attention`}
+                  >
+                    {scheduleAttention.total > 9 ? '9+' : scheduleAttention.total}
                   </span>
                 ) : null}
               </NavLink>

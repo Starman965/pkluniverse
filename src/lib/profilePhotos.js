@@ -37,11 +37,7 @@ export function resolveProfileAvatarUrl(profile = {}, authPhotoUrl = '') {
 
 export function resolvePlayerAvatarUrl({ authPhotoUrl = '', player = {}, profile = null } = {}) {
   if (profile) {
-    const fromProfile = resolveProfileAvatarUrl(profile, authPhotoUrl);
-
-    if (fromProfile) {
-      return fromProfile;
-    }
+    return resolveProfileAvatarUrl(profile, authPhotoUrl);
   }
 
   const customHeadshot = normalizeStoredHeadshotUrl(player.headshotUrl ?? '');
@@ -50,5 +46,7 @@ export function resolvePlayerAvatarUrl({ authPhotoUrl = '', player = {}, profile
     return customHeadshot;
   }
 
-  return player.photoURL || authPhotoUrl || '';
+  const rawHeadshotUrl = String(player.headshotUrl ?? '').trim();
+
+  return player.photoURL || rawHeadshotUrl || authPhotoUrl || '';
 }

@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, isFirebaseConfigured, storage } from './firebase';
-import { normalizeStoredHeadshotUrl, resolveProfileAvatarUrl } from './profilePhotos';
+import { normalizeStoredHeadshotUrl, resolvePlayerAvatarUrl, resolveProfileAvatarUrl } from './profilePhotos';
 
 const INDEPENDENT_CLUB = {
   id: 'independent',
@@ -380,6 +380,7 @@ function buildPlayerSnapshotFromGlobalProfile(profile) {
     headshotPath: profile.headshotPath ?? '',
     headshotUrl: normalizeStoredHeadshotUrl(profile.headshotUrl ?? ''),
     lastName: profile.lastName ?? '',
+    photoURL: profile.photoURL ?? '',
     skillLevel: normalizeSkillLevel(profile.skillLevel ?? ''),
   };
 }
@@ -2800,11 +2801,12 @@ export async function listApprovedClubTeams(clubSlug) {
       .map((entry) => {
         const data = entry.data();
         const teamSlug = entry.id;
+        const storageClubSlug = sourceClubSlug || entry.ref.parent.parent?.id || data.clubId || '';
 
         return {
           affiliationStatus: data.affiliationStatus ?? 'independent',
           approvedClubSlug: data.approvedClubSlug ?? '',
-          clubSlug: data.clubId ?? sourceClubSlug ?? entry.ref.parent.parent?.id ?? '',
+          clubSlug: storageClubSlug,
           id: entry.id,
           logoUrl: data.logoUrl ?? '',
           name: data.name ?? entry.id,
@@ -4185,6 +4187,7 @@ export async function listPlayers(clubSlug, teamSlug) {
       id: entry.id,
       lastName,
       notes: data.notes ?? '',
+      photoURL: data.photoURL ?? '',
       skillLevel: data.skillLevel ?? '',
       uid: data.uid ?? '',
     };
@@ -4415,6 +4418,43 @@ function normalizePairings(pairings, rosterPlayerIds = []) {
   });
 }
 
+async function resolveTeamStoragePath(clubSlug, teamSlug) {
+  const trimmedClub = String(clubSlug ?? '').trim();
+  const trimmedTeam = String(teamSlug ?? '').trim();
+
+  if (!trimmedTeam) {
+    return { clubSlug: trimmedClub, teamSlug: trimmedTeam };
+  }
+
+  async function teamExistsAt(candidateClubSlug) {
+    if (!candidateClubSlug) {
+      return false;
+    }
+
+    const snapshot = await getDoc(doc(db, 'clubs', candidateClubSlug, 'teams', trimmedTeam));
+
+    return snapshot.exists();
+  }
+
+  if (await teamExistsAt(trimmedClub)) {
+    return { clubSlug: trimmedClub, teamSlug: trimmedTeam };
+  }
+
+  const clubs = await listClubs({ includeIndependent: true });
+
+  for (const club of clubs) {
+    if (club.slug === trimmedClub) {
+      continue;
+    }
+
+    if (await teamExistsAt(club.slug)) {
+      return { clubSlug: club.slug, teamSlug: trimmedTeam };
+    }
+  }
+
+  return { clubSlug: trimmedClub, teamSlug: trimmedTeam };
+}
+
 function normalizeGameEntry(entry) {
   const data = entry.data();
 
@@ -4443,6 +4483,7 @@ function normalizeGameEntry(entry) {
     timeLabel: normalizeTimeLabel(data.timeLabel),
     challengeClubSlug: data.challengeClubSlug ?? '',
     challengeId: data.challengeId ?? '',
+    createdAtMs: normalizeTimestampMs(data.createdAt),
     linkedGameId: data.linkedGameId ?? '',
     linkedTeamClubSlug: data.linkedTeamClubSlug ?? '',
     linkedTeamLogoUrl: data.linkedTeamLogoUrl ?? '',
@@ -4451,6 +4492,7 @@ function normalizeGameEntry(entry) {
     linkedTeamSlug: data.linkedTeamSlug ?? '',
     source: data.source ?? 'manual',
     sourceTeamLogoUrl: data.sourceTeamLogoUrl ?? '',
+    updatedAtMs: normalizeTimestampMs(data.updatedAt),
   };
 }
 
@@ -4463,6 +4505,19 @@ export async function listGames(clubSlug, teamSlug) {
 
   const currentTeamSnap = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug));
   const currentTeamLogo = currentTeamSnap.exists() ? (currentTeamSnap.data().logoUrl ?? '').trim() : '';
+  const currentTeamData = currentTeamSnap.exists() ? currentTeamSnap.data() : {};
+  const approvedClubSlug =
+    currentTeamData.affiliationStatus === 'approved' ? currentTeamData.approvedClubSlug ?? '' : '';
+  const approvedTeamStorageBySlug = new Map();
+
+  if (approvedClubSlug && approvedClubSlug !== INDEPENDENT_CLUB.slug) {
+    const approvedTeams = await listApprovedClubTeams(approvedClubSlug);
+
+    approvedTeams.forEach((team) => {
+      approvedTeamStorageBySlug.set(team.teamSlug, team.clubSlug);
+    });
+  }
+
   const linkedTeamKeys = new Map();
 
   games.forEach((game) => {
@@ -4481,35 +4536,51 @@ export async function listGames(clubSlug, teamSlug) {
 
   if (linkedTeamKeys.size > 0) {
     const entries = [...linkedTeamKeys.values()];
+    const resolvedLinkedTeams = await Promise.all(
+      entries.map(async (entry) => {
+        const requestKey = `${entry.clubSlug}::${entry.teamSlug}`;
+        const storageClubSlug =
+          approvedTeamStorageBySlug.get(entry.teamSlug) ??
+          (await resolveTeamStoragePath(entry.clubSlug, entry.teamSlug)).clubSlug;
+
+        return {
+          clubSlug: storageClubSlug,
+          requestKey,
+          teamSlug: entry.teamSlug,
+        };
+      }),
+    );
     const [linkedSnaps, linkedPlayerGroups, linkedMemberGroups] = await Promise.all([
       Promise.all(
-        entries.map(({ clubSlug: linkedClub, teamSlug: linkedTeam }) =>
+        resolvedLinkedTeams.map(({ clubSlug: linkedClub, teamSlug: linkedTeam }) =>
           getDoc(doc(db, 'clubs', linkedClub, 'teams', linkedTeam)),
         ),
       ),
       Promise.all(
-        entries.map(({ clubSlug: linkedClub, teamSlug: linkedTeam }) =>
-          getDocs(collection(db, 'clubs', linkedClub, 'teams', linkedTeam, 'players')).catch(() => null),
+        resolvedLinkedTeams.map(({ clubSlug: linkedClub, teamSlug: linkedTeam }) =>
+          listPlayers(linkedClub, linkedTeam).catch(() => []),
         ),
       ),
       Promise.all(
-        entries.map(({ clubSlug: linkedClub, teamSlug: linkedTeam }) =>
-          getDocs(collection(db, 'clubs', linkedClub, 'teams', linkedTeam, 'members')).catch(() => null),
+        resolvedLinkedTeams.map(({ clubSlug: linkedClub, teamSlug: linkedTeam }) =>
+          listTeamMembers(linkedClub, linkedTeam).catch(() => []),
         ),
       ),
     ]);
     const logoByKey = new Map();
     const playersByKey = new Map();
+    const storagePathByRequestKey = new Map(
+      resolvedLinkedTeams.map((entry) => [entry.requestKey, entry]),
+    );
 
-    entries.forEach((entry, index) => {
-      const key = `${entry.clubSlug}::${entry.teamSlug}`;
+    resolvedLinkedTeams.forEach((entry, index) => {
+      const key = entry.requestKey;
       const snap = linkedSnaps[index];
       const url = snap.exists() ? (snap.data().logoUrl ?? '').trim() : '';
       const roleByPlayerId = new Map();
 
-      (linkedMemberGroups[index]?.docs ?? []).forEach((memberDoc) => {
-        const member = memberDoc.data();
-        const playerId = member.playerId || memberDoc.id;
+      (linkedMemberGroups[index] ?? []).forEach((member) => {
+        const playerId = member.playerId || member.uid;
 
         if (playerId) {
           roleByPlayerId.set(playerId, member.role ?? '');
@@ -4520,32 +4591,35 @@ export async function listGames(clubSlug, teamSlug) {
       playersByKey.set(
         key,
         new Map(
-          (linkedPlayerGroups[index]?.docs ?? []).map((playerDoc) => {
-            const player = playerDoc.data();
-            const firstName = (player.firstName ?? '').trim();
-            const lastName = (player.lastName ?? '').trim();
-
-            return [
-              playerDoc.id,
-              {
-                fullName: player.fullName ?? buildFullName(firstName, lastName),
-                headshotUrl: player.headshotUrl ?? '',
-                id: playerDoc.id,
-                memberRole: roleByPlayerId.get(playerDoc.id) ?? '',
-              },
-            ];
-          }),
+          (linkedPlayerGroups[index] ?? []).map((player) => [
+            player.id,
+            {
+              fullName: player.fullName,
+              headshotUrl: resolvePlayerAvatarUrl({ player }),
+              id: player.id,
+              memberRole: roleByPlayerId.get(player.id) ?? roleByPlayerId.get(player.uid) ?? '',
+              uid: player.uid || player.id,
+            },
+          ]),
         ),
       );
     });
 
     const linkedGameLookups = games
       .filter((game) => game.linkedTeamClubSlug && game.linkedTeamSlug && game.linkedGameId)
-      .map((game) =>
-        getDoc(doc(db, 'clubs', game.linkedTeamClubSlug, 'teams', game.linkedTeamSlug, 'games', game.linkedGameId))
+      .map((game) => {
+        const requestKey = `${game.linkedTeamClubSlug}::${game.linkedTeamSlug}`;
+        const storagePath = storagePathByRequestKey.get(requestKey) ?? {
+          clubSlug: game.linkedTeamClubSlug,
+          teamSlug: game.linkedTeamSlug,
+        };
+
+        return getDoc(
+          doc(db, 'clubs', storagePath.clubSlug, 'teams', storagePath.teamSlug, 'games', game.linkedGameId),
+        )
           .then((snapshot) => ({ game, snapshot }))
-          .catch(() => ({ game, snapshot: null })),
-      );
+          .catch(() => ({ game, snapshot: null }));
+      });
     const linkedGameSnapshots = await Promise.all(linkedGameLookups);
 
     games.forEach((game) => {
@@ -4569,6 +4643,22 @@ export async function listGames(clubSlug, teamSlug) {
       game.linkedRosterPlayers = linkedRosterPlayerIds
         .map((playerId) => linkedPlayers.get(playerId))
         .filter(Boolean);
+    });
+
+    const linkedRosterUids = games.flatMap((game) =>
+      (game.linkedRosterPlayers ?? []).map((player) => player.uid || player.id).filter(Boolean),
+    );
+    const linkedRosterAvatarsByUid = await getUserProfileAvatarsByUid(linkedRosterUids);
+
+    games.forEach((game) => {
+      game.linkedRosterPlayers = (game.linkedRosterPlayers ?? []).map((player) => ({
+        ...player,
+        headshotUrl:
+          player.headshotUrl ||
+          (player.uid && linkedRosterAvatarsByUid[player.uid]) ||
+          (player.id && linkedRosterAvatarsByUid[player.id]) ||
+          resolvePlayerAvatarUrl({ player }),
+      }));
     });
   }
 

@@ -3,6 +3,7 @@ import Cropper from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { markScheduleViewed } from '../lib/scheduleAttention';
 import { ACTIVITY_ICON_BY_TYPE } from '../lib/activityIcons';
 import { normalizeStoredHeadshotUrl, resolvePlayerAvatarUrl, resolveProfileAvatarUrl } from '../lib/profilePhotos';
 import {
@@ -447,6 +448,26 @@ function sortMatchPlayersForDisplay(players = []) {
   });
 }
 
+function MatchCardPlayerAvatar({ fullName = 'Player', headshotUrl = '' }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const showPhoto = Boolean(headshotUrl) && !imageFailed;
+
+  return (
+    <span className="match-card-score-row__player-avatar">
+      {showPhoto ? (
+        <img
+          alt=""
+          decoding="async"
+          onError={() => setImageFailed(true)}
+          src={headshotUrl}
+        />
+      ) : (
+        buildPlayerInitials(fullName)
+      )}
+    </span>
+  );
+}
+
 function MatchCardScoreRow({
   aggregateScore,
   fallbackLogoUrl,
@@ -473,25 +494,18 @@ function MatchCardScoreRow({
         />
         <div className="match-card-score-row__players">
           {sortedPlayers.length ? (
-            sortedPlayers.map((player, index) => {
-              const playerAvatarUrl = resolvePlayerAvatarUrl({ player });
-
-              return (
+            sortedPlayers.map((player, index) => (
               <span key={player.id || player.fullName} className="match-card-score-row__player-group">
                 {index > 0 ? <span className="match-card-score-row__player-separator">|</span> : null}
                 <span className="match-card-score-row__player">
-                  <span className="match-card-score-row__player-avatar">
-                    {playerAvatarUrl ? (
-                      <img alt="" decoding="async" src={playerAvatarUrl} />
-                    ) : (
-                      buildPlayerInitials(player.fullName || 'Player')
-                    )}
-                  </span>
+                  <MatchCardPlayerAvatar
+                    fullName={player.fullName || 'Player'}
+                    headshotUrl={resolvePlayerAvatarUrl({ player })}
+                  />
                   <strong>{player.fullName || 'Player'}</strong>
                 </span>
               </span>
-              );
-            })
+            ))
           ) : (
             <strong>{name}</strong>
           )}
@@ -2128,6 +2142,19 @@ function buildClubTeamCaptainNames(members, players) {
     .filter(Boolean);
 }
 
+function buildDisplayedTeamRosterPlayers(members, players) {
+  const playersById = new Map(players.map((player) => [player.id, player]));
+  const activeMembers = members.filter((member) => member.status !== 'inactive');
+  const linkedRosterPlayers = activeMembers
+    .map((member) => playersById.get(member.playerId) || playersById.get(member.uid))
+    .filter(Boolean);
+  const rosterSource = linkedRosterPlayers.length ? linkedRosterPlayers : players;
+
+  return rosterSource
+    .filter((player) => player.active !== false)
+    .slice(0, TEAM_MEMBER_LIMIT);
+}
+
 function ClubEventsPanel({ clubName = '', clubSlug, managerToolsLabel = 'Club manager tools', managerView = false, user }) {
   const [events, setEvents] = useState([]);
   const [form, setForm] = useState(createEmptyClubEventForm());
@@ -3365,39 +3392,103 @@ export function TeamMembersPage() {
   const [members, setMembers] = useState([]);
   const [games, setGames] = useState([]);
   const [membership, setMembership] = useState(null);
+  const [clubTeamSummaries, setClubTeamSummaries] = useState([]);
+  const [clubName, setClubName] = useState('');
+  const [activeTeamTab, setActiveTeamTab] = useState('our-team');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
   useEffect(() => {
     let ignore = false;
 
-    Promise.all([
-      getTeam(clubSlug, teamSlug),
-      listPlayers(clubSlug, teamSlug),
-      listTeamMembers(clubSlug, teamSlug),
-      listGames(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
-    ])
-      .then(([teamData, playerData, memberData, gameData, membershipData]) => {
-        if (!ignore) {
-          setTeam(teamData);
-          setPlayers(playerData);
-          setMembers(memberData);
-          setGames(gameData);
-          setMembership(membershipData);
-          setError('');
-        }
-      })
-      .catch((loadError) => {
-        if (!ignore) {
-          setTeam(null);
-          setPlayers([]);
-          setMembers([]);
-          setGames([]);
-          setMembership(null);
-          setError(loadError.message ?? 'Unable to load the team roster yet.');
-        }
-      });
+    async function loadTeamPage() {
+      const [teamData, playerData, memberData, gameData, membershipData] = await Promise.all([
+        getTeam(clubSlug, teamSlug),
+        listPlayers(clubSlug, teamSlug),
+        listTeamMembers(clubSlug, teamSlug),
+        listGames(clubSlug, teamSlug),
+        user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
+      ]);
+
+      let nextClubTeamSummaries = [];
+      let nextClubName = '';
+      const approvedClubSlug = teamData?.approvedClubSlug ?? '';
+
+      if (
+        teamData?.affiliationStatus === 'approved' &&
+        approvedClubSlug &&
+        approvedClubSlug !== 'independent'
+      ) {
+        const [approvedTeams, clubs] = await Promise.all([
+          listApprovedClubTeams(approvedClubSlug),
+          listClubs().catch(() => []),
+        ]);
+
+        nextClubName = clubs.find((club) => club.slug === approvedClubSlug)?.name ?? formatClubTeamsClubName(approvedClubSlug);
+        nextClubTeamSummaries = await Promise.all(
+          approvedTeams.map(async (clubTeam) => {
+            const isCurrentTeam = clubTeam.clubSlug === clubSlug && clubTeam.teamSlug === teamSlug;
+            const [teamMembers, teamPlayers, teamGames] = isCurrentTeam
+              ? [memberData, playerData, gameData]
+              : await Promise.all([
+                  listTeamMembers(clubTeam.clubSlug, clubTeam.teamSlug),
+                  listPlayers(clubTeam.clubSlug, clubTeam.teamSlug),
+                  listGames(clubTeam.clubSlug, clubTeam.teamSlug),
+                ]);
+            const stats = getTeamStandingsStats(teamGames);
+            const activeMembers = teamMembers.filter((member) => member.status !== 'inactive');
+
+            return {
+              ...clubTeam,
+              ...stats,
+              captainNames: buildClubTeamCaptainNames(teamMembers, teamPlayers),
+              memberCount: activeMembers.length || teamMembers.length,
+              rosterPlayers: buildDisplayedTeamRosterPlayers(teamMembers, teamPlayers),
+            };
+          }),
+        );
+
+        const rosterPlayersForAvatars = nextClubTeamSummaries.flatMap((clubTeam) => clubTeam.rosterPlayers ?? []);
+        const playerAvatarsByUid = await getUserProfileAvatarsByUid(
+          rosterPlayersForAvatars.map((player) => player.uid).filter(Boolean),
+        );
+
+        nextClubTeamSummaries = nextClubTeamSummaries.map((clubTeam) => ({
+          ...clubTeam,
+          rosterPlayers: (clubTeam.rosterPlayers ?? []).map((player) => ({
+            ...player,
+            headshotUrl:
+              (player.uid && playerAvatarsByUid[player.uid]) ||
+              resolvePlayerAvatarUrl({ player }),
+          })),
+        }));
+      }
+
+      if (!ignore) {
+        setTeam(teamData);
+        setPlayers(playerData);
+        setMembers(memberData);
+        setGames(gameData);
+        setMembership(membershipData);
+        setClubTeamSummaries(nextClubTeamSummaries);
+        setClubName(nextClubName);
+        setActiveTeamTab('our-team');
+        setError('');
+      }
+    }
+
+    loadTeamPage().catch((loadError) => {
+      if (!ignore) {
+        setTeam(null);
+        setPlayers([]);
+        setMembers([]);
+        setGames([]);
+        setMembership(null);
+        setClubTeamSummaries([]);
+        setClubName('');
+        setError(loadError.message ?? 'Unable to load the team roster yet.');
+      }
+    });
 
     return () => {
       ignore = true;
@@ -3472,7 +3563,17 @@ export function TeamMembersPage() {
   }, [games, members, players, user?.displayName, user?.uid]);
 
   const rosterPlayerCount = teamCards.filter((entry) => !entry.isPendingLink).length;
+  const canShowTeamTabs = clubTeamSummaries.length > 1;
+  const isAllTeamsView = canShowTeamTabs && activeTeamTab === 'all-teams';
   const teamTitle = team?.name ? `The ${team.name} Team` : 'The Team';
+  const pageEyebrow = isAllTeamsView ? 'Team directory' : 'Current roster';
+  const pageTitle = isAllTeamsView ? `${clubName || 'Club'} Teams` : teamTitle;
+  const pageCopy = isAllTeamsView
+    ? `Browse all teams in ${clubName || 'your club'} with rosters and records.`
+    : `Meet the ${team?.name ?? 'team'} players who make up the team.`;
+  const pageCountLabel = isAllTeamsView
+    ? `${clubTeamSummaries.length} Team${clubTeamSummaries.length === 1 ? '' : 's'}`
+    : `${rosterPlayerCount} Members`;
   const inviteLink = team?.joinCode
     ? `${window.location.origin}${window.location.pathname}#/join?code=${encodeURIComponent(team.joinCode)}`
     : '';
@@ -3513,90 +3614,162 @@ export function TeamMembersPage() {
       <section className="card team-members-card">
         <div className="team-members-card__header">
           <div className="team-members-card__header-copy">
-            <p className="eyebrow">Current roster</p>
-            <h1>{teamTitle}</h1>
-            <p className="team-members-card__copy">
-              Meet the {team?.name ?? 'team'} players who make up the team.
-            </p>
+            <p className="eyebrow">{pageEyebrow}</p>
+            <h1>{pageTitle}</h1>
+            <p className="team-members-card__copy">{pageCopy}</p>
           </div>
-          <div className="team-members-card__count">{rosterPlayerCount} Members</div>
+          <div className="team-members-card__count">{pageCountLabel}</div>
         </div>
 
         {error ? <div className="notice notice--error">{error}</div> : null}
 
-        {teamCards.length > 0 ? (
-          <div className="team-members-grid">
-            {teamCards.map((entry) => (
-              <article key={entry.id} className="team-member-card">
-                <div className="team-member-card__top">
-                  {entry.headshotUrl ? (
+        {canShowTeamTabs ? (
+          <div className="team-members-card__tabs-row">
+            <div className="availability-tabs" aria-label="Team views">
+              <button
+                className={`availability-tabs__button ${activeTeamTab === 'our-team' ? 'availability-tabs__button--active' : ''}`}
+                onClick={() => setActiveTeamTab('our-team')}
+                type="button"
+              >
+                Our Team ({rosterPlayerCount})
+              </button>
+              <button
+                className={`availability-tabs__button ${activeTeamTab === 'all-teams' ? 'availability-tabs__button--active' : ''}`}
+                onClick={() => setActiveTeamTab('all-teams')}
+                type="button"
+              >
+                All Teams ({clubTeamSummaries.length})
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {activeTeamTab === 'our-team' || !canShowTeamTabs ? (
+          <>
+            {teamCards.length > 0 ? (
+              <div className="team-members-grid">
+                {teamCards.map((entry) => (
+                  <article key={entry.id} className="team-member-card">
+                    <div className="team-member-card__top">
+                      {entry.headshotUrl ? (
+                        <img
+                          alt={`${entry.fullName} headshot`}
+                          className="team-member-card__avatar team-member-card__avatar--photo"
+                          decoding="async"
+                          loading="lazy"
+                          src={entry.headshotUrl}
+                        />
+                      ) : (
+                        <div className="team-member-card__avatar">{entry.initials}</div>
+                      )}
+                      <div className="team-member-card__body">
+                        <strong className="team-member-card__name">{entry.fullName}</strong>
+                        {entry.subtitle ? (
+                          <span className="team-member-card__subtitle">
+                            {entry.subtitle}
+                            {entry.isPendingLink ? ' · waiting for roster link' : ''}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="team-member-card__stats">
+                      <span className="team-member-card__stat team-member-card__stat--record">
+                        <span><MemberStatIcon type="record" /> Record</span>
+                        <strong>{entry.record.wins}-{entry.record.losses}</strong>
+                      </span>
+                      <span className="team-member-card__stat team-member-card__stat--skill">
+                        <span><MemberStatIcon type="skill" /> Skill</span>
+                        <strong>{entry.skillLevel}</strong>
+                      </span>
+                      <span className="team-member-card__stat team-member-card__stat--win-rate">
+                        <span><MemberStatIcon type="winRate" /> Win Rate</span>
+                        <strong>{entry.winRate}</strong>
+                      </span>
+                      <span className="team-member-card__stat team-member-card__stat--games">
+                        <span><MemberStatIcon type="games" /> Games</span>
+                        <strong>{entry.gamesPlayedCount}</strong>
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p>No players are on the team yet.</p>
+            )}
+
+            <div className="team-members-invite-strip">
+              <p>Add other players by sharing the team join code, or the entire link.</p>
+              <div className="team-members-invite-strip__details">
+                <div className="team-members-invite-strip__item">
+                  <span>Join code</span>
+                  <strong>{team?.joinCode ?? 'Not available yet'}</strong>
+                </div>
+                <div className="team-members-invite-strip__item team-members-invite-strip__item--link">
+                  <span>Invite link</span>
+                  <code title={inviteLink || undefined}>{inviteLink || 'Not available yet'}</code>
+                </div>
+                <button
+                  className="button team-members-invite-strip__button"
+                  disabled={!inviteLink}
+                  onClick={handleCopyInviteLink}
+                  type="button"
+                >
+                  Copy Invite Link
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="team-members-team-grid">
+              {clubTeamSummaries.map((clubTeam) => {
+                const isCurrentTeam = clubTeam.clubSlug === clubSlug && clubTeam.teamSlug === teamSlug;
+
+                return (
+                  <article
+                    key={`${clubTeam.clubSlug}-${clubTeam.teamSlug}`}
+                    className={`home-team-card${isCurrentTeam ? ' home-team-card--current' : ''}`}
+                  >
                     <img
-                      alt={`${entry.fullName} headshot`}
-                      className="team-member-card__avatar team-member-card__avatar--photo"
+                      alt={`${clubTeam.name} logo`}
+                      className="home-team-card__logo"
                       decoding="async"
                       loading="lazy"
-                      src={entry.headshotUrl}
+                      src={clubTeam.logoUrl || defaultTeamLogo}
                     />
-                  ) : (
-                    <div className="team-member-card__avatar">{entry.initials}</div>
-                  )}
-                  <div className="team-member-card__body">
-                    <strong className="team-member-card__name">{entry.fullName}</strong>
-                    {entry.subtitle ? (
-                      <span className="team-member-card__subtitle">
-                        {entry.subtitle}
-                        {entry.isPendingLink ? ' · waiting for roster link' : ''}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="team-member-card__stats">
-                  <span className="team-member-card__stat team-member-card__stat--record">
-                    <span><MemberStatIcon type="record" /> Record</span>
-                    <strong>{entry.record.wins}-{entry.record.losses}</strong>
-                  </span>
-                  <span className="team-member-card__stat team-member-card__stat--skill">
-                    <span><MemberStatIcon type="skill" /> Skill</span>
-                    <strong>{entry.skillLevel}</strong>
-                  </span>
-                  <span className="team-member-card__stat team-member-card__stat--win-rate">
-                    <span><MemberStatIcon type="winRate" /> Win Rate</span>
-                    <strong>{entry.winRate}</strong>
-                  </span>
-                  <span className="team-member-card__stat team-member-card__stat--games">
-                    <span><MemberStatIcon type="games" /> Games</span>
-                    <strong>{entry.gamesPlayedCount}</strong>
-                  </span>
-                </div>
-              </article>
-            ))}
+                    <div className="home-team-card__body">
+                      <div className="home-team-card__header">
+                        <h3>
+                          {clubTeam.name}
+                          {isCurrentTeam ? ' (your team)' : ''}
+                        </h3>
+                        <span>
+                          {clubTeam.gamesPlayed} match{clubTeam.gamesPlayed === 1 ? '' : 'es'} ·{' '}
+                          {clubTeam.wins}-{clubTeam.losses} W-L
+                        </span>
+                      </div>
+                      <div className="home-team-card__players">
+                        {clubTeam.rosterPlayers?.length ? (
+                          clubTeam.rosterPlayers.map((player) => (
+                            <div key={player.id} className="home-team-card__player">
+                              {player.headshotUrl ? (
+                                <img alt={`${getPlayerName(player)} headshot`} src={player.headshotUrl} />
+                              ) : (
+                                <span>{buildPlayerInitials(getPlayerName(player))}</span>
+                              )}
+                              <strong>{getPlayerName(player)}</strong>
+                            </div>
+                          ))
+                        ) : (
+                          <span>Roster pending</span>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
           </div>
-        ) : (
-          <p>No players are on the team yet.</p>
         )}
-
-        <div className="team-members-invite-strip">
-          <p>Add other players by sharing the team join code, or the entire link.</p>
-          <div className="team-members-invite-strip__details">
-            <div className="team-members-invite-strip__item">
-              <span>Join code</span>
-              <strong>{team?.joinCode ?? 'Not available yet'}</strong>
-            </div>
-            <div className="team-members-invite-strip__item team-members-invite-strip__item--link">
-              <span>Invite link</span>
-              <code title={inviteLink || undefined}>{inviteLink || 'Not available yet'}</code>
-            </div>
-            <button
-              className="button team-members-invite-strip__button"
-              disabled={!inviteLink}
-              onClick={handleCopyInviteLink}
-              type="button"
-            >
-              Copy Invite Link
-            </button>
-          </div>
-        </div>
       </section>
 
     </div>
@@ -4301,10 +4474,21 @@ export function SchedulePage() {
     const opponentTeamOptions = approvedTeamOptions.filter(
       (team) => !(team.clubSlug === clubSlug && team.teamSlug === teamSlug),
     );
+    const playerAvatarsByUid = await getUserProfileAvatarsByUid(
+      playerData.map((player) => player.uid).filter(Boolean),
+    );
 
     setGames(gameData);
     setMembership(membershipData);
-    setPlayers(playerData.map((player) => ({ ...player, memberRole: roleByPlayerId.get(player.id) ?? '' })));
+    setPlayers(
+      playerData.map((player) => ({
+        ...player,
+        memberRole: roleByPlayerId.get(player.id) ?? '',
+        headshotUrl:
+          (player.uid && playerAvatarsByUid[player.uid]) ||
+          resolvePlayerAvatarUrl({ player }),
+      })),
+    );
     setCourtOptions(buildCourtOptionsFromClub(activeClub));
     setMatchTeamOptions(opponentTeamOptions);
     setTeamProfile({
@@ -4325,6 +4509,15 @@ export function SchedulePage() {
         setLoading(false);
       });
   }, [clubSlug, teamSlug, user?.uid]);
+
+  useEffect(() => {
+    if (!clubSlug || !teamSlug) {
+      return;
+    }
+
+    markScheduleViewed(clubSlug, teamSlug);
+    window.dispatchEvent(new Event('schedule-viewed'));
+  }, [clubSlug, teamSlug]);
 
   useEffect(() => {
     if (!isEditorOpen || !isCreateEditorOpen || !form.linkedTeamClubSlug || !form.linkedTeamSlug) {
@@ -5257,7 +5450,17 @@ export function NewsPage() {
     return {
       players: playerCards,
       rankings: rankingRows,
-      teams: teamEntries.map((entry) => entry.team).sort((left, right) => left.name.localeCompare(right.name)),
+      teams: teamEntries
+        .map(({ team }) => ({
+          ...team,
+          rosterPlayers: team.rosterPlayers.map((player) => ({
+            ...player,
+            headshotUrl:
+              (player.uid && playerAvatarsByUid[player.uid]) ||
+              resolvePlayerAvatarUrl({ player }),
+          })),
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
     };
   }
 
