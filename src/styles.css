@@ -7008,6 +7008,41 @@ ul {
   margin-top: 0.65rem;
 }
 
+.admin-team-card__members {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.35rem;
+  width: 100%;
+}
+
+.admin-team-card__members > strong {
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-team-member-row {
+  align-items: center;
+  border: 1px solid rgba(126, 161, 255, 0.18);
+  border-radius: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0.65rem 0.75rem;
+}
+
+.admin-team-member-row__identity {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 10rem;
+}
+
+.admin-team-member-row__identity span {
+  color: #9fb6d8;
+  font-size: 0.82rem;
+}
+
 .club-admin-grid {
   display: grid;
   gap: 1rem;

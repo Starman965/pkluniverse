@@ -81,6 +81,7 @@ import {
   updateNewsComment,
   updateTeamLogoAsAdmin,
   updateTeamMemberRole,
+  updateTeamMemberRoleAsAdmin,
   updateTeamSettings,
 } from '../lib/data';
 import blackhawkPickleballCourts from '../../blackhawk_pickleball_courts.webp';
@@ -8380,6 +8381,7 @@ export function ClubAffiliationAdminPage() {
   const [loadingAdminPlayers, setLoadingAdminPlayers] = useState(false);
   const [copyingPlayers, setCopyingPlayers] = useState(false);
   const [updatingTeamLogoId, setUpdatingTeamLogoId] = useState('');
+  const [updatingAdminMemberRoleKey, setUpdatingAdminMemberRoleKey] = useState('');
   const [teamLogoCropTarget, setTeamLogoCropTarget] = useState(null);
   const [teamLogoCropImageSrc, setTeamLogoCropImageSrc] = useState('');
   const [teamLogoCropFileName, setTeamLogoCropFileName] = useState('team-logo.webp');
@@ -9166,6 +9168,32 @@ export function ClubAffiliationAdminPage() {
     }
   }
 
+  async function handleAdminMemberRoleChange(teamSummary, member, nextRole) {
+    const updateKey = `${teamSummary.clubSlug}::${teamSummary.teamSlug}::${member.uid}`;
+
+    setUpdatingAdminMemberRoleKey(updateKey);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateTeamMemberRoleAsAdmin({
+        clubSlug: teamSummary.clubSlug,
+        role: nextRole,
+        targetUid: member.uid,
+        teamSlug: teamSummary.teamSlug,
+        user,
+      });
+      setMessage(
+        `${member.displayName || 'Player'} is now ${formatRoleLabel(nextRole).toLowerCase()} on ${teamSummary.name}.`,
+      );
+      await loadAdminData();
+    } catch (updateError) {
+      setError(updateError.message ?? 'Unable to update that team role.');
+    } finally {
+      setUpdatingAdminMemberRoleKey('');
+    }
+  }
+
   async function handleDeleteTeam(teamSummary) {
     const confirmed = window.confirm(
       `Delete ${teamSummary.name}? This removes the team, roster, players, news, team-owned schedule, membership links, affiliation requests, and challenges involving this team. Other teams' saved matchups against this team will stay.`,
@@ -9382,7 +9410,7 @@ export function ClubAffiliationAdminPage() {
               <div>
                 <p className="eyebrow">Teams</p>
                 <h2>All teams</h2>
-                <p>Review each team, its club affiliation, captains, and member count.</p>
+                <p>Review each team, its club affiliation, captains, member count, and member roles.</p>
               </div>
             </div>
 
@@ -9426,6 +9454,50 @@ export function ClubAffiliationAdminPage() {
                           : 'TBD'}
                       </span>
                       <span>Members: {teamSummary.memberCount}</span>
+                      {teamSummary.members?.length ? (
+                        <div className="admin-team-card__members">
+                          <strong>Member roles</strong>
+                          {teamSummary.members.map((member) => {
+                            const role = member.role ?? 'member';
+                            const updateKey = `${teamSummary.clubSlug}::${teamSummary.teamSlug}::${member.uid}`;
+                            const isUpdating = updatingAdminMemberRoleKey === updateKey;
+                            const isCaptain = role === 'captain';
+
+                            return (
+                              <div key={member.uid} className="admin-team-member-row">
+                                <div className="admin-team-member-row__identity">
+                                  <strong>{member.displayName || member.uid}</strong>
+                                  <span>{member.email || member.uid}</span>
+                                </div>
+                                {isCaptain ? (
+                                  <span className="status-badge member-role-card__badge member-role-card__badge--captain">
+                                    Captain
+                                  </span>
+                                ) : (
+                                  <div className="member-role-card__actions" aria-label={`Change role for ${member.displayName}`}>
+                                    <button
+                                      className={`choice-button ${role === 'member' ? 'choice-button--active' : ''}`}
+                                      disabled={isUpdating}
+                                      onClick={() => handleAdminMemberRoleChange(teamSummary, member, 'member')}
+                                      type="button"
+                                    >
+                                      {isUpdating && role === 'coCaptain' ? 'Saving...' : 'Member'}
+                                    </button>
+                                    <button
+                                      className={`choice-button ${role === 'coCaptain' ? 'choice-button--active' : ''}`}
+                                      disabled={isUpdating}
+                                      onClick={() => handleAdminMemberRoleChange(teamSummary, member, 'coCaptain')}
+                                      type="button"
+                                    >
+                                      {isUpdating && role === 'member' ? 'Saving...' : 'Co-captain'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
                       <div className="admin-team-card__actions">
                         <label className="button button--ghost">
                           {updatingTeamLogoId === `${teamSummary.clubSlug}-${teamSummary.teamSlug}`

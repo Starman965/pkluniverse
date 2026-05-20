@@ -1713,6 +1713,19 @@ export async function listAdminTeamSummaries(user) {
             .filter((member) => member.role === 'captain' || member.role === 'coCaptain')
             .map((member) => playerMap.get(member.playerId)?.fullName || member.uid)
             .filter(Boolean);
+          const memberSummaries = members.map((member) => {
+            const player =
+              playerMap.get(member.playerId) ??
+              (member.uid ? playerMap.get(member.uid) : null);
+
+            return {
+              displayName: player?.fullName || player?.displayName || member.uid,
+              email: player?.email ?? '',
+              playerId: member.playerId ?? '',
+              role: member.role ?? 'member',
+              uid: member.uid,
+            };
+          });
 
           return {
             affiliationStatus: team.affiliationStatus ?? 'independent',
@@ -1722,6 +1735,7 @@ export async function listAdminTeamSummaries(user) {
             clubSlug: club.slug,
             logoUrl: team.logoUrl ?? '',
             memberCount: members.length,
+            members: memberSummaries,
             name: team.name ?? teamSlug,
             requestedClubSlug: team.requestedClubSlug ?? '',
             teamSlug: sourceTeamSlug,
@@ -2195,7 +2209,7 @@ export async function joinTeamByCode({ code, user }) {
     const storedMemberCount = Number(currentTeam.memberCount);
     const currentMemberCount = Number.isFinite(storedMemberCount) ? storedMemberCount : 1;
     const existingMembershipData = membershipSnapshot.exists() ? membershipSnapshot.data() : null;
-    const role = existingMembershipData?.role ?? 'member';
+    const role = existingMembershipData?.role ?? 'coCaptain';
 
     if (!membershipSnapshot.exists() && currentMemberCount >= TEAM_MEMBER_LIMIT) {
       throw new Error('This team already has two team members, so it is not accepting new joins.');
@@ -3875,10 +3889,72 @@ export async function updateTeamMemberRole({
     throw new Error('Captain reassignment is not supported here yet.');
   }
 
+  if ((membership.role ?? 'member') === role) {
+    return membership;
+  }
+
   await updateDoc(membershipRef, {
     role,
     updatedAt: serverTimestamp(),
   });
+
+  await syncMembershipSummary({
+    clubSlug: membership.clubSlug ?? clubSlug,
+    role,
+    teamName: membership.teamName ?? teamSlug,
+    teamSlug: membership.teamSlug ?? teamSlug,
+    uid: targetUid,
+  });
+}
+
+export async function updateTeamMemberRoleAsAdmin({
+  clubSlug,
+  role,
+  targetUid,
+  teamSlug,
+  user,
+}) {
+  requireDb();
+
+  if (!(await isPlatformAdmin(user?.uid, user?.email))) {
+    throw new Error('Only the app admin can change team member roles.');
+  }
+
+  if (!['member', 'coCaptain'].includes(role)) {
+    throw new Error('That role change is not supported.');
+  }
+
+  const membershipRef = doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'members', targetUid);
+  const membershipSnapshot = await getDoc(membershipRef);
+
+  if (!membershipSnapshot.exists()) {
+    throw new Error('That team member could not be found.');
+  }
+
+  const membership = membershipSnapshot.data();
+
+  if ((membership.role ?? '') === 'captain') {
+    throw new Error('Captain roles cannot be changed from the admin tool.');
+  }
+
+  if ((membership.role ?? 'member') === role) {
+    return membership;
+  }
+
+  await updateDoc(membershipRef, {
+    role,
+    updatedAt: serverTimestamp(),
+  });
+
+  await syncMembershipSummary({
+    clubSlug: membership.clubSlug ?? clubSlug,
+    role,
+    teamName: membership.teamName ?? teamSlug,
+    teamSlug: membership.teamSlug ?? teamSlug,
+    uid: targetUid,
+  });
+
+  return { ...membership, role };
 }
 
 function normalizeNullableNumber(value) {

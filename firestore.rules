@@ -997,7 +997,7 @@ service cloud.firestore {
                 !get(/databases/$(database)/documents/clubs/$(clubId)/teams/$(teamId)).data.keys().hasAny(['memberCount'])
                 || get(/databases/$(database)/documents/clubs/$(clubId)/teams/$(teamId)).data.memberCount < 2
               )
-              && request.resource.data.role in ['captain', 'member']
+              && request.resource.data.role in ['captain', 'coCaptain', 'member']
               && request.resource.data.status == 'active'
             );
           allow update: if safeSelfMembershipUpdate(uid)
