@@ -15,6 +15,7 @@ import {
   PLAYER_SKILL_LEVELS,
   TEAM_MEMBER_LIMIT,
   acceptChallenge,
+  MAX_PROPOSED_CHALLENGE_WINDOWS,
   addNewsComment,
   addClubManager,
   archiveClubEvent,
@@ -184,6 +185,15 @@ function createEmptyScheduleAdminForm() {
   };
 }
 
+function createEmptyProposedWindow() {
+  return {
+    hour: '',
+    isoDate: '',
+    minute: '00',
+    period: 'AM',
+  };
+}
+
 function createEmptyChallengeForm() {
   return {
     dateTbd: true,
@@ -194,6 +204,7 @@ function createEmptyChallengeForm() {
     period: 'AM',
     playersNeeded: 2,
     createdByPlayerId: '',
+    proposedWindows: Array.from({ length: MAX_PROPOSED_CHALLENGE_WINDOWS }, () => createEmptyProposedWindow()),
     targetTeamKey: '',
     visibility: 'targeted',
   };
@@ -6610,6 +6621,14 @@ export function NewsroomPage() {
 }
 
 function formatChallengeDate(challenge) {
+  if (challenge.schedulingMode === 'proposed_windows' && challenge.proposedWindows?.length) {
+    if (challenge.selectedWindowLabel) {
+      return challenge.selectedWindowLabel;
+    }
+
+    return `${challenge.proposedWindows.length} proposed time${challenge.proposedWindows.length === 1 ? '' : 's'}`;
+  }
+
   if (challenge.dateTbd || !challenge.isoDate) {
     return 'Date TBD';
   }
@@ -6618,9 +6637,32 @@ function formatChallengeDate(challenge) {
 }
 
 function formatChallengeTime(challenge) {
+  if (challenge.schedulingMode === 'proposed_windows' && challenge.proposedWindows?.length && !challenge.selectedWindowLabel) {
+    return 'Pick a time on accept';
+  }
+
   const normalizedTime = (challenge.timeLabel ?? '').replace(':undefined', ':00');
 
   return challenge.dateTbd ? 'Time TBD' : normalizedTime || 'Time TBD';
+}
+
+function formatProposedWindowTimeLabel(window) {
+  if (!window?.hour) {
+    return '';
+  }
+
+  return `${window.hour}:${window.minute || '00'} ${window.period || 'AM'}`;
+}
+
+function proposedWindowFromChallenge(window) {
+  const match = String(window?.timeLabel ?? '').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+
+  return {
+    hour: match?.[1] ?? '',
+    isoDate: window?.isoDate ?? '',
+    minute: match?.[2] ?? '00',
+    period: match?.[3]?.toUpperCase() ?? 'AM',
+  };
 }
 
 function buildChallengeTimeLabel(form) {
@@ -6633,16 +6675,23 @@ function buildChallengeTimeLabel(form) {
 
 function createChallengeFormFromChallenge(challenge) {
   const match = String(challenge.timeLabel ?? '').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  const storedWindows = Array.isArray(challenge.proposedWindows) ? challenge.proposedWindows : [];
+  const proposedWindows = Array.from({ length: MAX_PROPOSED_CHALLENGE_WINDOWS }, (_, index) => {
+    const storedWindow = storedWindows[index];
+
+    return storedWindow ? proposedWindowFromChallenge(storedWindow) : createEmptyProposedWindow();
+  });
 
   return {
-    dateTbd: challenge.dateTbd === true,
-    hour: challenge.dateTbd === true ? '' : match?.[1] ?? '',
-    isoDate: challenge.dateTbd === true ? '' : challenge.isoDate ?? '',
+    dateTbd: challenge.schedulingMode === 'proposed_windows' ? true : challenge.dateTbd === true,
+    hour: challenge.schedulingMode === 'fixed' ? match?.[1] ?? '' : '',
+    isoDate: challenge.schedulingMode === 'fixed' ? challenge.isoDate ?? '' : '',
     location: challenge.location && challenge.location !== 'Location TBD' ? challenge.location : '',
-    minute: challenge.dateTbd === true ? '00' : match?.[2] ?? '00',
-    period: challenge.dateTbd === true ? 'AM' : match?.[3]?.toUpperCase() ?? 'AM',
+    minute: challenge.schedulingMode === 'fixed' ? match?.[2] ?? '00' : '00',
+    period: challenge.schedulingMode === 'fixed' ? match?.[3]?.toUpperCase() ?? 'AM' : 'AM',
     playersNeeded: normalizeMatchPlayerCount(challenge.playersNeeded),
     createdByPlayerId: challenge.createdByPlayerId ?? '',
+    proposedWindows,
     targetTeamKey:
       challenge.visibility === 'targeted'
         ? `${challenge.targetTeamClubSlug}:${challenge.targetTeamSlug}`
@@ -6690,6 +6739,7 @@ export function ChallengesPage() {
   const [challengeFormOpen, setChallengeFormOpen] = useState(false);
   const [incomingChallengeIndex, setIncomingChallengeIndex] = useState(0);
   const [acceptPlayerSelections, setAcceptPlayerSelections] = useState({});
+  const [acceptWindowSelections, setAcceptWindowSelections] = useState({});
 
   const canManage = canManageRole(membership?.role);
   const challengeTargetTeamKey = location.state?.challengeTargetTeamKey ?? '';
@@ -6837,6 +6887,7 @@ export function ChallengesPage() {
         isoDate: form.isoDate,
         location: form.location,
         playersNeeded: form.playersNeeded,
+        proposedWindows: form.dateTbd ? form.proposedWindows : [],
         targetTeam: form.visibility === 'targeted' ? selectedTargetTeam : null,
         teamSlug,
         timeLabel: buildChallengeTimeLabel(form),
@@ -6931,6 +6982,7 @@ export function ChallengesPage() {
         challengeClubSlug: challenge.challengeClubSlug,
         challengeId: challenge.id,
         clubSlug,
+        selectedWindowId: acceptWindowSelections[challenge.id] ?? '',
         teamSlug,
         user,
       });
@@ -7021,9 +7073,47 @@ export function ChallengesPage() {
     );
   }
 
+  function renderAcceptWindowSelector(challenge) {
+    const proposedWindows = Array.isArray(challenge.proposedWindows) ? challenge.proposedWindows : [];
+
+    if (!proposedWindows.length) {
+      return null;
+    }
+
+    return (
+      <fieldset className="challenge-window-picker">
+        <legend>Choose a proposed time</legend>
+        {proposedWindows.map((window, index) => (
+          <label key={window.id || `window-${index}`} className="checkbox-option challenge-window-picker__option">
+            <input
+              checked={acceptWindowSelections[challenge.id] === window.id}
+              disabled={updatingChallengeId === challenge.id}
+              name={`challenge-window-${challenge.id}`}
+              onChange={() =>
+                setAcceptWindowSelections((current) => ({
+                  ...current,
+                  [challenge.id]: window.id,
+                }))
+              }
+              type="radio"
+            />
+            <span>
+              <strong>Option {index + 1}</strong>
+              <small>{window.displayLabel}</small>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+    );
+  }
+
   function getAcceptDisabledReason(challenge) {
     if (updatingChallengeId === challenge.id) {
       return '';
+    }
+
+    if (challenge.proposedWindows?.length && !acceptWindowSelections[challenge.id]) {
+      return 'Choose one of the proposed times before accepting this challenge.';
     }
 
     if (normalizeMatchPlayerCount(challenge.playersNeeded) === 1 && !acceptPlayerSelections[challenge.id]) {
@@ -7093,6 +7183,16 @@ export function ChallengesPage() {
               <span>Scheduled match created</span>
             ) : null}
           </div>
+          {challenge.schedulingMode === 'proposed_windows' && challenge.proposedWindows?.length ? (
+            <ul className="challenge-card__windows">
+              {challenge.proposedWindows.map((window, index) => (
+                <li key={window.id || `window-${index}`}>
+                  <strong>Option {index + 1}:</strong> {window.displayLabel}
+                  {challenge.selectedWindowId === window.id ? <span className="status-badge">Selected</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {normalizeMatchPlayerCount(challenge.playersNeeded) === 1 && challenge.createdByPlayerName ? (
             <div className="challenge-card__details">
               <span>{challenge.createdByTeamName || challenge.createdByTeamSlug}: {challenge.createdByPlayerName}</span>
@@ -7285,7 +7385,10 @@ export function ChallengesPage() {
                   <p className="eyebrow">You&apos;ve Been Challenged</p>
                   <h2>{featuredChallengerName} has challenged {featuredTeamName}</h2>
                   <p>
-                    Respond by {formatChallengeDate(featuredIncomingChallenge)} to secure your match.
+                    {featuredIncomingChallenge.schedulingMode === 'proposed_windows' &&
+                    featuredIncomingChallenge.proposedWindows?.length
+                      ? `Pick one of ${featuredIncomingChallenge.proposedWindows.length} proposed times to secure your match.`
+                      : `Respond by ${formatChallengeDate(featuredIncomingChallenge)} to secure your match.`}
                   </p>
                 </div>
                 <div className="competition-challenge-hero__matchup" aria-label={`${featuredChallengerName} versus ${featuredTeamName}`}>
@@ -7294,6 +7397,7 @@ export function ChallengesPage() {
                   <img alt={`${featuredTeamName} logo`} src={featuredTeamLogo} />
                 </div>
                 <div className="competition-challenge-hero__actions">
+                  {renderAcceptWindowSelector(featuredIncomingChallenge)}
                   {renderAcceptSinglesSelector(featuredIncomingChallenge)}
                   <button
                     className="button"
@@ -7424,7 +7528,10 @@ export function ChallengesPage() {
                   <div className="challenge-form__section">
                     <div className="challenge-form__section-copy">
                       <h3>When and where?</h3>
-                      <p>Add proposed match details. Use TBD if captains still need to coordinate.</p>
+                      <p>
+                        Propose up to three time windows, set one fixed time, or leave date/time TBD for later
+                        coordination.
+                      </p>
                     </div>
                     <label className="checkbox-field challenge-form__tbd">
                       <input
@@ -7437,81 +7544,184 @@ export function ChallengesPage() {
                             isoDate: event.target.checked ? '' : current.isoDate,
                             minute: event.target.checked ? '00' : current.minute,
                             period: event.target.checked ? 'AM' : current.period,
+                            proposedWindows: event.target.checked
+                              ? current.proposedWindows
+                              : Array.from({ length: MAX_PROPOSED_CHALLENGE_WINDOWS }, () =>
+                                  createEmptyProposedWindow(),
+                                ),
                           }))
                         }
                         type="checkbox"
                       />
                       <span>
                         <strong>Date and time TBD</strong>
-                        <small>Leave checked until captains confirm the match date.</small>
+                        <small>Uncheck to set one fixed match time instead of proposed windows.</small>
                       </span>
                     </label>
-                    <div className="challenge-form__date-time-row">
-                      <label className="field challenge-form__date">
-                        <span>Game date</span>
-                        <input
-                          onChange={(event) =>
-                            setForm((current) => ({
-                              ...current,
-                              dateTbd: event.target.value ? false : current.dateTbd,
-                              isoDate: event.target.value,
-                            }))
-                          }
-                          type="date"
-                          value={form.isoDate}
-                        />
-                      </label>
-                      <div className="field challenge-form__time">
-                        <span>Time</span>
-                        <div className="challenge-time-selectors">
-                          <select
+                    {form.dateTbd ? (
+                      <div className="challenge-form__windows">
+                        <div className="challenge-form__windows-copy">
+                          <h4>Proposed times (optional)</h4>
+                          <p>Add up to three options for the other captain to choose from when accepting.</p>
+                        </div>
+                        {form.proposedWindows.map((window, index) => (
+                          <div key={`proposed-window-${index}`} className="challenge-form__window-row">
+                            <p className="challenge-form__window-label">Option {index + 1}</p>
+                            <div className="challenge-form__date-time-row">
+                              <label className="field challenge-form__date">
+                                <span>Date</span>
+                                <input
+                                  onChange={(event) =>
+                                    setForm((current) => ({
+                                      ...current,
+                                      proposedWindows: current.proposedWindows.map((entry, entryIndex) =>
+                                        entryIndex === index
+                                          ? { ...entry, isoDate: event.target.value }
+                                          : entry,
+                                      ),
+                                    }))
+                                  }
+                                  type="date"
+                                  value={window.isoDate}
+                                />
+                              </label>
+                              <div className="field challenge-form__time">
+                                <span>Time</span>
+                                <div className="challenge-time-selectors">
+                                  <select
+                                    onChange={(event) =>
+                                      setForm((current) => ({
+                                        ...current,
+                                        proposedWindows: current.proposedWindows.map((entry, entryIndex) =>
+                                          entryIndex === index
+                                            ? { ...entry, hour: event.target.value }
+                                            : entry,
+                                        ),
+                                      }))
+                                    }
+                                    value={window.hour}
+                                  >
+                                    <option value="">Hour</option>
+                                    {Array.from({ length: 12 }, (_, hourIndex) => String(hourIndex + 1)).map(
+                                      (hour) => (
+                                        <option key={`${index}-${hour}`} value={hour}>
+                                          {hour}
+                                        </option>
+                                      ),
+                                    )}
+                                  </select>
+                                  <select
+                                    onChange={(event) =>
+                                      setForm((current) => ({
+                                        ...current,
+                                        proposedWindows: current.proposedWindows.map((entry, entryIndex) =>
+                                          entryIndex === index
+                                            ? { ...entry, minute: event.target.value }
+                                            : entry,
+                                        ),
+                                      }))
+                                    }
+                                    value={window.minute}
+                                  >
+                                    {['00', '15', '30', '45'].map((minute) => (
+                                      <option key={`${index}-${minute}`} value={minute}>
+                                        {minute}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <select
+                                    onChange={(event) =>
+                                      setForm((current) => ({
+                                        ...current,
+                                        proposedWindows: current.proposedWindows.map((entry, entryIndex) =>
+                                          entryIndex === index
+                                            ? { ...entry, period: event.target.value }
+                                            : entry,
+                                        ),
+                                      }))
+                                    }
+                                    value={window.period}
+                                  >
+                                    <option value="AM">AM</option>
+                                    <option value="PM">PM</option>
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {!form.dateTbd ? (
+                      <div className="challenge-form__date-time-row">
+                        <label className="field challenge-form__date">
+                          <span>Game date</span>
+                          <input
                             onChange={(event) =>
                               setForm((current) => ({
                                 ...current,
                                 dateTbd: event.target.value ? false : current.dateTbd,
-                                hour: event.target.value,
+                                isoDate: event.target.value,
                               }))
                             }
-                            value={form.hour}
-                          >
-                            <option value="">Hour</option>
-                            {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((hour) => (
-                              <option key={hour} value={hour}>
-                                {hour}
-                              </option>
-                            ))}
-                          </select>
-                          <select
-                            onChange={(event) =>
-                              setForm((current) => ({
-                                ...current,
-                                dateTbd: event.target.value ? false : current.dateTbd,
-                                minute: event.target.value,
-                              }))
-                            }
-                            value={form.minute}
-                          >
-                            {['00', '15', '30', '45'].map((minute) => (
-                              <option key={minute} value={minute}>
-                                {minute}
-                              </option>
-                            ))}
-                          </select>
-                          <select
-                            onChange={(event) =>
-                              setForm((current) => ({
-                                ...current,
-                                dateTbd: event.target.value ? false : current.dateTbd,
-                                period: event.target.value,
-                              }))
-                            }
-                            value={form.period}
-                          >
-                            <option value="AM">AM</option>
-                            <option value="PM">PM</option>
-                          </select>
+                            type="date"
+                            value={form.isoDate}
+                          />
+                        </label>
+                        <div className="field challenge-form__time">
+                          <span>Time</span>
+                          <div className="challenge-time-selectors">
+                            <select
+                              onChange={(event) =>
+                                setForm((current) => ({
+                                  ...current,
+                                  dateTbd: event.target.value ? false : current.dateTbd,
+                                  hour: event.target.value,
+                                }))
+                              }
+                              value={form.hour}
+                            >
+                              <option value="">Hour</option>
+                              {Array.from({ length: 12 }, (_, hourIndex) => String(hourIndex + 1)).map((hour) => (
+                                <option key={hour} value={hour}>
+                                  {hour}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              onChange={(event) =>
+                                setForm((current) => ({
+                                  ...current,
+                                  dateTbd: event.target.value ? false : current.dateTbd,
+                                  minute: event.target.value,
+                                }))
+                              }
+                              value={form.minute}
+                            >
+                              {['00', '15', '30', '45'].map((minute) => (
+                                <option key={minute} value={minute}>
+                                  {minute}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              onChange={(event) =>
+                                setForm((current) => ({
+                                  ...current,
+                                  dateTbd: event.target.value ? false : current.dateTbd,
+                                  period: event.target.value,
+                                }))
+                              }
+                              value={form.period}
+                            >
+                              <option value="AM">AM</option>
+                              <option value="PM">PM</option>
+                            </select>
+                          </div>
                         </div>
                       </div>
+                    ) : null}
+                    <div className="challenge-form__date-time-row">
                       <label className="field challenge-form__players-needed">
                         <span>Players needed</span>
                         <select
@@ -7670,6 +7880,7 @@ export function ChallengesPage() {
                     </div>
                     {canManage ? (
                       <div className="challenge-inbox-card__actions">
+                        {renderAcceptWindowSelector(selectedIncomingChallenge)}
                         {renderAcceptSinglesSelector(selectedIncomingChallenge)}
                         <button
                           className="button"
@@ -7771,6 +7982,7 @@ export function ChallengesPage() {
                         challenge,
                         canManage ? (
                           <>
+                            {renderAcceptWindowSelector(challenge)}
                             {renderAcceptSinglesSelector(challenge)}
                             <button
                               className="button"

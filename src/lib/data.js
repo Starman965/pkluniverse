@@ -2957,9 +2957,200 @@ export async function listApprovedClubTeams(clubSlug) {
   return teams;
 }
 
+export const MAX_PROPOSED_CHALLENGE_WINDOWS = 3;
+
+function buildTimeLabelFromParts({ hour = '', minute = '00', period = 'AM', timeLabel = '' } = {}) {
+  const trimmedTimeLabel = (timeLabel ?? '').trim();
+
+  if (trimmedTimeLabel) {
+    return normalizeTimeLabel(trimmedTimeLabel);
+  }
+
+  const trimmedHour = String(hour ?? '').trim();
+
+  if (!trimmedHour) {
+    return '';
+  }
+
+  return normalizeTimeLabel(`${trimmedHour}:${minute || '00'} ${period || 'AM'}`);
+}
+
+export function formatProposedWindowDisplayLabel({ isoDate = '', location = '', timeLabel = '' } = {}) {
+  const datePart = isoDate || 'Date TBD';
+  const timePart = timeLabel || 'Time TBD';
+  const locationPart = location && location !== 'Location TBD' ? location : '';
+
+  return [datePart, timePart, locationPart].filter(Boolean).join(' · ');
+}
+
+function normalizeStoredProposedWindows(proposedWindows = []) {
+  if (!Array.isArray(proposedWindows)) {
+    return [];
+  }
+
+  return proposedWindows
+    .map((window, index) => {
+      const isoDate = String(window?.isoDate ?? '').trim();
+      const timeLabel = normalizeTimeLabel(window?.timeLabel ?? '');
+      const location = String(window?.location ?? '').trim() || 'Location TBD';
+
+      if (!isoDate) {
+        return null;
+      }
+
+      return {
+        displayLabel:
+          window?.displayLabel?.trim() ||
+          formatProposedWindowDisplayLabel({ isoDate, location, timeLabel }),
+        id: String(window?.id ?? index + 1),
+        isoDate,
+        location,
+        timeLabel: timeLabel || 'Time TBD',
+      };
+    })
+    .filter(Boolean)
+    .slice(0, MAX_PROPOSED_CHALLENGE_WINDOWS);
+}
+
+export function buildProposedWindowsText(proposedWindows = []) {
+  return normalizeStoredProposedWindows(proposedWindows)
+    .map((window, index) => `Option ${index + 1}: ${window.displayLabel}`)
+    .join('\n');
+}
+
+function normalizeProposedWindowInput(window, index, defaultLocation = '') {
+  const isoDate = String(window?.isoDate ?? '').trim();
+  const timeLabel = buildTimeLabelFromParts(window);
+
+  if (!isoDate) {
+    return null;
+  }
+
+  const location = String(window?.location ?? defaultLocation).trim() || defaultLocation || 'Location TBD';
+
+  return {
+    displayLabel: formatProposedWindowDisplayLabel({ isoDate, location, timeLabel }),
+    id: String(index + 1),
+    isoDate,
+    location,
+    timeLabel: timeLabel || 'Time TBD',
+  };
+}
+
+export function normalizeChallengeScheduleInput({
+  dateTbd = false,
+  isoDate = '',
+  location = '',
+  proposedWindows = [],
+  timeLabel = '',
+}) {
+  const trimmedLocation = location.trim() || 'Location TBD';
+  const normalizedDateTbd = dateTbd === true;
+
+  if (!normalizedDateTbd) {
+    const trimmedIsoDate = isoDate.trim();
+    const trimmedTimeLabel = normalizeTimeLabel(timeLabel.trim());
+
+    return {
+      dateTbd: false,
+      isoDate: trimmedIsoDate,
+      location: trimmedLocation,
+      proposedWindows: [],
+      proposedWindowsText: '',
+      schedulingMode: 'fixed',
+      selectedWindowId: '',
+      selectedWindowLabel: '',
+      timeLabel: trimmedTimeLabel,
+    };
+  }
+
+  const windows = (Array.isArray(proposedWindows) ? proposedWindows : [])
+    .map((window, index) => normalizeProposedWindowInput(window, index, trimmedLocation))
+    .filter(Boolean)
+    .slice(0, MAX_PROPOSED_CHALLENGE_WINDOWS);
+
+  if (windows.length > 0) {
+    return {
+      dateTbd: true,
+      isoDate: '',
+      location: trimmedLocation,
+      proposedWindows: windows,
+      proposedWindowsText: buildProposedWindowsText(windows),
+      schedulingMode: 'proposed_windows',
+      selectedWindowId: '',
+      selectedWindowLabel: '',
+      timeLabel: '',
+    };
+  }
+
+  return {
+    dateTbd: true,
+    isoDate: '',
+    location: trimmedLocation,
+    proposedWindows: [],
+    proposedWindowsText: '',
+    schedulingMode: 'tbd',
+    selectedWindowId: '',
+    selectedWindowLabel: '',
+    timeLabel: '',
+  };
+}
+
+export function resolveChallengeSchedule(challenge, selectedWindowId = challenge?.selectedWindowId ?? '') {
+  if (!challenge) {
+    return challenge;
+  }
+
+  const proposedWindows = normalizeStoredProposedWindows(challenge.proposedWindows);
+
+  if (challenge.schedulingMode === 'proposed_windows' && proposedWindows.length) {
+    const selectedWindow = proposedWindows.find((window) => window.id === selectedWindowId);
+
+    if (selectedWindow) {
+      return {
+        ...challenge,
+        dateTbd: false,
+        isoDate: selectedWindow.isoDate,
+        location: selectedWindow.location || challenge.location || 'Location TBD',
+        proposedWindows,
+        timeLabel: selectedWindow.timeLabel || 'Time TBD',
+      };
+    }
+
+    return {
+      ...challenge,
+      proposedWindows,
+    };
+  }
+
+  return {
+    ...challenge,
+    proposedWindows,
+  };
+}
+
+function buildChallengeNotificationScheduleMetadata(challenge) {
+  const resolvedChallenge = resolveChallengeSchedule(challenge);
+  const proposedWindows = normalizeStoredProposedWindows(challenge.proposedWindows);
+
+  return {
+    dateLabel: resolvedChallenge.dateTbd ? 'Date TBD' : resolvedChallenge.isoDate || 'Date TBD',
+    dateTbd: resolvedChallenge.dateTbd === true,
+    isoDate: resolvedChallenge.dateTbd ? '' : resolvedChallenge.isoDate || '',
+    location: resolvedChallenge.location || 'Location TBD',
+    proposedWindows,
+    proposedWindowsText: buildProposedWindowsText(proposedWindows),
+    schedulingMode: challenge.schedulingMode ?? (resolvedChallenge.dateTbd ? 'tbd' : 'fixed'),
+    selectedWindowId: challenge.selectedWindowId ?? '',
+    selectedWindowLabel: challenge.selectedWindowLabel ?? '',
+    timeLabel: resolvedChallenge.dateTbd ? 'Time TBD' : resolvedChallenge.timeLabel || 'Time TBD',
+  };
+}
+
 function normalizeChallenge(entry, challengeClubSlug) {
   const data = entry.data();
   const normalizedPlayersNeeded = normalizeMatchPlayerCount(data.playersNeeded);
+  const proposedWindows = normalizeStoredProposedWindows(data.proposedWindows);
 
   return {
     acceptedAtMs: normalizeTimestampMs(data.acceptedAt),
@@ -2983,6 +3174,10 @@ function normalizeChallenge(entry, challengeClubSlug) {
     isoDate: data.isoDate ?? '',
     location: data.location ?? '',
     playersNeeded: normalizedPlayersNeeded,
+    proposedWindows,
+    schedulingMode: data.schedulingMode ?? (data.dateTbd === true ? 'tbd' : 'fixed'),
+    selectedWindowId: data.selectedWindowId ?? '',
+    selectedWindowLabel: data.selectedWindowLabel ?? '',
     status: data.status ?? 'open',
     targetTeamClubSlug: data.targetTeamClubSlug ?? '',
     targetTeamName: data.targetTeamName ?? '',
@@ -3072,10 +3267,13 @@ function buildChallengeGamePayload({
   rosterPlayers = [],
   user,
 }) {
-  const normalizedDateTbd = challenge.dateTbd === true;
-  const isoDate = normalizedDateTbd ? '' : challenge.isoDate || '';
-  const location = challenge.location || 'Location TBD';
-  const timeLabel = normalizedDateTbd ? 'Time TBD' : normalizeTimeLabel(challenge.timeLabel) || 'Time TBD';
+  const scheduledChallenge = resolveChallengeSchedule(challenge);
+  const normalizedDateTbd = scheduledChallenge.dateTbd === true;
+  const isoDate = normalizedDateTbd ? '' : scheduledChallenge.isoDate || '';
+  const location = scheduledChallenge.location || 'Location TBD';
+  const timeLabel = normalizedDateTbd
+    ? 'Time TBD'
+    : normalizeTimeLabel(scheduledChallenge.timeLabel) || 'Time TBD';
 
   return {
     attendance: {},
@@ -3117,6 +3315,7 @@ export async function createChallenge({
   isoDate = '',
   location = '',
   playersNeeded = 2,
+  proposedWindows = [],
   targetTeam = null,
   teamSlug,
   timeLabel = '',
@@ -3145,10 +3344,13 @@ export async function createChallenge({
   }
 
   const normalizedVisibility = visibility === 'targeted' ? 'targeted' : 'open';
-  const trimmedIsoDate = isoDate.trim();
-  const trimmedLocation = location.trim();
-  const trimmedTimeLabel = timeLabel.trim();
-  const normalizedDateTbd = dateTbd === true;
+  const schedule = normalizeChallengeScheduleInput({
+    dateTbd,
+    isoDate,
+    location,
+    proposedWindows,
+    timeLabel,
+  });
   const normalizedPlayersNeeded = normalizeMatchPlayerCount(playersNeeded);
   const sourcePlayers = await listActiveTeamRosterPlayers(clubSlug, teamSlug);
   const createdByPlayer =
@@ -3160,7 +3362,7 @@ export async function createChallenge({
     throw new Error('Your team needs two active members before sending a doubles challenge.');
   }
 
-  if (!normalizedDateTbd && !trimmedIsoDate) {
+  if (schedule.schedulingMode === 'fixed' && !schedule.isoDate) {
     throw new Error('Choose a date or mark the challenge date as TBD.');
   }
 
@@ -3182,7 +3384,9 @@ export async function createChallenge({
     });
   }
 
-  const challengeId = slugify(`${teamSlug}-${normalizedDateTbd ? 'date-tbd' : trimmedIsoDate}-${Date.now()}`);
+  const challengeId = slugify(
+    `${teamSlug}-${schedule.schedulingMode === 'fixed' ? schedule.isoDate : 'date-tbd'}-${Date.now()}`,
+  );
   const challengeRef = doc(db, 'clubs', challengeClubSlug, 'challenges', challengeId);
 
   await setDoc(challengeRef, {
@@ -3203,17 +3407,21 @@ export async function createChallenge({
     createdByUid: user.uid,
     createdByPlayerId: createdByPlayer?.id ?? '',
     createdByPlayerName: createdByPlayer ? getPlayerDisplayName(createdByPlayer) : '',
-    dateTbd: normalizedDateTbd,
+    dateTbd: schedule.dateTbd,
     declinedAt: null,
     homeGameId: '',
-    isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
-    location: trimmedLocation || 'Location TBD',
+    isoDate: schedule.isoDate,
+    location: schedule.location,
     playersNeeded: normalizedPlayersNeeded,
+    proposedWindows: schedule.proposedWindows,
+    schedulingMode: schedule.schedulingMode,
+    selectedWindowId: '',
+    selectedWindowLabel: '',
     status: 'open',
     targetTeamClubSlug: target?.clubSlug ?? '',
     targetTeamName: target?.name ?? '',
     targetTeamSlug: target?.teamSlug ?? '',
-    timeLabel: normalizedDateTbd ? '' : trimmedTimeLabel,
+    timeLabel: schedule.timeLabel,
     updatedAt: serverTimestamp(),
     visibility: normalizedVisibility,
   });
@@ -3236,8 +3444,10 @@ export async function createChallenge({
       matchType: 'club_challenge',
       opponentTeamId: target?.teamSlug ?? '',
       opponentTeamName: target?.name ?? (normalizedVisibility === 'open' ? 'Open challenge' : ''),
-      proposedDate: normalizedDateTbd ? 'Date TBD' : trimmedIsoDate,
-      timeLabel: normalizedDateTbd ? 'Time TBD' : trimmedTimeLabel || 'Time TBD',
+      proposedDate: schedule.dateTbd ? 'Date TBD' : schedule.isoDate,
+      proposedWindowsText: schedule.proposedWindowsText,
+      schedulingMode: schedule.schedulingMode,
+      timeLabel: schedule.dateTbd ? 'Time TBD' : schedule.timeLabel || 'Time TBD',
       visibility: normalizedVisibility,
     },
     targetId: challengeId,
@@ -3247,14 +3457,23 @@ export async function createChallenge({
 
   if (normalizedVisibility === 'targeted' && target) {
     const captainNotificationFields = await getTeamCaptainNotificationFields(target.clubSlug, target.teamSlug);
-    const challengeDateLabel = normalizedDateTbd ? 'Date TBD' : trimmedIsoDate;
-    const challengeTimeLabel = normalizedDateTbd ? 'Time TBD' : trimmedTimeLabel || 'Time TBD';
-    const challengeLocation = trimmedLocation || 'Location TBD';
+    const scheduleMetadata = buildChallengeNotificationScheduleMetadata({
+      dateTbd: schedule.dateTbd,
+      isoDate: schedule.isoDate,
+      location: schedule.location,
+      proposedWindows: schedule.proposedWindows,
+      schedulingMode: schedule.schedulingMode,
+      timeLabel: schedule.timeLabel,
+    });
+    const challengeMessage =
+      schedule.schedulingMode === 'proposed_windows'
+        ? `${sourceTeam.name ?? teamSlug} challenged ${target.name ?? target.teamSlug} with ${schedule.proposedWindows.length} proposed time${schedule.proposedWindows.length === 1 ? '' : 's'}.`
+        : `${sourceTeam.name ?? teamSlug} challenged ${target.name ?? target.teamSlug} to a match.`;
 
     await createAdminNotification({
       ...captainNotificationFields,
       clubSlug: target.clubSlug,
-      message: `${sourceTeam.name ?? teamSlug} challenged ${target.name ?? target.teamSlug} to a match.`,
+      message: challengeMessage,
       teamName: target.name ?? target.teamSlug,
       teamSlug: target.teamSlug,
       title: 'New team challenge',
@@ -3272,12 +3491,8 @@ export async function createChallenge({
         challengerTeamSlug: teamSlug,
         challengerPlayerId: createdByPlayer?.id ?? '',
         challengerPlayerName: createdByPlayer ? getPlayerDisplayName(createdByPlayer) : '',
-        dateLabel: challengeDateLabel,
-        dateTbd: normalizedDateTbd,
-        isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
-        location: challengeLocation,
         playersNeeded: normalizedPlayersNeeded,
-        timeLabel: challengeTimeLabel,
+        ...scheduleMetadata,
       },
     });
   }
@@ -3294,6 +3509,7 @@ export async function updateChallenge({
   isoDate = '',
   location = '',
   playersNeeded = 2,
+  proposedWindows = [],
   targetTeam = null,
   teamSlug,
   timeLabel = '',
@@ -3329,10 +3545,13 @@ export async function updateChallenge({
   }
 
   const normalizedVisibility = visibility === 'targeted' ? 'targeted' : 'open';
-  const trimmedIsoDate = isoDate.trim();
-  const trimmedLocation = location.trim();
-  const trimmedTimeLabel = timeLabel.trim();
-  const normalizedDateTbd = dateTbd === true;
+  const schedule = normalizeChallengeScheduleInput({
+    dateTbd,
+    isoDate,
+    location,
+    proposedWindows,
+    timeLabel,
+  });
   const normalizedPlayersNeeded = normalizeMatchPlayerCount(playersNeeded);
   const sourcePlayers = await listActiveTeamRosterPlayers(clubSlug, teamSlug);
   const createdByPlayer =
@@ -3344,7 +3563,7 @@ export async function updateChallenge({
     throw new Error('Your team needs two active members before sending a doubles challenge.');
   }
 
-  if (!normalizedDateTbd && !trimmedIsoDate) {
+  if (schedule.schedulingMode === 'fixed' && !schedule.isoDate) {
     throw new Error('Choose a date or mark the challenge date as TBD.');
   }
 
@@ -3369,14 +3588,18 @@ export async function updateChallenge({
   await updateDoc(challengeRef, {
     createdByPlayerId: createdByPlayer?.id ?? '',
     createdByPlayerName: createdByPlayer ? getPlayerDisplayName(createdByPlayer) : '',
-    dateTbd: normalizedDateTbd,
-    isoDate: normalizedDateTbd ? '' : trimmedIsoDate,
-    location: trimmedLocation || 'Location TBD',
+    dateTbd: schedule.dateTbd,
+    isoDate: schedule.isoDate,
+    location: schedule.location,
     playersNeeded: normalizedPlayersNeeded,
+    proposedWindows: schedule.proposedWindows,
+    schedulingMode: schedule.schedulingMode,
+    selectedWindowId: '',
+    selectedWindowLabel: '',
     targetTeamClubSlug: target?.clubSlug ?? '',
     targetTeamName: target?.name ?? '',
     targetTeamSlug: target?.teamSlug ?? '',
-    timeLabel: normalizedDateTbd ? '' : trimmedTimeLabel,
+    timeLabel: schedule.timeLabel,
     updatedAt: serverTimestamp(),
     visibility: normalizedVisibility,
   });
@@ -3529,7 +3752,15 @@ export async function deleteChallengeAsAdmin({ challengeClubSlug, challengeId, u
   await batch.commit();
 }
 
-export async function acceptChallenge({ acceptedByPlayerId = '', challengeId, challengeClubSlug, clubSlug, teamSlug, user }) {
+export async function acceptChallenge({
+  acceptedByPlayerId = '',
+  challengeId,
+  challengeClubSlug,
+  clubSlug,
+  selectedWindowId = '',
+  teamSlug,
+  user,
+}) {
   requireDb();
 
   await requireTeamManager({ clubSlug, teamSlug, user });
@@ -3600,6 +3831,20 @@ export async function acceptChallenge({ acceptedByPlayerId = '', challengeId, ch
     acceptedByRosterPlayers = acceptedByPlayers.slice(0, 2);
   }
 
+  const proposedWindows = normalizeStoredProposedWindows(challenge.proposedWindows);
+  const normalizedSelectedWindowId = String(selectedWindowId ?? '').trim();
+
+  if (proposedWindows.length > 0 && !normalizedSelectedWindowId) {
+    throw new Error('Choose one of the proposed times before accepting this challenge.');
+  }
+
+  const selectedWindow = proposedWindows.find((window) => window.id === normalizedSelectedWindowId) ?? null;
+
+  if (proposedWindows.length > 0 && !selectedWindow) {
+    throw new Error('That proposed time could not be found.');
+  }
+
+  const scheduledChallenge = resolveChallengeSchedule(challenge, normalizedSelectedWindowId);
   const homeGameId = `challenge-${challengeId}-${createdByTeam.teamSlug}`;
   const awayGameId = `challenge-${challengeId}-${acceptedByTeam.teamSlug}`;
   const batch = writeBatch(db);
@@ -3614,13 +3859,15 @@ export async function acceptChallenge({ acceptedByPlayerId = '', challengeId, ch
     acceptedByPlayerName: acceptedByPlayer ? getPlayerDisplayName(acceptedByPlayer) : '',
     awayGameId,
     homeGameId,
+    selectedWindowId: selectedWindow?.id ?? '',
+    selectedWindowLabel: selectedWindow?.displayLabel ?? '',
     status: 'accepted',
     updatedAt: serverTimestamp(),
   });
   batch.set(
     doc(db, 'clubs', createdByTeam.clubSlug, 'teams', createdByTeam.teamSlug, 'games', homeGameId),
     buildChallengeGamePayload({
-      challenge,
+      challenge: scheduledChallenge,
       challengeClubSlug,
       createdBy: createdByTeam,
       linkedGameId: awayGameId,
@@ -3632,7 +3879,7 @@ export async function acceptChallenge({ acceptedByPlayerId = '', challengeId, ch
   batch.set(
     doc(db, 'clubs', acceptedByTeam.clubSlug, 'teams', acceptedByTeam.teamSlug, 'games', awayGameId),
     buildChallengeGamePayload({
-      challenge,
+      challenge: scheduledChallenge,
       challengeClubSlug,
       createdBy: acceptedByTeam,
       linkedGameId: homeGameId,
@@ -3646,10 +3893,19 @@ export async function acceptChallenge({ acceptedByPlayerId = '', challengeId, ch
 
   const captainNotificationFields = await getTeamCaptainNotificationFields(createdByTeam.clubSlug, createdByTeam.teamSlug);
 
+  const acceptedScheduleMetadata = buildChallengeNotificationScheduleMetadata({
+    ...scheduledChallenge,
+    selectedWindowId: selectedWindow?.id ?? '',
+    selectedWindowLabel: selectedWindow?.displayLabel ?? '',
+  });
+  const acceptedMessage = selectedWindow
+    ? `${acceptedByTeam.name || acceptedByTeam.teamSlug} accepted your challenge and chose ${selectedWindow.displayLabel}.`
+    : `${acceptedByTeam.name || acceptedByTeam.teamSlug} accepted the challenge from ${createdByTeam.name || createdByTeam.teamSlug}.`;
+
   await createAdminNotification({
     ...captainNotificationFields,
     clubSlug: createdByTeam.clubSlug,
-    message: `${acceptedByTeam.name || acceptedByTeam.teamSlug} accepted the challenge from ${createdByTeam.name || createdByTeam.teamSlug}.`,
+    message: acceptedMessage,
     teamName: createdByTeam.name || createdByTeam.teamSlug,
     teamSlug: createdByTeam.teamSlug,
     title: 'Team challenge accepted',
@@ -3668,14 +3924,10 @@ export async function acceptChallenge({ acceptedByPlayerId = '', challengeId, ch
       challengerTeamClubSlug: createdByTeam.clubSlug,
       challengerTeamName: createdByTeam.name || createdByTeam.teamSlug,
       challengerTeamSlug: createdByTeam.teamSlug,
-      dateLabel: challenge.dateTbd ? 'Date TBD' : challenge.isoDate || 'Date TBD',
-      dateTbd: challenge.dateTbd,
       homeGameId,
       awayGameId,
-      isoDate: challenge.dateTbd ? '' : challenge.isoDate,
-      location: challenge.location || 'Location TBD',
       playersNeeded: normalizeMatchPlayerCount(challenge.playersNeeded),
-      timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
+      ...acceptedScheduleMetadata,
     },
   });
 
@@ -3695,8 +3947,11 @@ export async function acceptChallenge({ acceptedByPlayerId = '', challengeId, ch
       challengerTeamSlug: createdByTeam.teamSlug,
       homeGameId,
       matchType: 'club_challenge',
-      proposedDate: challenge.dateTbd ? 'Date TBD' : challenge.isoDate || 'Date TBD',
-      timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
+      proposedDate: scheduledChallenge.dateTbd ? 'Date TBD' : scheduledChallenge.isoDate || 'Date TBD',
+      proposedWindowsText: buildProposedWindowsText(challenge.proposedWindows),
+      schedulingMode: challenge.schedulingMode ?? 'fixed',
+      selectedWindowLabel: selectedWindow?.displayLabel ?? '',
+      timeLabel: scheduledChallenge.dateTbd ? 'Time TBD' : scheduledChallenge.timeLabel || 'Time TBD',
     },
     targetId: challengeId,
     teamId: acceptedByTeam.teamSlug,
@@ -3708,10 +3963,10 @@ export async function acceptChallenge({ acceptedByPlayerId = '', challengeId, ch
     clubId: challengeClubSlug,
     metadata: {
       challengeId,
-      dateLabel: challenge.dateTbd ? 'Date TBD' : challenge.isoDate || 'Date TBD',
+      dateLabel: scheduledChallenge.dateTbd ? 'Date TBD' : scheduledChallenge.isoDate || 'Date TBD',
       awayGameId,
       homeGameId,
-      location: challenge.location || 'Location TBD',
+      location: scheduledChallenge.location || 'Location TBD',
       matchType: 'club_challenge',
       opponentName: acceptedByTeam.name || acceptedByTeam.teamSlug,
       teamAClubSlug: createdByTeam.clubSlug,
@@ -3723,7 +3978,8 @@ export async function acceptChallenge({ acceptedByPlayerId = '', challengeId, ch
       teamBName: acceptedByTeam.name || acceptedByTeam.teamSlug,
       teamBSlug: acceptedByTeam.teamSlug,
       teamName: createdByTeam.name || createdByTeam.teamSlug,
-      timeLabel: challenge.dateTbd ? 'Time TBD' : challenge.timeLabel || 'Time TBD',
+      selectedWindowLabel: selectedWindow?.displayLabel ?? '',
+      timeLabel: scheduledChallenge.dateTbd ? 'Time TBD' : scheduledChallenge.timeLabel || 'Time TBD',
     },
     targetId: homeGameId,
     teamId: createdByTeam.teamSlug,
