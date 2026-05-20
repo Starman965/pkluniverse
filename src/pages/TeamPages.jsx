@@ -4,6 +4,7 @@ import 'react-easy-crop/react-easy-crop.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ACTIVITY_ICON_BY_TYPE } from '../lib/activityIcons';
+import { normalizeStoredHeadshotUrl, resolvePlayerAvatarUrl, resolveProfileAvatarUrl } from '../lib/profilePhotos';
 import {
   ACTIVITY_TYPES,
   MATCH_PLAYER_COUNT_OPTIONS,
@@ -36,6 +37,7 @@ import {
   getMembership,
   getTeam,
   getUserProfileData,
+  getUserProfileAvatarsByUid,
   isPlatformAdmin,
   listAdminActivity,
   listAdminPlayers,
@@ -471,13 +473,16 @@ function MatchCardScoreRow({
         />
         <div className="match-card-score-row__players">
           {sortedPlayers.length ? (
-            sortedPlayers.map((player, index) => (
+            sortedPlayers.map((player, index) => {
+              const playerAvatarUrl = resolvePlayerAvatarUrl({ player });
+
+              return (
               <span key={player.id || player.fullName} className="match-card-score-row__player-group">
                 {index > 0 ? <span className="match-card-score-row__player-separator">|</span> : null}
                 <span className="match-card-score-row__player">
                   <span className="match-card-score-row__player-avatar">
-                    {player.headshotUrl ? (
-                      <img alt="" decoding="async" src={player.headshotUrl} />
+                    {playerAvatarUrl ? (
+                      <img alt="" decoding="async" src={playerAvatarUrl} />
                     ) : (
                       buildPlayerInitials(player.fullName || 'Player')
                     )}
@@ -485,7 +490,8 @@ function MatchCardScoreRow({
                   <strong>{player.fullName || 'Player'}</strong>
                 </span>
               </span>
-            ))
+              );
+            })
           ) : (
             <strong>{name}</strong>
           )}
@@ -804,6 +810,14 @@ function NewsAuthorAvatar({ name, photoUrl = '' }) {
   );
 }
 
+function resolveNewsAuthorPhotoUrl(uid, storedPhotoUrl = '', authorAvatarsByUid = {}) {
+  if (uid && authorAvatarsByUid[uid]) {
+    return authorAvatarsByUid[uid];
+  }
+
+  return normalizeStoredHeadshotUrl(storedPhotoUrl) || storedPhotoUrl || '';
+}
+
 const NEWS_REACTION_OPTIONS = [
   { emoji: '👍', label: 'Like', type: 'like' },
   { emoji: '👎', label: 'Disagree', type: 'thumbsDown' },
@@ -815,6 +829,7 @@ const NEWS_REACTION_OPTIONS = [
 ];
 
 function NewsFeed({
+  authorAvatarsByUid = {},
   canModerate = false,
   commentDrafts = {},
   commentEditDraft = '',
@@ -863,7 +878,10 @@ function NewsFeed({
           <article key={post.id} className="news-feed-card">
             <div className="news-feed-card__header">
               <div className="news-feed-card__author">
-                <NewsAuthorAvatar name={post.authorName} photoUrl={post.authorPhotoUrl} />
+                <NewsAuthorAvatar
+                  name={post.authorName}
+                  photoUrl={resolveNewsAuthorPhotoUrl(post.authorUid, post.authorPhotoUrl, authorAvatarsByUid)}
+                />
                 <div>
                   <strong>{post.authorName || 'Teammate'}</strong>
                   <span>{formatNewsPostDate(post)}</span>
@@ -975,7 +993,14 @@ function NewsFeed({
 
                 return (
                   <div key={comment.id} className="news-feed-comment">
-                    <NewsAuthorAvatar name={comment.authorName} photoUrl={comment.authorPhotoUrl} />
+                    <NewsAuthorAvatar
+                      name={comment.authorName}
+                      photoUrl={resolveNewsAuthorPhotoUrl(
+                        comment.authorUid,
+                        comment.authorPhotoUrl,
+                        authorAvatarsByUid,
+                      )}
+                    />
                     <div className="news-feed-comment__body">
                       <strong>{comment.authorName || 'Teammate'}</strong>
                       {isEditingComment ? (
@@ -3753,6 +3778,7 @@ export function ProfilePage() {
         teamSlug,
       });
       setMessage('Profile saved.');
+      window.dispatchEvent(new Event('team-updated'));
       await loadProfileData();
     } catch (submitError) {
       setError(submitError.message ?? 'Unable to save your profile.');
@@ -3795,7 +3821,13 @@ export function ProfilePage() {
   }
 
   const profileName = userProfile?.fullName || player?.fullName || user?.displayName || user?.email || 'Your profile';
-  const profileHeadshotUrl = userProfile?.headshotUrl || userProfile?.photoURL || player?.headshotUrl || '';
+  const profileHeadshotUrl = resolveProfileAvatarUrl(
+    {
+      ...(userProfile ?? {}),
+      photoURL: userProfile?.photoURL ?? user?.photoURL ?? '',
+    },
+    user?.photoURL ?? '',
+  );
   const profileFirstName = userProfile?.firstName || player?.firstName || 'Not set';
   const profileLastName = userProfile?.lastName || player?.lastName || 'Not set';
 
@@ -3965,6 +3997,7 @@ export function RosterPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
   const [players, setPlayers] = useState([]);
+  const [playerAvatarsByUid, setPlayerAvatarsByUid] = useState({});
   const [members, setMembers] = useState([]);
   const [membership, setMembership] = useState(null);
   const [updatingPlayerId, setUpdatingPlayerId] = useState('');
@@ -3998,7 +4031,12 @@ export function RosterPage() {
       user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
     ]);
 
+    const avatarMap = await getUserProfileAvatarsByUid(
+      playerData.map((player) => player.uid).filter(Boolean),
+    );
+
     setPlayers(playerData);
+    setPlayerAvatarsByUid(avatarMap);
     setMembers(memberData);
     setMembership(membershipData);
   }
@@ -4108,12 +4146,15 @@ export function RosterPage() {
                             ? 'You cannot change your own role here'
                             : 'Role controls unavailable until this roster entry is linked'
                           : 'Only the captain can change team roles';
+                    const playerAvatarUrl =
+                      (player.uid && playerAvatarsByUid[player.uid]) ||
+                      resolvePlayerAvatarUrl({ player });
 
                     return (
                       <article key={player.id} className={`member-role-card roster-player-card member-role-card--${role}`}>
                         <div className="member-role-card__avatar roster-player-card__avatar">
-                          {player.headshotUrl ? (
-                            <img alt="" src={player.headshotUrl} />
+                          {playerAvatarUrl ? (
+                            <img alt="" src={playerAvatarUrl} />
                           ) : (
                             buildPlayerInitials(displayName)
                           )}
@@ -5091,6 +5132,7 @@ export function NewsPage() {
   const [communityRankings, setCommunityRankings] = useState([]);
   const [communityTeams, setCommunityTeams] = useState([]);
   const [newsPosts, setNewsPosts] = useState([]);
+  const [authorAvatarsByUid, setAuthorAvatarsByUid] = useState({});
   const [membership, setMembership] = useState(null);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [form, setForm] = useState({ body: '', imageFile: null, imagePreviewUrl: '' });
@@ -5175,6 +5217,13 @@ export function NewsPage() {
     );
     const playerAliasKeys = new Map();
     const playerCardsByKey = new Map();
+    const rosterPlayersForAvatars = teamEntries.flatMap(({ players }) =>
+      players.filter((player) => player.active !== false),
+    );
+    const playerAvatarsByUid = await getUserProfileAvatarsByUid(
+      rosterPlayersForAvatars.map((player) => player.uid).filter(Boolean),
+    );
+
     teamEntries.forEach(({ games, players, team }) => {
       players
         .filter((player) => player.active !== false)
@@ -5189,7 +5238,9 @@ export function NewsPage() {
 
           playerCardsByKey.set(playerKey, {
             gamesPlayed: Math.max(existingPlayer?.gamesPlayed ?? 0, gamesPlayed),
-            headshotUrl: existingPlayer?.headshotUrl || player.headshotUrl || player.photoURL || '',
+            headshotUrl:
+              (player.uid && playerAvatarsByUid[player.uid]) ||
+              resolvePlayerAvatarUrl({ player }),
             id: playerKey,
             name: existingPlayer?.name || getPlayerName(player),
             teamNames: [...new Set([...(existingPlayer?.teamNames ?? []), team.name].filter(Boolean))],
@@ -5249,6 +5300,45 @@ export function NewsPage() {
       unsubscribe?.();
     };
   }, [clubSlug, teamSlug, user?.email, user?.uid]);
+
+  useEffect(() => {
+    const authorUids = new Set();
+
+    newsPosts.forEach((post) => {
+      if (post.authorUid) {
+        authorUids.add(post.authorUid);
+      }
+
+      post.comments?.forEach((comment) => {
+        if (comment.authorUid) {
+          authorUids.add(comment.authorUid);
+        }
+      });
+    });
+
+    if (!authorUids.size) {
+      setAuthorAvatarsByUid({});
+      return;
+    }
+
+    let ignore = false;
+
+    getUserProfileAvatarsByUid([...authorUids])
+      .then((avatarMap) => {
+        if (!ignore) {
+          setAuthorAvatarsByUid(avatarMap);
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setAuthorAvatarsByUid({});
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [newsPosts]);
 
   useEffect(() => {
     let ignore = false;
@@ -5636,6 +5726,7 @@ export function NewsPage() {
         )}
 
         <NewsFeed
+          authorAvatarsByUid={authorAvatarsByUid}
           canModerate={isAppAdmin}
           commentDrafts={commentDrafts}
           commentEditDraft={commentEditDraft}
@@ -5804,6 +5895,7 @@ export function NewsroomPage() {
   const { clubSlug, teamSlug } = useParams();
   const { user } = useAuth();
   const [newsPosts, setNewsPosts] = useState([]);
+  const [authorAvatarsByUid, setAuthorAvatarsByUid] = useState({});
   const [membership, setMembership] = useState(null);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState('');
@@ -5877,6 +5969,45 @@ export function NewsroomPage() {
         setLoading(false);
       });
   }, [clubSlug, teamSlug, user?.uid]);
+
+  useEffect(() => {
+    const authorUids = new Set();
+
+    newsPosts.forEach((post) => {
+      if (post.authorUid) {
+        authorUids.add(post.authorUid);
+      }
+
+      post.comments?.forEach((comment) => {
+        if (comment.authorUid) {
+          authorUids.add(comment.authorUid);
+        }
+      });
+    });
+
+    if (!authorUids.size) {
+      setAuthorAvatarsByUid({});
+      return;
+    }
+
+    let ignore = false;
+
+    getUserProfileAvatarsByUid([...authorUids])
+      .then((avatarMap) => {
+        if (!ignore) {
+          setAuthorAvatarsByUid(avatarMap);
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setAuthorAvatarsByUid({});
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [newsPosts]);
 
   function resetForm() {
     setEditingPostId('');
@@ -6059,7 +6190,7 @@ export function NewsroomPage() {
             selectedPostId={editingPostId}
           />
         ) : (
-          <NewsFeed newsPosts={newsPosts} />
+          <NewsFeed authorAvatarsByUid={authorAvatarsByUid} newsPosts={newsPosts} />
         )}
       </section>
 

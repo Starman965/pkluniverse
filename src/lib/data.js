@@ -19,6 +19,7 @@ import {
 } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, isFirebaseConfigured, storage } from './firebase';
+import { normalizeStoredHeadshotUrl, resolveProfileAvatarUrl } from './profilePhotos';
 
 const INDEPENDENT_CLUB = {
   id: 'independent',
@@ -360,7 +361,9 @@ function buildGlobalProfileFields({ fallback = {}, user = null, userProfile = {}
     firstName,
     fullName,
     headshotPath: userProfile.headshotPath ?? fallback.headshotPath ?? '',
-    headshotUrl: userProfile.headshotUrl ?? fallback.headshotUrl ?? userProfile.photoURL ?? user?.photoURL ?? '',
+    headshotUrl:
+      normalizeStoredHeadshotUrl(userProfile.headshotUrl ?? '') ||
+      normalizeStoredHeadshotUrl(fallback.headshotUrl ?? ''),
     lastName,
     photoURL: user?.photoURL ?? userProfile.photoURL ?? '',
     skillLevel: normalizeSkillLevel(userProfile.skillLevel ?? fallback.skillLevel ?? ''),
@@ -375,7 +378,7 @@ function buildPlayerSnapshotFromGlobalProfile(profile) {
     firstName: profile.firstName ?? '',
     fullName: profile.fullName ?? buildFullName(profile.firstName, profile.lastName),
     headshotPath: profile.headshotPath ?? '',
-    headshotUrl: profile.headshotUrl || profile.photoURL || '',
+    headshotUrl: normalizeStoredHeadshotUrl(profile.headshotUrl ?? ''),
     lastName: profile.lastName ?? '',
     skillLevel: normalizeSkillLevel(profile.skillLevel ?? ''),
   };
@@ -519,6 +522,10 @@ export async function syncUserProfile(user) {
     },
     { merge: true },
   );
+
+  if (profile.headshotUrl) {
+    await syncUserProfileToTeamPlayerSnapshots(user.uid, profile);
+  }
 }
 
 export async function getUserProfileData(uid) {
@@ -534,6 +541,66 @@ export async function getUserProfileData(uid) {
   return snapshot.exists() ? buildGlobalProfileFields({ userProfile: snapshot.data() }) : null;
 }
 
+export async function getUserProfileAvatarsByUid(uids = []) {
+  requireDb();
+
+  const uniqueUids = [...new Set(uids.filter(Boolean))];
+  const avatarMap = {};
+
+  await Promise.all(
+    uniqueUids.map(async (uid) => {
+      try {
+        const profile = await getUserProfileData(uid);
+        avatarMap[uid] = resolveProfileAvatarUrl(profile ?? {});
+      } catch {
+        avatarMap[uid] = '';
+      }
+    }),
+  );
+
+  return avatarMap;
+}
+
+async function listLinkedPlayerIdsForMembership(uid, clubSlug, teamSlug) {
+  const playerIds = new Set([uid]);
+
+  try {
+    const memberSnapshot = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'members', uid));
+
+    if (memberSnapshot.exists()) {
+      const linkedPlayerId = memberSnapshot.data()?.playerId?.trim?.() ?? '';
+
+      if (linkedPlayerId) {
+        playerIds.add(linkedPlayerId);
+      }
+    }
+  } catch (error) {
+    if (error?.code !== 'permission-denied' && error?.code !== 'not-found') {
+      throw error;
+    }
+  }
+
+  try {
+    const playerLinkSnapshot = await getDoc(
+      doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'playerLinks', uid),
+    );
+
+    if (playerLinkSnapshot.exists()) {
+      const linkedPlayerId = playerLinkSnapshot.data()?.playerId?.trim?.() ?? '';
+
+      if (linkedPlayerId) {
+        playerIds.add(linkedPlayerId);
+      }
+    }
+  } catch (error) {
+    if (error?.code !== 'permission-denied' && error?.code !== 'not-found') {
+      throw error;
+    }
+  }
+
+  return [...playerIds];
+}
+
 async function syncUserProfileToTeamPlayerSnapshots(uid, profile) {
   const memberships = await listMemberships(uid);
   const snapshot = buildPlayerSnapshotFromGlobalProfile(profile);
@@ -544,24 +611,34 @@ async function syncUserProfileToTeamPlayerSnapshots(uid, profile) {
         return;
       }
 
-      const playerRef = doc(db, 'clubs', membership.clubSlug, 'teams', membership.teamSlug, 'players', uid);
+      const playerIds = await listLinkedPlayerIdsForMembership(
+        uid,
+        membership.clubSlug,
+        membership.teamSlug,
+      );
 
-      try {
-        const playerSnapshot = await getDoc(playerRef);
+      await Promise.all(
+        playerIds.map(async (playerId) => {
+          const playerRef = doc(db, 'clubs', membership.clubSlug, 'teams', membership.teamSlug, 'players', playerId);
 
-        if (!playerSnapshot.exists()) {
-          return;
-        }
+          try {
+            const playerSnapshot = await getDoc(playerRef);
 
-        await updateDoc(playerRef, {
-          ...snapshot,
-          updatedAt: serverTimestamp(),
-        });
-      } catch (error) {
-        if (error?.code !== 'permission-denied' && error?.code !== 'not-found') {
-          throw error;
-        }
-      }
+            if (!playerSnapshot.exists()) {
+              return;
+            }
+
+            await updateDoc(playerRef, {
+              ...snapshot,
+              updatedAt: serverTimestamp(),
+            });
+          } catch (error) {
+            if (error?.code !== 'permission-denied' && error?.code !== 'not-found') {
+              throw error;
+            }
+          }
+        }),
+      );
     }),
   );
 }
@@ -619,8 +696,9 @@ export async function saveUserPlayerProfile({ headshotFile = null, skillLevel = 
     email: authProfile.email,
     firstName: authProfile.firstName,
     fullName: authProfile.fullName,
-    headshotPath: currentProfile.headshotPath ?? '',
-    headshotUrl: currentProfile.headshotUrl ?? authProfile.photoURL ?? '',
+    headshotPath: uploadedHeadshot?.headshotPath ?? currentProfile.headshotPath ?? '',
+    headshotUrl:
+      uploadedHeadshot?.headshotUrl ?? normalizeStoredHeadshotUrl(currentProfile.headshotUrl ?? ''),
     lastName: authProfile.lastName,
     photoURL: authProfile.photoURL,
     skillLevel: normalizedSkillLevel,
@@ -4985,12 +5063,13 @@ function createNewsPostId(title = 'post') {
   return `${Date.now()}-${slug}`;
 }
 
-function buildAuthorFromUser(user, fallbackRole = '') {
+async function buildAuthorFromUser(user, fallbackRole = '') {
   const displayName = user?.displayName || user?.email || 'Teammate';
+  const profile = user?.uid ? await getUserProfileData(user.uid).catch(() => null) : null;
 
   return {
     authorName: displayName,
-    authorPhotoUrl: user?.photoURL ?? '',
+    authorPhotoUrl: resolveProfileAvatarUrl(profile ?? {}, user?.photoURL ?? ''),
     authorRole: fallbackRole,
     authorUid: user?.uid ?? '',
   };
@@ -5197,15 +5276,17 @@ export async function saveNewsPost({
     });
   }
 
+  const authorFields = post
+    ? {
+        authorName: post.authorName ?? user.displayName ?? user.email ?? 'Teammate',
+        authorPhotoUrl: post.authorPhotoUrl ?? resolveProfileAvatarUrl({}, user.photoURL ?? ''),
+        authorRole: post.authorRole ?? membership?.role ?? '',
+        authorUid: post.authorUid ?? user.uid,
+      }
+    : await buildAuthorFromUser(user, membership?.role ?? '');
+
   const payload = {
-    ...(post
-      ? {
-          authorName: post.authorName ?? user.displayName ?? user.email ?? 'Teammate',
-          authorPhotoUrl: post.authorPhotoUrl ?? user.photoURL ?? '',
-          authorRole: post.authorRole ?? membership?.role ?? '',
-          authorUid: post.authorUid ?? user.uid,
-        }
-      : buildAuthorFromUser(user, membership?.role ?? '')),
+    ...authorFields,
     body: normalizedBody,
     clubSlug,
     createdBy: post?.createdBy ?? user.uid,
@@ -5272,7 +5353,7 @@ export async function addNewsComment({ body, clubSlug, postId, teamSlug, user })
   const commentRef = doc(collection(db, 'clubs', clubSlug, 'newsPosts', postId, 'comments'));
 
   await setDoc(commentRef, {
-    ...buildAuthorFromUser(user, membership?.role ?? ''),
+    ...(await buildAuthorFromUser(user, membership?.role ?? '')),
     body: normalizedBody,
     createdAt: serverTimestamp(),
     createdBy: user.uid,

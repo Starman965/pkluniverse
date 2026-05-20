@@ -5,6 +5,7 @@ import {
   buildStandingsSummary,
   getMembership,
   getTeam,
+  getUserProfileData,
   isPlatformAdmin,
   listGames,
   listMemberships,
@@ -13,6 +14,7 @@ import {
   setLastActiveTeam,
   subscribeChallengeHub,
 } from '../lib/data';
+import { resolvePlayerAvatarUrl, resolveProfileAvatarUrl } from '../lib/profilePhotos';
 import defaultTeamLogo from '../../default_team_logo.webp';
 import pklUniverseWideLogo from '../../pkl_universe_wide_logo.webp';
 import PlayerMenuIcon from './PlayerMenuIcon';
@@ -121,6 +123,7 @@ export default function AppShell() {
   const [activeTeam, setActiveTeam] = useState(null);
   const [activeMembership, setActiveMembership] = useState(null);
   const [currentPlayer, setCurrentPlayer] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
   const [isAppAdmin, setIsAppAdmin] = useState(false);
   const [teamNavSummary, setTeamNavSummary] = useState({
     activeMemberCount: 0,
@@ -211,6 +214,19 @@ export default function AppShell() {
   }, []);
 
   useEffect(() => {
+    if (!user?.uid) {
+      setUserProfile(null);
+      return;
+    }
+
+    getUserProfileData(user.uid)
+      .then(setUserProfile)
+      .catch(() => {
+        setUserProfile(null);
+      });
+  }, [teamRefreshKey, user?.photoURL, user?.uid]);
+
+  useEffect(() => {
     if (!clubSlug || !teamSlug) {
       setActiveTeam(null);
       setActiveMembership(null);
@@ -284,7 +300,18 @@ export default function AppShell() {
         ? 'Captain'
         : 'Player';
   const userDisplayName = currentPlayer?.fullName || user?.displayName || user?.email || 'Player';
-  const userAvatarUrl = currentPlayer?.headshotUrl || user?.photoURL || '';
+  const userAvatarUrl =
+    resolveProfileAvatarUrl(
+      {
+        ...(userProfile ?? {}),
+        photoURL: userProfile?.photoURL ?? user?.photoURL ?? '',
+      },
+      user?.photoURL ?? '',
+    ) ||
+    resolvePlayerAvatarUrl({
+      authPhotoUrl: user?.photoURL ?? '',
+      player: currentPlayer ?? {},
+    });
   const userInitial = userDisplayName.trim().charAt(0).toUpperCase() || 'P';
 
   useEffect(() => {
