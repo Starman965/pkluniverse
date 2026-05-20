@@ -3,8 +3,10 @@ import Cropper from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import FirestoreDebugPanel from '../components/FirestoreDebugPanel';
+import MatchScheduleWhen from '../components/MatchScheduleWhen';
 import { useAuth } from '../context/AuthContext';
 import { createFirestoreStepError, extractFirestoreDebugInfo } from '../lib/firestoreDebug';
+import { formatIsoDateForDisplay } from '../lib/matchScheduleDisplay';
 import { markScheduleViewed } from '../lib/scheduleAttention';
 import { ACTIVITY_ICON_BY_TYPE } from '../lib/activityIcons';
 import { normalizeStoredHeadshotUrl, resolvePlayerAvatarUrl, resolveProfileAvatarUrl } from '../lib/profilePhotos';
@@ -15,6 +17,8 @@ import {
   PLAYER_SKILL_LEVELS,
   TEAM_MEMBER_LIMIT,
   acceptChallenge,
+  CHALLENGE_ACCEPT_SCHEDULE_TBD_ID,
+  CHALLENGE_ACCEPT_SCHEDULE_TBD_LABEL,
   MAX_PROPOSED_CHALLENGE_WINDOWS,
   addNewsComment,
   addClubManager,
@@ -6621,11 +6625,11 @@ export function NewsroomPage() {
 }
 
 function formatChallengeDate(challenge) {
-  if (challenge.schedulingMode === 'proposed_windows' && challenge.proposedWindows?.length) {
-    if (challenge.selectedWindowLabel) {
-      return challenge.selectedWindowLabel;
-    }
+  if (challenge.selectedWindowLabel) {
+    return challenge.selectedWindowLabel;
+  }
 
+  if (challenge.schedulingMode === 'proposed_windows' && challenge.proposedWindows?.length) {
     return `${challenge.proposedWindows.length} proposed time${challenge.proposedWindows.length === 1 ? '' : 's'}`;
   }
 
@@ -6633,7 +6637,7 @@ function formatChallengeDate(challenge) {
     return 'Date TBD';
   }
 
-  return challenge.isoDate;
+  return formatIsoDateForDisplay(challenge.isoDate);
 }
 
 function formatChallengeTime(challenge) {
@@ -6740,6 +6744,7 @@ export function ChallengesPage() {
   const [incomingChallengeIndex, setIncomingChallengeIndex] = useState(0);
   const [acceptPlayerSelections, setAcceptPlayerSelections] = useState({});
   const [acceptWindowSelections, setAcceptWindowSelections] = useState({});
+  const [cancelConfirmChallenge, setCancelConfirmChallenge] = useState(null);
 
   const canManage = canManageRole(membership?.role);
   const challengeTargetTeamKey = location.state?.challengeTargetTeamKey ?? '';
@@ -7018,7 +7023,18 @@ export function ChallengesPage() {
     }
   }
 
-  async function handleCancelChallenge(challenge) {
+  function openCancelChallengeConfirm(challenge) {
+    setError('');
+    setCancelConfirmChallenge(challenge);
+  }
+
+  async function confirmCancelChallenge() {
+    const challenge = cancelConfirmChallenge;
+
+    if (!challenge) {
+      return;
+    }
+
     setUpdatingChallengeId(challenge.id);
     setError('');
     setMessage('');
@@ -7031,6 +7047,7 @@ export function ChallengesPage() {
         teamSlug,
         user,
       });
+      setCancelConfirmChallenge(null);
       setMessage('Challenge cancelled.');
       await loadChallengeData();
     } catch (cancelError) {
@@ -7080,30 +7097,67 @@ export function ChallengesPage() {
       return null;
     }
 
+    const selectedWindowId = acceptWindowSelections[challenge.id] ?? '';
+
+    const isTbdSelected = selectedWindowId === CHALLENGE_ACCEPT_SCHEDULE_TBD_ID;
+
     return (
-      <fieldset className="challenge-window-picker">
-        <legend>Choose a proposed time</legend>
-        {proposedWindows.map((window, index) => (
-          <label key={window.id || `window-${index}`} className="checkbox-option challenge-window-picker__option">
+      <div className="challenge-time-slots">
+        <p className="challenge-time-slots__title">Pick a time or keep scheduling open</p>
+        <div className="challenge-time-slots__grid" role="radiogroup" aria-label="Pick a time or keep scheduling open">
+          {proposedWindows.map((window, index) => {
+            const isSelected = selectedWindowId === window.id;
+
+            return (
+              <label
+                key={window.id || `window-${index}`}
+                className={`challenge-time-slot ${isSelected ? 'challenge-time-slot--selected' : ''}`}
+              >
+                <input
+                  checked={isSelected}
+                  className="challenge-time-slot__input"
+                  disabled={updatingChallengeId === challenge.id}
+                  name={`challenge-window-${challenge.id}`}
+                  onChange={() =>
+                    setAcceptWindowSelections((current) => ({
+                      ...current,
+                      [challenge.id]: window.id,
+                    }))
+                  }
+                  type="radio"
+                />
+                <span className="challenge-time-slot__badge">Option {index + 1}</span>
+                <MatchScheduleWhen
+                  className="challenge-time-slot__schedule"
+                  isoDate={window.isoDate}
+                  location={window.location}
+                  timeLabel={window.timeLabel}
+                />
+              </label>
+            );
+          })}
+          <label
+            className={`challenge-time-slot challenge-time-slot--tbd ${isTbdSelected ? 'challenge-time-slot--selected' : ''}`}
+          >
             <input
-              checked={acceptWindowSelections[challenge.id] === window.id}
+              checked={isTbdSelected}
+              className="challenge-time-slot__input"
               disabled={updatingChallengeId === challenge.id}
               name={`challenge-window-${challenge.id}`}
               onChange={() =>
                 setAcceptWindowSelections((current) => ({
                   ...current,
-                  [challenge.id]: window.id,
+                  [challenge.id]: CHALLENGE_ACCEPT_SCHEDULE_TBD_ID,
                 }))
               }
               type="radio"
             />
-            <span>
-              <strong>Option {index + 1}</strong>
-              <small>{window.displayLabel}</small>
-            </span>
+            <span className="challenge-time-slot__badge">Option {proposedWindows.length + 1}</span>
+            <span className="challenge-time-slot__label">{CHALLENGE_ACCEPT_SCHEDULE_TBD_LABEL}</span>
+            <span className="challenge-time-slot__hint">Accept now and coordinate a time later.</span>
           </label>
-        ))}
-      </fieldset>
+        </div>
+      </div>
     );
   }
 
@@ -7113,7 +7167,7 @@ export function ChallengesPage() {
     }
 
     if (challenge.proposedWindows?.length && !acceptWindowSelections[challenge.id]) {
-      return 'Choose one of the proposed times before accepting this challenge.';
+      return 'Choose a time option (or Option 4 to keep date and time TBD) before accepting.';
     }
 
     if (normalizeMatchPlayerCount(challenge.playersNeeded) === 1 && !acceptPlayerSelections[challenge.id]) {
@@ -7156,6 +7210,11 @@ export function ChallengesPage() {
       challenge.createdByTeamClubSlug === clubSlug && challenge.createdByTeamSlug === teamSlug
         ? challenge.homeGameId
         : challenge.awayGameId;
+    const proposedWindows = Array.isArray(challenge.proposedWindows) ? challenge.proposedWindows : [];
+    const hasProposedWindows =
+      challenge.schedulingMode === 'proposed_windows' && proposedWindows.length > 0;
+    const showFixedSchedule =
+      !hasProposedWindows && (challenge.isoDate || (!challenge.dateTbd && challenge.timeLabel));
 
     return (
       <article key={challenge.id} className="challenge-card">
@@ -7175,23 +7234,57 @@ export function ChallengesPage() {
           </div>
 
           <div className="challenge-card__details">
-            <span>{formatChallengeDate(challenge)}</span>
-            <span>{formatChallengeTime(challenge)}</span>
-            <span>{normalizeMatchPlayerCount(challenge.playersNeeded)} Players</span>
-            <span>{challenge.location || 'Location TBD'}</span>
+            {showFixedSchedule ? (
+              <MatchScheduleWhen
+                className="challenge-card__schedule-summary"
+                isoDate={challenge.isoDate}
+                location={challenge.location}
+                timeLabel={challenge.timeLabel}
+              />
+            ) : null}
+            {!showFixedSchedule && !hasProposedWindows && challenge.dateTbd ? (
+              <span className="challenge-card__meta">Date and time TBD</span>
+            ) : null}
+            {challenge.status === 'accepted' && challenge.selectedWindowLabel ? (
+              <span className="challenge-card__meta challenge-card__meta--accent">
+                {challenge.selectedWindowLabel}
+              </span>
+            ) : null}
+            <span className="challenge-card__meta">
+              {normalizeMatchPlayerCount(challenge.playersNeeded)} players
+            </span>
+            <span className="challenge-card__meta">{challenge.location || 'Court TBD'}</span>
             {challenge.status === 'accepted' && scheduleGameId ? (
-              <span>Scheduled match created</span>
+              <span className="challenge-card__meta challenge-card__meta--accent">Match scheduled</span>
             ) : null}
           </div>
-          {challenge.schedulingMode === 'proposed_windows' && challenge.proposedWindows?.length ? (
-            <ul className="challenge-card__windows">
-              {challenge.proposedWindows.map((window, index) => (
-                <li key={window.id || `window-${index}`}>
-                  <strong>Option {index + 1}:</strong> {window.displayLabel}
-                  {challenge.selectedWindowId === window.id ? <span className="status-badge">Selected</span> : null}
-                </li>
-              ))}
-            </ul>
+          {hasProposedWindows ? (
+            <div className="challenge-card__windows-panel">
+              <p className="challenge-card__windows-title">
+                {challenge.status === 'accepted' ? 'Accepted time' : 'Proposed times'}
+              </p>
+              <div className="challenge-card__windows-grid">
+                {proposedWindows.map((window, index) => {
+                  const isSelected = challenge.selectedWindowId === window.id;
+
+                  return (
+                    <div
+                      key={window.id || `window-${index}`}
+                      className={`challenge-card__window-slot${isSelected ? ' challenge-card__window-slot--selected' : ''}`}
+                    >
+                      <span className="challenge-card__windows-option">Option {index + 1}</span>
+                      <MatchScheduleWhen
+                        className="challenge-card__window-schedule"
+                        isoDate={window.isoDate}
+                        location={window.location}
+                        timeLabel={window.timeLabel}
+                      />
+                      {isSelected ? <span className="status-badge">Selected</span> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           ) : null}
           {normalizeMatchPlayerCount(challenge.playersNeeded) === 1 && challenge.createdByPlayerName ? (
             <div className="challenge-card__details">
@@ -7202,7 +7295,7 @@ export function ChallengesPage() {
             </div>
           ) : null}
           {actions || (challenge.status === 'accepted' && scheduleGameId) ? (
-            <div className="challenge-card__actions">
+            <div className={`challenge-card__actions${actions ? ' challenge-card__actions--manage' : ''}`}>
               {challenge.status === 'accepted' && scheduleGameId ? (
                 <Link className="button button--ghost" to="../schedule">
                   View Matches
@@ -7230,20 +7323,7 @@ export function ChallengesPage() {
   }, [incomingChallengeIndex, incomingChallenges.length]);
 
   const selectedIncomingChallenge = incomingChallenges[incomingChallengeIndex] ?? null;
-  const selectedIncomingSourceTeam = selectedIncomingChallenge
-    ? eligibleTeams.find(
-        (eligibleTeam) =>
-          eligibleTeam.clubSlug === selectedIncomingChallenge.createdByTeamClubSlug &&
-          eligibleTeam.teamSlug === selectedIncomingChallenge.createdByTeamSlug,
-      )
-    : null;
-  const selectedIncomingSourceName =
-    selectedIncomingChallenge?.createdByTeamName ||
-    selectedIncomingSourceTeam?.name ||
-    selectedIncomingChallenge?.createdByTeamSlug ||
-    'Team';
-  const selectedIncomingSourceLogo = selectedIncomingSourceTeam?.logoUrl || defaultTeamLogo;
-  const featuredIncomingChallenge = incomingChallenges[0] ?? null;
+  const featuredIncomingChallenge = selectedIncomingChallenge;
   const featuredChallengerTeam = featuredIncomingChallenge
     ? eligibleTeams.find(
         (eligibleTeam) =>
@@ -7292,6 +7372,10 @@ export function ChallengesPage() {
     () => eligibleTeams.filter((eligibleTeam) => eligibleTeam.openToChallenges).length,
     [eligibleTeams],
   );
+  const teamsLookingToBeChallengedCount = Math.max(
+    0,
+    teamsOpenToChallengesCount - (team?.openToChallenges === true ? 1 : 0),
+  );
   const hasOtherTeamsOpenToChallenges = otherTeamsOpenToChallengesCount > 0;
   const directoryOnlySelfOpen = teamsOpenToChallengesCount > 0 && !hasOtherTeamsOpenToChallenges;
   const visiblePostedChallenges =
@@ -7320,18 +7404,20 @@ export function ChallengesPage() {
         }
       : hasOtherTeamsOpenToChallenges
         ? {
-            actionLabel: "See who's ready",
-            body: "Your team might be in this list too. Scroll down, tap another crew's logo, and invite them to play.",
+            actionLabel: '',
+            body: "Click on another team's logo, and invite them to challenge.",
             eyebrow: 'Pick your matchup',
-            onAction: () => handleScrollToSection('competition-hub-directory'),
-            title: `${teamsOpenToChallengesCount} team${teamsOpenToChallengesCount === 1 ? '' : 's'} ready to hear from you`,
+            onAction: () => {},
+            title: `${teamsLookingToBeChallengedCount} team${
+              teamsLookingToBeChallengedCount === 1 ? '' : 's'
+            } looking to be challenged`,
           }
         : directoryOnlySelfOpen
           ? {
-              actionLabel: "See who's ready",
+              actionLabel: '',
               body: "You're on the board—nice. When more teams join in, they'll show up below. Until then, Challenge a Team works for anyone in the club.",
               eyebrow: 'Your crew is on the list',
-              onAction: () => handleScrollToSection('competition-hub-directory'),
+              onAction: () => {},
               title: "You're inviting challenges",
             }
           : {
@@ -7377,7 +7463,13 @@ export function ChallengesPage() {
         ) : (
           <div className="challenge-page">
             {featuredIncomingChallenge ? (
-              <section className="competition-challenge-hero">
+              <section
+                className={`competition-challenge-hero${
+                  featuredIncomingChallenge.proposedWindows?.length
+                    ? ' competition-challenge-hero--with-slots'
+                    : ''
+                }`}
+              >
                 <div className="competition-challenge-hero__icon">
                   <img alt="" aria-hidden="true" src={ACTIVITY_ICON_BY_TYPE.challenge_created} />
                 </div>
@@ -7387,7 +7479,7 @@ export function ChallengesPage() {
                   <p>
                     {featuredIncomingChallenge.schedulingMode === 'proposed_windows' &&
                     featuredIncomingChallenge.proposedWindows?.length
-                      ? `Pick one of ${featuredIncomingChallenge.proposedWindows.length} proposed times to secure your match.`
+                      ? `Pick one of ${featuredIncomingChallenge.proposedWindows.length} proposed times, or accept with date and time still TBD.`
                       : `Respond by ${formatChallengeDate(featuredIncomingChallenge)} to secure your match.`}
                   </p>
                 </div>
@@ -7398,29 +7490,35 @@ export function ChallengesPage() {
                 </div>
                 <div className="competition-challenge-hero__actions">
                   {renderAcceptWindowSelector(featuredIncomingChallenge)}
-                  {renderAcceptSinglesSelector(featuredIncomingChallenge)}
-                  <button
-                    className="button"
-                    disabled={isAcceptDisabled(featuredIncomingChallenge)}
-                    onClick={() => handleAcceptChallenge(featuredIncomingChallenge)}
-                    title={getAcceptDisabledReason(featuredIncomingChallenge)}
-                    type="button"
-                  >
-                    {updatingChallengeId === featuredIncomingChallenge.id ? 'Accepting...' : 'Accept Challenge'}
-                  </button>
-                  <button
-                    className="button button--ghost"
-                    disabled={updatingChallengeId === featuredIncomingChallenge.id}
-                    onClick={() => handleDeclineChallenge(featuredIncomingChallenge)}
-                    type="button"
-                  >
-                    Decline Challenge
-                  </button>
+                  <div className="competition-challenge-hero__button-row">
+                    {renderAcceptSinglesSelector(featuredIncomingChallenge)}
+                    <button
+                      className="button"
+                      disabled={isAcceptDisabled(featuredIncomingChallenge)}
+                      onClick={() => handleAcceptChallenge(featuredIncomingChallenge)}
+                      title={getAcceptDisabledReason(featuredIncomingChallenge)}
+                      type="button"
+                    >
+                      {updatingChallengeId === featuredIncomingChallenge.id ? 'Accepting...' : 'Accept Challenge'}
+                    </button>
+                    <button
+                      className="button button--ghost"
+                      disabled={updatingChallengeId === featuredIncomingChallenge.id}
+                      onClick={() => handleDeclineChallenge(featuredIncomingChallenge)}
+                      type="button"
+                    >
+                      Decline Challenge
+                    </button>
+                  </div>
                   {renderAcceptRequirementNotice(featuredIncomingChallenge)}
                 </div>
               </section>
             ) : (
-              <section className="competition-challenge-hero competition-challenge-hero--empty">
+              <section
+                className={`competition-challenge-hero competition-challenge-hero--empty${
+                  !emptyHeroState.actionLabel && canManage ? ' competition-challenge-hero--no-action' : ''
+                }`}
+              >
                 <div className="competition-challenge-hero__icon">
                   <img alt="" aria-hidden="true" src={ACTIVITY_ICON_BY_TYPE.challenge_created} />
                 </div>
@@ -7429,15 +7527,17 @@ export function ChallengesPage() {
                   <h2>{emptyHeroState.title}</h2>
                   <p>{emptyHeroState.body}</p>
                 </div>
-                <div className="competition-challenge-hero__actions">
-                  {emptyHeroState.actionLabel ? (
-                    <button className="button" onClick={emptyHeroState.onAction} type="button">
-                      {emptyHeroState.actionLabel}
-                    </button>
-                  ) : (
-                    <span className="competition-challenge-hero__note">Captains can send team challenges.</span>
-                  )}
-                </div>
+                {emptyHeroState.actionLabel || !canManage ? (
+                  <div className="competition-challenge-hero__actions">
+                    {emptyHeroState.actionLabel ? (
+                      <button className="button" onClick={emptyHeroState.onAction} type="button">
+                        {emptyHeroState.actionLabel}
+                      </button>
+                    ) : (
+                      <span className="competition-challenge-hero__note">Captains can send team challenges.</span>
+                    )}
+                  </div>
+                ) : null}
               </section>
             )}
 
@@ -7555,7 +7655,7 @@ export function ChallengesPage() {
                       />
                       <span>
                         <strong>Date and time TBD</strong>
-                        <small>Uncheck to set one fixed match time instead of proposed windows.</small>
+                        <small>Uncheck TBD to set a specific time for the match.</small>
                       </span>
                     </label>
                     {form.dateTbd ? (
@@ -7816,99 +7916,6 @@ export function ChallengesPage() {
               ) : null
             )}
 
-            <section id="competition-challenges-inbox" className="schedule-admin-card">
-              <div className="schedule-admin-card__header">
-                <div>
-                  <p className="eyebrow">Inbox</p>
-                  <h2>Challenges received</h2>
-                  <p>Respond to direct challenges from other captains.</p>
-                </div>
-                {incomingChallenges.length > 1 ? (
-                  <div className="challenge-inbox-nav" aria-label="Challenge inbox navigation">
-                    <button
-                      aria-label="Previous challenge"
-                      disabled={incomingChallenges.length <= 1}
-                      onClick={() =>
-                        setIncomingChallengeIndex((current) =>
-                          current === 0 ? incomingChallenges.length - 1 : current - 1,
-                        )
-                      }
-                      type="button"
-                    >
-                      ‹
-                    </button>
-                    <span>{incomingChallengeIndex + 1} / {incomingChallenges.length}</span>
-                    <button
-                      aria-label="Next challenge"
-                      disabled={incomingChallenges.length <= 1}
-                      onClick={() =>
-                        setIncomingChallengeIndex((current) =>
-                          current === incomingChallenges.length - 1 ? 0 : current + 1,
-                        )
-                      }
-                      type="button"
-                    >
-                      ›
-                    </button>
-                  </div>
-                ) : incomingChallenges.length === 1 ? (
-                  <span className="challenge-inbox-count">1 / 1</span>
-                ) : null}
-              </div>
-              {selectedIncomingChallenge ? (
-                <article className="challenge-inbox-card">
-                  <img
-                    alt={`${selectedIncomingSourceName} logo`}
-                    className="challenge-inbox-card__logo"
-                    src={selectedIncomingSourceLogo}
-                  />
-                  <div className="challenge-inbox-card__body">
-                    <div className="challenge-inbox-card__header">
-                      <div>
-                        <h3>{selectedIncomingSourceName}</h3>
-                        <p>To {team?.name ?? teamSlug}</p>
-                      </div>
-                      <time dateTime={selectedIncomingChallenge.createdAtMs ? new Date(selectedIncomingChallenge.createdAtMs).toISOString() : undefined}>
-                        {formatActivityTimestamp(selectedIncomingChallenge.createdAtMs)}
-                      </time>
-                    </div>
-                    <div className="challenge-inbox-card__pills">
-                      <span>{getChallengeStatusLabel(selectedIncomingChallenge)}</span>
-                      <span>{formatChallengeDate(selectedIncomingChallenge)}</span>
-                      <span>{formatChallengeTime(selectedIncomingChallenge)}</span>
-                      <span>{normalizeMatchPlayerCount(selectedIncomingChallenge.playersNeeded)} Players</span>
-                    </div>
-                    {canManage ? (
-                      <div className="challenge-inbox-card__actions">
-                        {renderAcceptWindowSelector(selectedIncomingChallenge)}
-                        {renderAcceptSinglesSelector(selectedIncomingChallenge)}
-                        <button
-                          className="button"
-                          disabled={isAcceptDisabled(selectedIncomingChallenge)}
-                          onClick={() => handleAcceptChallenge(selectedIncomingChallenge)}
-                          title={getAcceptDisabledReason(selectedIncomingChallenge)}
-                          type="button"
-                        >
-                          {updatingChallengeId === selectedIncomingChallenge.id ? 'Accepting...' : 'Accept Challenge'}
-                        </button>
-                        <button
-                          className="button button--ghost"
-                          disabled={updatingChallengeId === selectedIncomingChallenge.id}
-                          onClick={() => handleDeclineChallenge(selectedIncomingChallenge)}
-                          type="button"
-                        >
-                          Decline Challenge
-                        </button>
-                        {renderAcceptRequirementNotice(selectedIncomingChallenge)}
-                      </div>
-                    ) : null}
-                  </div>
-                </article>
-              ) : (
-                <div className="notice notice--info">No direct challenges are waiting for this team.</div>
-              )}
-            </section>
-
             <section className="schedule-admin-card" id="competition-hub-directory">
               <div className="schedule-admin-card__header">
                 <div>
@@ -8003,6 +8010,71 @@ export function ChallengesPage() {
               ) : null}
             </section>
 
+            {incomingChallenges.length > 1 ? (
+              <section id="competition-challenges-inbox" className="schedule-admin-card">
+                <div className="schedule-admin-card__header">
+                  <div>
+                    <p className="eyebrow">Inbox</p>
+                    <h2>Challenges received</h2>
+                    <p>
+                      {incomingChallenges.length} challenges waiting — pick one to respond in the banner above.
+                    </p>
+                  </div>
+                  <span className="challenge-inbox-count">
+                    {incomingChallengeIndex + 1} / {incomingChallenges.length}
+                  </span>
+                </div>
+                <div className="challenge-inbox-queue" role="list" aria-label="Choose a challenge">
+                  {incomingChallenges.map((challenge, index) => {
+                    const sourceTeam = eligibleTeams.find(
+                      (eligibleTeam) =>
+                        eligibleTeam.clubSlug === challenge.createdByTeamClubSlug &&
+                        eligibleTeam.teamSlug === challenge.createdByTeamSlug,
+                    );
+                    const sourceName =
+                      challenge.createdByTeamName || sourceTeam?.name || challenge.createdByTeamSlug || 'Team';
+                    const sourceLogo = sourceTeam?.logoUrl || defaultTeamLogo;
+                    const isActive = index === incomingChallengeIndex;
+
+                    return (
+                      <button
+                        key={challenge.id}
+                        aria-current={isActive ? 'true' : undefined}
+                        aria-label={`${sourceName}, ${formatActivityTimestamp(challenge.createdAtMs)}`}
+                        className={`challenge-inbox-queue__item${isActive ? ' challenge-inbox-queue__item--active' : ''}`}
+                        onClick={() => setIncomingChallengeIndex(index)}
+                        role="listitem"
+                        type="button"
+                      >
+                        <img alt="" className="challenge-inbox-queue__logo" src={sourceLogo} />
+                        <span className="challenge-inbox-queue__name">{sourceName}</span>
+                        <time
+                          dateTime={
+                            challenge.createdAtMs
+                              ? new Date(challenge.createdAtMs).toISOString()
+                              : undefined
+                          }
+                        >
+                          {formatActivityTimestamp(challenge.createdAtMs)}
+                        </time>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : incomingChallenges.length === 0 ? (
+              <section id="competition-challenges-inbox" className="schedule-admin-card">
+                <div className="schedule-admin-card__header">
+                  <div>
+                    <p className="eyebrow">Inbox</p>
+                    <h2>Challenges received</h2>
+                    <p>Respond to direct challenges from other captains.</p>
+                  </div>
+                </div>
+                <div className="notice notice--info">No direct challenges are waiting for this team.</div>
+              </section>
+            ) : null}
+
             <section className="schedule-admin-card" id="competition-hub-sent">
               <div className="schedule-admin-card__header">
                 <div>
@@ -8055,7 +8127,7 @@ export function ChallengesPage() {
                               <button
                                 className="button button--ghost"
                                 disabled={updatingChallengeId === challenge.id}
-                                onClick={() => handleCancelChallenge(challenge)}
+                                onClick={() => openCancelChallengeConfirm(challenge)}
                                 type="button"
                               >
                                 {updatingChallengeId === challenge.id ? 'Cancelling...' : 'Cancel'}
@@ -8082,6 +8154,51 @@ export function ChallengesPage() {
           </div>
         )}
       </section>
+
+      {cancelConfirmChallenge ? (
+        <div
+          className="club-challenge-dialog club-challenge-dialog--layered"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cancel-challenge-dialog-title"
+        >
+          <button
+            aria-label="Close cancel challenge confirmation"
+            className="club-challenge-dialog__backdrop"
+            disabled={updatingChallengeId === cancelConfirmChallenge.id}
+            onClick={() => setCancelConfirmChallenge(null)}
+            type="button"
+          />
+          <div className="club-challenge-dialog__panel">
+            <p className="eyebrow">Challenges sent</p>
+            <h2 id="cancel-challenge-dialog-title">
+              Cancel challenge to {cancelConfirmChallenge.targetTeamName || cancelConfirmChallenge.targetTeamSlug}?
+            </h2>
+            <p>
+              {cancelConfirmChallenge.targetTeamName || 'The other team'} will no longer see this challenge in their
+              inbox. You can send a new challenge later if plans change.
+            </p>
+            <div className="club-challenge-dialog__actions">
+              <button
+                className="button button--ghost"
+                disabled={updatingChallengeId === cancelConfirmChallenge.id}
+                onClick={() => setCancelConfirmChallenge(null)}
+                type="button"
+              >
+                Keep challenge
+              </button>
+              <button
+                className="button button--danger"
+                disabled={updatingChallengeId === cancelConfirmChallenge.id}
+                onClick={() => void confirmCancelChallenge()}
+                type="button"
+              >
+                {updatingChallengeId === cancelConfirmChallenge.id ? 'Cancelling…' : 'Cancel challenge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
