@@ -5,7 +5,7 @@ import {
   buildStandingsSummary,
   getMembership,
   getTeam,
-  getUserProfileData,
+  getUserProfileAvatarsByUid,
   isPlatformAdmin,
   listGames,
   listMemberships,
@@ -21,7 +21,7 @@ import {
   getScheduleLastViewedMs,
   getTodayDateKey,
 } from '../lib/scheduleAttention';
-import { resolvePlayerAvatarUrl, resolveProfileAvatarUrl } from '../lib/profilePhotos';
+import { resolvePlayerAvatarUrl } from '../lib/profilePhotos';
 import defaultTeamLogo from '../../default_team_logo.webp';
 import pklUniverseWideLogo from '../../pkl_universe_wide_logo.webp';
 import PlayerMenuIcon from './PlayerMenuIcon';
@@ -130,7 +130,7 @@ export default function AppShell() {
   const [activeTeam, setActiveTeam] = useState(null);
   const [activeMembership, setActiveMembership] = useState(null);
   const [currentPlayer, setCurrentPlayer] = useState(null);
-  const [userProfile, setUserProfile] = useState(null);
+  const [userAvatarUrl, setUserAvatarUrl] = useState('');
   const [isAppAdmin, setIsAppAdmin] = useState(false);
   const [teamNavSummary, setTeamNavSummary] = useState({
     activeMemberCount: 0,
@@ -276,16 +276,47 @@ export default function AppShell() {
 
   useEffect(() => {
     if (!user?.uid) {
-      setUserProfile(null);
-      return;
+      setUserAvatarUrl('');
+      return undefined;
     }
 
-    getUserProfileData(user.uid)
-      .then(setUserProfile)
+    let cancelled = false;
+
+    getUserProfileAvatarsByUid([user.uid])
+      .then((avatarMap) => {
+        if (cancelled) {
+          return;
+        }
+
+        setUserAvatarUrl(
+          avatarMap[user.uid] ||
+            resolvePlayerAvatarUrl({
+              authPhotoUrl: user.photoURL ?? '',
+              player: currentPlayer ?? {},
+            }) ||
+            user.photoURL ||
+            '',
+        );
+      })
       .catch(() => {
-        setUserProfile(null);
+        if (cancelled) {
+          return;
+        }
+
+        setUserAvatarUrl(
+          resolvePlayerAvatarUrl({
+            authPhotoUrl: user.photoURL ?? '',
+            player: currentPlayer ?? {},
+          }) ||
+            user.photoURL ||
+            '',
+        );
       });
-  }, [teamRefreshKey, user?.photoURL, user?.uid]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPlayer, teamRefreshKey, user?.photoURL, user?.uid]);
 
   useEffect(() => {
     if (!clubSlug || !teamSlug) {
@@ -361,18 +392,6 @@ export default function AppShell() {
         ? 'Captain'
         : 'Player';
   const userDisplayName = currentPlayer?.fullName || user?.displayName || user?.email || 'Player';
-  const userAvatarUrl =
-    resolveProfileAvatarUrl(
-      {
-        ...(userProfile ?? {}),
-        photoURL: userProfile?.photoURL ?? user?.photoURL ?? '',
-      },
-      user?.photoURL ?? '',
-    ) ||
-    resolvePlayerAvatarUrl({
-      authPhotoUrl: user?.photoURL ?? '',
-      player: currentPlayer ?? {},
-    });
   const userInitial = userDisplayName.trim().charAt(0).toUpperCase() || 'P';
   const scheduleAttentionLabel = buildScheduleAttentionLabel(scheduleAttention);
 
