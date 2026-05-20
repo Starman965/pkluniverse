@@ -1881,13 +1881,16 @@ async function findTeamByJoinCode(normalizedCode) {
   return null;
 }
 
-async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
-  const playerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'players', user.uid);
+async function ensurePlayerProfile({ clubId, teamId, teamName, user, memberPlayerId = '' }) {
+  const playerId = user.uid;
+  const playerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'players', playerId);
   const membershipPlayerRef = doc(db, 'clubs', clubId, 'teams', teamId, 'playerLinks', user.uid);
+  const membershipRef = doc(db, 'clubs', clubId, 'teams', teamId, 'members', user.uid);
   const userRef = doc(db, 'users', user.uid);
   let playerSnapshot = null;
   let existingPlayer = null;
   let userProfile = null;
+  let linkedPlayerId = memberPlayerId || playerId;
 
   try {
     playerSnapshot = await getDoc(playerRef);
@@ -1909,16 +1912,26 @@ async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
     }
   }
 
+  try {
+    const membershipSnapshot = await getDoc(membershipRef);
+    linkedPlayerId = membershipSnapshot.data()?.playerId || linkedPlayerId || playerId;
+  } catch (error) {
+    if (error?.code !== 'permission-denied') {
+      throw error;
+    }
+  }
+
   const globalProfile = buildGlobalProfileFields({
     fallback: existingPlayer ?? {},
     user,
     userProfile: userProfile ?? {},
   });
+  const profilePayload = buildPlayerSnapshotFromGlobalProfile(globalProfile);
 
   await setDoc(
     userRef,
     {
-      ...buildPlayerSnapshotFromGlobalProfile(globalProfile),
+      ...profilePayload,
       photoURL: globalProfile.photoURL,
       uid: user.uid,
       updatedAt: serverTimestamp(),
@@ -1926,37 +1939,40 @@ async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
     { merge: true },
   );
 
-  const payload = {
-    ...buildPlayerSnapshotFromGlobalProfile(globalProfile),
-    teamId,
-    teamName,
-    uid: user.uid,
-    updatedAt: serverTimestamp(),
-  };
-
-  if (playerSnapshot) {
-    payload.active = existingPlayer?.active !== false;
-    payload.availableDays = playerSnapshot.exists()
-      ? normalizeAvailableDays(existingPlayer?.availableDays)
-      : PLAYER_AVAILABLE_DAYS.map((day) => day.id);
-    payload.notes = existingPlayer?.notes ?? '';
-
-    if (!playerSnapshot.exists()) {
-      payload.createdAt = serverTimestamp();
-      payload.createdBy = user.uid;
-    }
+  if (linkedPlayerId !== playerId) {
+    // Self-service Firestore rules only allow writing players/{uid} for the signed-in user.
+    return linkedPlayerId;
   }
 
-  await setDoc(
-    playerRef,
-    payload,
-    { merge: true },
-  );
+  if (!playerSnapshot?.exists()) {
+    await setDoc(playerRef, {
+      ...profilePayload,
+      active: true,
+      availableDays: PLAYER_AVAILABLE_DAYS.map((day) => day.id),
+      createdAt: serverTimestamp(),
+      createdBy: user.uid,
+      notes: '',
+      teamId,
+      teamName,
+      uid: user.uid,
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    const { photoURL: _photoURL, ...snapshotFields } = profilePayload;
+    await setDoc(
+      playerRef,
+      {
+        ...snapshotFields,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
 
   await setDoc(
     membershipPlayerRef,
     {
-      playerId: user.uid,
+      playerId,
       teamId,
       uid: user.uid,
       updatedAt: serverTimestamp(),
@@ -1964,7 +1980,29 @@ async function ensurePlayerProfile({ clubId, teamId, teamName, user }) {
     { merge: true },
   );
 
-  return user.uid;
+  return playerId;
+}
+
+async function repairMembershipSideEffects({ clubSlug, data, teamSlug, uid, user }) {
+  await syncMembershipSummary({
+    clubSlug: data.clubSlug ?? clubSlug,
+    role: data.role,
+    teamName: data.teamName,
+    teamSlug: data.teamSlug ?? teamSlug,
+    uid,
+  });
+
+  if (user?.uid !== uid) {
+    return;
+  }
+
+  await ensurePlayerProfile({
+    clubId: clubSlug,
+    memberPlayerId: data.playerId ?? uid,
+    teamId: teamSlug,
+    teamName: data.teamName ?? teamSlug,
+    user,
+  });
 }
 
 export async function createTeam({ teamName, user }) {
@@ -2393,20 +2431,15 @@ export async function getMembership(clubSlug, teamSlug, uid, user = null) {
 
   const data = snapshot.data();
 
-  await syncMembershipSummary({
-    clubSlug: data.clubSlug,
-    role: data.role,
-    teamName: data.teamName,
-    teamSlug: data.teamSlug,
-    uid,
-  });
-
-  if (user?.uid === uid) {
-    await ensurePlayerProfile({
-      clubId: clubSlug,
-      teamId: teamSlug,
-      teamName: data.teamName ?? teamSlug,
-      user,
+  try {
+    await repairMembershipSideEffects({ clubSlug, data, teamSlug, uid, user });
+  } catch (error) {
+    console.warn('[getMembership:repair]', {
+      clubSlug,
+      code: error?.code ?? '',
+      message: error?.message ?? String(error),
+      teamSlug,
+      uid,
     });
   }
 
