@@ -634,11 +634,10 @@ function countGamesPlayed(games, playerId) {
   }
 
   return games.filter((game) => {
-    const isCompleted = game.matchStatus === 'final' || game.matchStatus === 'completed';
     const inRoster = (game.rosterPlayerIds ?? []).includes(playerId);
     const inPairings = (game.pairings ?? []).some((pairing) => (pairing.playerIds ?? []).includes(playerId));
 
-    return isCompleted && (inRoster || inPairings);
+    return isMatchCompleted(game) && (inRoster || inPairings);
   }).length;
 }
 
@@ -653,10 +652,9 @@ function buildPlayerRecord(games, playerId) {
   }
 
   games.forEach((game) => {
-    const isCompleted = game.matchStatus === 'final' || game.matchStatus === 'completed';
     const wasRostered = (game.rosterPlayerIds ?? []).includes(playerId);
 
-    if (!isCompleted || !wasRostered) {
+    if (!isMatchCompleted(game) || !wasRostered) {
       return;
     }
 
@@ -680,21 +678,8 @@ function formatPlayerWinRate(record) {
   return `${Math.round((record.wins / gamesPlayed) * 100)}%`;
 }
 
-function getTodayDateKey() {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
-
-function gameBelongsInPast(game, todayDateKey) {
-  if (!game?.isoDate) {
-    return false;
-  }
-
-  return game.isoDate < todayDateKey;
+function isMatchCompleted(game) {
+  return game?.matchStatus === 'completed' || game?.matchStatus === 'final';
 }
 
 function getGameTimeSortValue(game) {
@@ -732,25 +717,6 @@ function sortGamesByMostRecent(games = []) {
 
     return String(left?.opponent ?? '').localeCompare(String(right?.opponent ?? ''));
   });
-}
-
-function findFirstUpcomingGameIndex(games, todayDateKey) {
-  const index = games.findIndex((game) => !gameBelongsInPast(game, todayDateKey));
-  return index >= 0 ? index : 0;
-}
-
-function getGameRosterBadge(game, todayDateKey) {
-  if (game.matchStatus === 'completed') {
-    return game.result && game.result !== 'pending'
-      ? String(game.result).toUpperCase()
-      : 'COMPLETED';
-  }
-
-  if (!game.isoDate) {
-    return 'DATE TBD';
-  }
-
-  return gameBelongsInPast(game, todayDateKey) ? 'PAST' : 'UPCOMING';
 }
 
 function buildRosterPairings(game, players) {
@@ -1540,7 +1506,7 @@ function TimePickerField({ disabled = false, onChange, value }) {
           ))}
         </select>
         <select
-          disabled={disabled || !timeParts.hour}
+          disabled={disabled}
           onChange={(event) => updateTimePart('minute', event.target.value)}
           value={timeParts.minute}
         >
@@ -1551,7 +1517,7 @@ function TimePickerField({ disabled = false, onChange, value }) {
           ))}
         </select>
         <select
-          disabled={disabled || !timeParts.hour}
+          disabled={disabled}
           onChange={(event) => updateTimePart('period', event.target.value)}
           value={timeParts.period}
         >
@@ -4428,7 +4394,7 @@ export function SchedulePage() {
   const [courtOptions, setCourtOptions] = useState([]);
   const [matchTeamOptions, setMatchTeamOptions] = useState([]);
   const [teamProfile, setTeamProfile] = useState({ logoUrl: '', name: '' });
-  const [activeTab, setActiveTab] = useState('upcoming');
+  const [activeTab, setActiveTab] = useState('scheduled');
   const [editorMode, setEditorMode] = useState('');
   const [editingGameId, setEditingGameId] = useState('');
   const [error, setError] = useState('');
@@ -4545,16 +4511,15 @@ export function SchedulePage() {
     };
   }, [isEditorOpen, isCreateEditorOpen, form.linkedTeamClubSlug, form.linkedTeamSlug]);
 
-  const todayDateKey = useMemo(() => getTodayDateKey(), []);
-  const upcomingGames = useMemo(
-    () => sortGamesByMostRecent(games.filter((game) => !gameBelongsInPast(game, todayDateKey))),
-    [games, todayDateKey],
+  const scheduledGames = useMemo(
+    () => sortGamesByMostRecent(games.filter((game) => !isMatchCompleted(game))),
+    [games],
   );
-  const pastGames = useMemo(
-    () => sortGamesByMostRecent(games.filter((game) => gameBelongsInPast(game, todayDateKey))),
-    [games, todayDateKey],
+  const completedGames = useMemo(
+    () => sortGamesByMostRecent(games.filter((game) => isMatchCompleted(game))),
+    [games],
   );
-  const visibleGames = activeTab === 'past' ? pastGames : upcomingGames;
+  const visibleGames = activeTab === 'completed' ? completedGames : scheduledGames;
 
   function openCreateEditor() {
     setEditorMode('create');
@@ -4664,7 +4629,7 @@ export function SchedulePage() {
       setMessage(isCreateEditorOpen ? 'Match created.' : 'Matchup updated.');
       closeEditor();
       if (isCreateEditorOpen) {
-        setActiveTab('upcoming');
+        setActiveTab('scheduled');
       }
       await loadScheduleData();
     } catch (submitError) {
@@ -4857,8 +4822,13 @@ export function SchedulePage() {
                   />
                 </label>
                 <TimePickerField
-                  disabled={form.dateTbd}
-                  onChange={(nextTimeLabel) => setForm((current) => ({ ...current, timeLabel: nextTimeLabel }))}
+                  onChange={(nextTimeLabel) =>
+                    setForm((current) => ({
+                      ...current,
+                      dateTbd: nextTimeLabel ? false : current.dateTbd,
+                      timeLabel: nextTimeLabel,
+                    }))
+                  }
                   value={form.timeLabel}
                 />
                 <label className="field schedule-admin-form__players-needed-field">
@@ -5004,18 +4974,18 @@ export function SchedulePage() {
           <div className="schedule-view-tabs-row">
             <div className="availability-tabs" aria-label="Schedule views">
               <button
-                className={`availability-tabs__button ${activeTab === 'upcoming' ? 'availability-tabs__button--active' : ''}`}
-                onClick={() => setActiveTab('upcoming')}
+                className={`availability-tabs__button ${activeTab === 'scheduled' ? 'availability-tabs__button--active' : ''}`}
+                onClick={() => setActiveTab('scheduled')}
                 type="button"
               >
-                Upcoming ({upcomingGames.length})
+                Scheduled ({scheduledGames.length})
               </button>
               <button
-                className={`availability-tabs__button ${activeTab === 'past' ? 'availability-tabs__button--active' : ''}`}
-                onClick={() => setActiveTab('past')}
+                className={`availability-tabs__button ${activeTab === 'completed' ? 'availability-tabs__button--active' : ''}`}
+                onClick={() => setActiveTab('completed')}
                 type="button"
               >
-                Past ({pastGames.length})
+                Completed ({completedGames.length})
               </button>
             </div>
             {canManage ? (
@@ -5085,7 +5055,7 @@ export function SchedulePage() {
         ) : games.length === 0 ? (
           <p>No matchups saved yet.</p>
         ) : (
-          <p>{activeTab === 'past' ? 'No past matchups yet.' : 'No upcoming matchups yet.'}</p>
+          <p>{activeTab === 'completed' ? 'No completed matchups yet.' : 'No scheduled matchups yet.'}</p>
         )}
       </section>
 
@@ -5363,7 +5333,11 @@ export function NewsPage() {
   }
 
   async function loadCommunityOverview() {
-    if (user?.uid) {
+    const membershipData = user?.uid
+      ? await getMembership(clubSlug, teamSlug, user.uid, user)
+      : null;
+
+    if (membershipData) {
       await ensureUserActiveTeamContext({ clubSlug, teamSlug, uid: user.uid });
     }
 
@@ -7360,8 +7334,13 @@ export function ChallengesPage() {
                         <span>Time</span>
                         <div className="challenge-time-selectors">
                           <select
-                            disabled={form.dateTbd}
-                            onChange={(event) => setForm((current) => ({ ...current, hour: event.target.value }))}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                dateTbd: event.target.value ? false : current.dateTbd,
+                                hour: event.target.value,
+                              }))
+                            }
                             value={form.hour}
                           >
                             <option value="">Hour</option>
@@ -7372,8 +7351,13 @@ export function ChallengesPage() {
                             ))}
                           </select>
                           <select
-                            disabled={form.dateTbd}
-                            onChange={(event) => setForm((current) => ({ ...current, minute: event.target.value }))}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                dateTbd: event.target.value ? false : current.dateTbd,
+                                minute: event.target.value,
+                              }))
+                            }
                             value={form.minute}
                           >
                             {['00', '15', '30', '45'].map((minute) => (
@@ -7383,8 +7367,13 @@ export function ChallengesPage() {
                             ))}
                           </select>
                           <select
-                            disabled={form.dateTbd}
-                            onChange={(event) => setForm((current) => ({ ...current, period: event.target.value }))}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                dateTbd: event.target.value ? false : current.dateTbd,
+                                period: event.target.value,
+                              }))
+                            }
                             value={form.period}
                           >
                             <option value="AM">AM</option>

@@ -3,15 +3,17 @@ import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'reac
 import { useAuth } from '../context/AuthContext';
 import {
   buildStandingsSummary,
+  ensureUserActiveTeamContext,
   getMembership,
   getTeam,
   getUserProfileAvatarsByUid,
+  getUserProfileData,
   isPlatformAdmin,
+  listActiveMemberships,
   listGames,
   listMemberships,
   listPlayers,
   listTeamMembers,
-  setLastActiveTeam,
   subscribeChallengeHub,
   subscribeTeamGames,
 } from '../lib/data';
@@ -19,7 +21,6 @@ import {
   buildScheduleAttentionLabel,
   countScheduleAttentionGames,
   getScheduleLastViewedMs,
-  getTodayDateKey,
 } from '../lib/scheduleAttention';
 import { resolvePlayerAvatarUrl } from '../lib/profilePhotos';
 import defaultTeamLogo from '../../default_team_logo.webp';
@@ -228,7 +229,6 @@ export default function AppShell() {
         countScheduleAttentionGames(
           scheduleGamesRef.current,
           getScheduleLastViewedMs(clubSlug, teamSlug),
-          getTodayDateKey(),
         ),
       );
     }
@@ -259,7 +259,6 @@ export default function AppShell() {
         countScheduleAttentionGames(
           games,
           getScheduleLastViewedMs(clubSlug, teamSlug),
-          getTodayDateKey(),
         ),
       );
     };
@@ -319,6 +318,65 @@ export default function AppShell() {
   }, [currentPlayer, teamRefreshKey, user?.photoURL, user?.uid]);
 
   useEffect(() => {
+    if (!user?.uid || !clubSlug || !teamSlug || isAppAdmin) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function redirectToAuthorizedTeam() {
+      const membership = await getMembership(clubSlug, teamSlug, user.uid, user);
+
+      if (membership || cancelled) {
+        return;
+      }
+
+      const [activeMemberships, userProfile] = await Promise.all([
+        listActiveMemberships(user.uid),
+        getUserProfileData(user.uid).catch(() => null),
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      const routeSuffixMatch = location.pathname.match(/\/c\/[^/]+\/t\/[^/]+(?:\/(.*))?$/);
+      const routeSuffix = routeSuffixMatch?.[1] || 'news';
+      const targetMembership =
+        activeMemberships.find(
+          (item) =>
+            item.clubSlug === userProfile?.lastActiveClubId &&
+            item.teamSlug === userProfile?.lastActiveTeamId,
+        ) ??
+        (activeMemberships.length === 1 ? activeMemberships[0] : null);
+
+      if (targetMembership) {
+        navigate(`/c/${targetMembership.clubSlug}/t/${targetMembership.teamSlug}/${routeSuffix}`, {
+          replace: true,
+        });
+        return;
+      }
+
+      if (activeMemberships.length > 1) {
+        navigate('/teams', { replace: true });
+        return;
+      }
+
+      if (activeMemberships.length === 0) {
+        navigate('/onboarding', { replace: true });
+      }
+    }
+
+    redirectToAuthorizedTeam().catch(() => {
+      // Route correction should not block rendering.
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clubSlug, isAppAdmin, location.pathname, navigate, teamSlug, user]);
+
+  useEffect(() => {
     if (!clubSlug || !teamSlug) {
       setActiveTeam(null);
       setActiveMembership(null);
@@ -333,38 +391,59 @@ export default function AppShell() {
       return;
     }
 
-    Promise.all([
-      getTeam(clubSlug, teamSlug),
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
-    ])
-      .then(async ([team, membership]) => {
-        const [members, players, games] = await Promise.all([
-          listTeamMembers(clubSlug, teamSlug),
-          listPlayers(clubSlug, teamSlug),
-          listGames(clubSlug, teamSlug),
+    let cancelled = false;
+
+    async function loadActiveTeamContext() {
+      try {
+        const [team, membership] = await Promise.all([
+          getTeam(clubSlug, teamSlug),
+          user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
         ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setActiveTeam(team);
+        setActiveMembership(membership);
+
+        const [members, players, games] = await Promise.all([
+          listTeamMembers(clubSlug, teamSlug).catch(() => []),
+          listPlayers(clubSlug, teamSlug).catch(() => []),
+          listGames(clubSlug, teamSlug).catch(() => []),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
         const currentPlayerRecord =
           players.find((player) => player.id === membership?.playerId) ??
           players.find((player) => player.uid === user?.uid || player.id === user?.uid) ??
           null;
-        setActiveTeam(team);
-        setActiveMembership(membership);
+
         setCurrentPlayer(currentPlayerRecord);
         setTeamNavSummary(buildTeamNavSummary(members, games));
+      } catch {
+        if (!cancelled) {
+          setActiveTeam(null);
+          setActiveMembership(null);
+          setCurrentPlayer(null);
+          setTeamNavSummary({
+            activeMemberCount: 0,
+            losses: 0,
+            winPct: 0,
+            wins: 0,
+          });
+        }
+      }
+    }
 
-      })
-      .catch(() => {
-        setActiveTeam(null);
-        setActiveMembership(null);
-        setCurrentPlayer(null);
-        setIncomingChallengeCount(0);
-        setTeamNavSummary({
-          activeMemberCount: 0,
-          losses: 0,
-          winPct: 0,
-          wins: 0,
-        });
-      });
+    loadActiveTeamContext();
+
+    return () => {
+      cancelled = true;
+    };
   }, [clubSlug, teamRefreshKey, teamSlug, user]);
 
   const currentMembership = useMemo(
@@ -424,7 +503,7 @@ export default function AppShell() {
       return;
     }
 
-    setLastActiveTeam({
+    ensureUserActiveTeamContext({
       clubSlug,
       teamSlug,
       uid: user.uid,

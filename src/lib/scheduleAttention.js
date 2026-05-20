@@ -41,14 +41,6 @@ function isCompletedGame(game) {
   return game?.matchStatus === 'completed' || game?.matchStatus === 'final';
 }
 
-export function gameBelongsInPast(game, todayDateKey) {
-  if (!game?.isoDate) {
-    return false;
-  }
-
-  return game.isoDate < todayDateKey;
-}
-
 export function isGameNeedsScheduling(game) {
   if (isCompletedGame(game)) {
     return false;
@@ -57,12 +49,8 @@ export function isGameNeedsScheduling(game) {
   return game?.dateTbd === true || !game?.isoDate;
 }
 
-export function isGameNewScheduled(game, lastViewedMs, todayDateKey) {
+export function isGameNewScheduled(game, lastViewedMs) {
   if (isCompletedGame(game)) {
-    return false;
-  }
-
-  if (gameBelongsInPast(game, todayDateKey)) {
     return false;
   }
 
@@ -79,12 +67,12 @@ export function isGameNewScheduled(game, lastViewedMs, todayDateKey) {
   return createdAtMs > lastViewedMs;
 }
 
-export function countScheduleAttentionGames(games = [], lastViewedMs = 0, todayDateKey = getTodayDateKey()) {
+export function countScheduleAttentionGames(games = [], lastViewedMs = 0) {
   let needsSchedulingCount = 0;
   let newScheduledCount = 0;
 
   games.forEach((game) => {
-    if (isCompletedGame(game) || gameBelongsInPast(game, todayDateKey)) {
+    if (isCompletedGame(game)) {
       return;
     }
 
@@ -93,7 +81,7 @@ export function countScheduleAttentionGames(games = [], lastViewedMs = 0, todayD
       return;
     }
 
-    if (isGameNewScheduled(game, lastViewedMs, todayDateKey)) {
+    if (isGameNewScheduled(game, lastViewedMs)) {
       newScheduledCount += 1;
     }
   });

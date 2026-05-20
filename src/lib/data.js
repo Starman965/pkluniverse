@@ -758,7 +758,13 @@ export async function ensureUserActiveTeamContext({ clubSlug, teamSlug, uid }) {
   requireDb();
 
   if (!uid || !clubSlug || !teamSlug) {
-    return;
+    return false;
+  }
+
+  const memberSnapshot = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'members', uid));
+
+  if (!memberSnapshot.exists() || memberSnapshot.data()?.status === 'inactive') {
+    return false;
   }
 
   await setDoc(
@@ -771,6 +777,7 @@ export async function ensureUserActiveTeamContext({ clubSlug, teamSlug, uid }) {
   );
 
   await setLastActiveTeam({ clubSlug, teamSlug, uid });
+  return true;
 }
 
 export async function ensureClub() {
@@ -2273,6 +2280,18 @@ export async function listMemberships(uid) {
   memberships.sort((a, b) => a.teamName.localeCompare(b.teamName));
 
   return memberships;
+}
+
+export async function listActiveMemberships(uid) {
+  const memberships = await listMemberships(uid);
+  const activeMemberships = await Promise.all(
+    memberships.map(async (membership) => {
+      const team = await getTeam(membership.clubSlug, membership.teamSlug).catch(() => null);
+      return (team?.status ?? 'active') === 'active' ? membership : null;
+    }),
+  );
+
+  return activeMemberships.filter(Boolean);
 }
 
 export async function getTeam(clubSlug, teamSlug) {
