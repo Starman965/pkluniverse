@@ -754,6 +754,25 @@ export async function setLastActiveTeam({ clubSlug, teamSlug, uid }) {
   );
 }
 
+export async function ensureUserActiveTeamContext({ clubSlug, teamSlug, uid }) {
+  requireDb();
+
+  if (!uid || !clubSlug || !teamSlug) {
+    return;
+  }
+
+  await setDoc(
+    doc(db, 'users', uid),
+    {
+      uid,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  await setLastActiveTeam({ clubSlug, teamSlug, uid });
+}
+
 export async function ensureClub() {
   requireDb();
 
@@ -5292,7 +5311,10 @@ export function subscribeNewsPosts(clubSlug, teamSlug, onChange, onError) {
               commentsByPost.set(postId, comments);
               emitPosts();
             },
-            onError,
+            () => {
+              commentsByPost.set(postId, []);
+              emitPosts();
+            },
           );
           const unsubscribeReactions = onSnapshot(
             collection(change.doc.ref, 'reactions'),
@@ -5300,7 +5322,10 @@ export function subscribeNewsPosts(clubSlug, teamSlug, onChange, onError) {
               reactionsByPost.set(postId, reactionsSnapshot.docs.map(normalizeNewsReactionEntry));
               emitPosts();
             },
-            onError,
+            () => {
+              reactionsByPost.set(postId, []);
+              emitPosts();
+            },
           );
 
           childUnsubscribers.set(postId, [unsubscribeComments, unsubscribeReactions]);

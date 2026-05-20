@@ -68,6 +68,7 @@ import {
   savePlayer,
   saveClubEvent,
   saveUserPlayerProfile,
+  ensureUserActiveTeamContext,
   setLastActiveTeam,
   subscribeChallengeHub,
   subscribeTeamGames,
@@ -5343,7 +5344,9 @@ export function NewsPage() {
   const [deletingCommentId, setDeletingCommentId] = useState('');
   const [reactingPostId, setReactingPostId] = useState('');
   const [isAppAdmin, setIsAppAdmin] = useState(false);
-  const [error, setError] = useState('');
+  const [feedError, setFeedError] = useState('');
+  const [communityError, setCommunityError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [message, setMessage] = useState('');
 
   async function loadNewsAccess() {
@@ -5352,7 +5355,7 @@ export function NewsPage() {
       user?.uid ? isPlatformAdmin(user.uid, user.email) : Promise.resolve(false),
     ]);
     if (user?.uid && membershipData) {
-      await setLastActiveTeam({ clubSlug, teamSlug, uid: user.uid });
+      await ensureUserActiveTeamContext({ clubSlug, teamSlug, uid: user.uid });
     }
 
     setMembership(membershipData);
@@ -5361,7 +5364,7 @@ export function NewsPage() {
 
   async function loadCommunityOverview() {
     if (user?.uid) {
-      await setLastActiveTeam({ clubSlug, teamSlug, uid: user.uid });
+      await ensureUserActiveTeamContext({ clubSlug, teamSlug, uid: user.uid });
     }
 
     const teamData = await getTeam(clubSlug, teamSlug);
@@ -5485,16 +5488,16 @@ export function NewsPage() {
         },
         (subscribeError) => {
           if (isMounted) {
-            setError(subscribeError.message ?? 'Unable to listen for community feed updates.');
+            setFeedError(subscribeError.message ?? 'Unable to listen for community feed updates.');
           }
         },
       );
     }
 
-    setError('');
+    setFeedError('');
     connectNewsFeed().catch((loadError) => {
       if (isMounted) {
-        setError(loadError.message ?? 'Unable to load community feed yet.');
+        setFeedError(loadError.message ?? 'Unable to load community feed yet.');
       }
     });
 
@@ -5547,17 +5550,19 @@ export function NewsPage() {
     let ignore = false;
 
     setCommunityLoading(true);
+    setCommunityError('');
     loadCommunityOverview()
       .then(({ players, rankings, teams }) => {
         if (!ignore) {
           setCommunityTeams(teams);
           setCommunityPlayers(players);
           setCommunityRankings(rankings);
+          setCommunityError('');
         }
       })
       .catch((loadError) => {
         if (!ignore) {
-          setError(loadError.message ?? 'Unable to load the community directory.');
+          setCommunityError(loadError.message ?? 'Unable to load the community directory.');
           setCommunityTeams([]);
           setCommunityPlayers([]);
           setCommunityRankings([]);
@@ -5585,10 +5590,14 @@ export function NewsPage() {
   async function handleSubmit(event) {
     event.preventDefault();
     setSaving(true);
-    setError('');
+    setActionError('');
     setMessage('');
 
     try {
+      if (user?.uid) {
+        await ensureUserActiveTeamContext({ clubSlug, teamSlug, uid: user.uid });
+      }
+
       await saveNewsPost({
         body: form.body,
         clubSlug,
@@ -5605,7 +5614,7 @@ export function NewsPage() {
       setIsComposerOpen(false);
       setMessage('Post shared.');
     } catch (submitError) {
-      setError(submitError.message ?? 'Unable to share that post.');
+      setActionError(submitError.message ?? 'Unable to share that post.');
     } finally {
       setSaving(false);
     }
@@ -5613,14 +5622,14 @@ export function NewsPage() {
 
   async function handleDeletePost(post) {
     setDeletingPostId(post.id);
-    setError('');
+    setActionError('');
     setMessage('');
 
     try {
       await deleteNewsPost({ clubSlug, post, teamSlug });
       setMessage('Post deleted.');
     } catch (deleteError) {
-      setError(deleteError.message ?? 'Unable to delete that post.');
+      setActionError(deleteError.message ?? 'Unable to delete that post.');
     } finally {
       setDeletingPostId('');
     }
@@ -5637,7 +5646,7 @@ export function NewsPage() {
     setPostEditImagePreviewUrl('');
     setEditingCommentId('');
     setCommentEditDraft('');
-    setError('');
+    setActionError('');
     setMessage('');
   }
 
@@ -5663,7 +5672,7 @@ export function NewsPage() {
       return;
     }
 
-    setError('');
+    setActionError('');
 
     try {
       const resizedFile = await createResizedNewsImageFile(file);
@@ -5674,13 +5683,13 @@ export function NewsPage() {
       setPostEditImageFile(resizedFile);
       setPostEditImagePreviewUrl(URL.createObjectURL(resizedFile));
     } catch (selectionError) {
-      setError(selectionError.message ?? 'Unable to prepare that image.');
+      setActionError(selectionError.message ?? 'Unable to prepare that image.');
     }
   }
 
   async function handleSavePostEdit(post) {
     setSavingPostId(post.id);
-    setError('');
+    setActionError('');
     setMessage('');
 
     try {
@@ -5704,7 +5713,7 @@ export function NewsPage() {
       setPostEditImagePreviewUrl('');
       setMessage('Post updated.');
     } catch (editError) {
-      setError(editError.message ?? 'Unable to update that post.');
+      setActionError(editError.message ?? 'Unable to update that post.');
     } finally {
       setSavingPostId('');
     }
@@ -5712,7 +5721,7 @@ export function NewsPage() {
 
   async function handleCommentSubmit(event, post) {
     event.preventDefault();
-    setError('');
+    setActionError('');
     setMessage('');
 
     try {
@@ -5725,13 +5734,13 @@ export function NewsPage() {
       });
       setCommentDrafts((current) => ({ ...current, [post.id]: '' }));
     } catch (commentError) {
-      setError(commentError.message ?? 'Unable to post that comment.');
+      setActionError(commentError.message ?? 'Unable to post that comment.');
     }
   }
 
   async function handleDeleteComment(post, comment) {
     setDeletingCommentId(comment.id);
-    setError('');
+    setActionError('');
     setMessage('');
 
     try {
@@ -5742,7 +5751,7 @@ export function NewsPage() {
         teamSlug,
       });
     } catch (deleteError) {
-      setError(deleteError.message ?? 'Unable to delete that comment.');
+      setActionError(deleteError.message ?? 'Unable to delete that comment.');
     } finally {
       setDeletingCommentId('');
     }
@@ -5759,7 +5768,7 @@ export function NewsPage() {
     setPostEditDraft('');
     setPostEditImageFile(null);
     setPostEditImagePreviewUrl('');
-    setError('');
+    setActionError('');
     setMessage('');
   }
 
@@ -5770,7 +5779,7 @@ export function NewsPage() {
 
   async function handleSaveCommentEdit(post, comment) {
     setSavingCommentId(comment.id);
-    setError('');
+    setActionError('');
     setMessage('');
 
     try {
@@ -5785,7 +5794,7 @@ export function NewsPage() {
       setEditingCommentId('');
       setCommentEditDraft('');
     } catch (editError) {
-      setError(editError.message ?? 'Unable to update that comment.');
+      setActionError(editError.message ?? 'Unable to update that comment.');
     } finally {
       setSavingCommentId('');
     }
@@ -5793,7 +5802,7 @@ export function NewsPage() {
 
   async function handleReactionToggle(post, reactionType = 'like') {
     setReactingPostId(post.id);
-    setError('');
+    setActionError('');
 
     try {
       await toggleNewsReaction({
@@ -5804,7 +5813,7 @@ export function NewsPage() {
         user,
       });
     } catch (reactionError) {
-      setError(reactionError.message ?? 'Unable to update that reaction.');
+      setActionError(reactionError.message ?? 'Unable to update that reaction.');
     } finally {
       setReactingPostId('');
     }
@@ -5816,7 +5825,7 @@ export function NewsPage() {
       return;
     }
 
-    setError('');
+    setActionError('');
 
     try {
       const resizedFile = await createResizedNewsImageFile(file);
@@ -5832,7 +5841,7 @@ export function NewsPage() {
         };
       });
     } catch (selectionError) {
-      setError(selectionError.message ?? 'Unable to prepare that image.');
+      setActionError(selectionError.message ?? 'Unable to prepare that image.');
     }
   }
 
@@ -5868,6 +5877,10 @@ export function NewsPage() {
           copy="Share photos, practice notes, match moments, and club updates."
           title="Community Feed"
         />
+
+        {feedError ? <div className="notice notice--error">{feedError}</div> : null}
+        {actionError ? <div className="notice notice--error">{actionError}</div> : null}
+        {message ? <div className="notice notice--success">{message}</div> : null}
 
         {isComposerOpen ? (
           <form className="news-composer" onSubmit={handleSubmit}>
@@ -5970,7 +5983,7 @@ export function NewsPage() {
           </div>
         </div>
 
-        {error ? <div className="notice notice--error">{error}</div> : null}
+        {communityError ? <div className="notice notice--error">{communityError}</div> : null}
 
         {communityLoading ? (
           <div className="state-panel">

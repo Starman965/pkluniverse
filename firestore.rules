@@ -191,28 +191,54 @@ service cloud.firestore {
         );
     }
 
-    function hasActiveApprovedTeamInClub(activityClubId) {
-      let profile = userProfileDoc(request.auth.uid);
-      let activeClubId = profile.data.lastActiveClubId;
-      let activeTeamId = profile.data.lastActiveTeamId;
+    function hasUserProfile() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
 
+    function activeUserProfile() {
+      return userProfileDoc(request.auth.uid).data;
+    }
+
+    function activeUserTeamRef() {
+      return /databases/$(database)/documents/clubs/$(activeUserProfile().lastActiveClubId)/teams/$(activeUserProfile().lastActiveTeamId);
+    }
+
+    function hasActiveApprovedTeamContext() {
       return signedIn()
-        && activeClubId is string
-        && activeTeamId is string
-        && exists(memberPath(activeClubId, activeTeamId))
-        && get(/databases/$(database)/documents/clubs/$(activeClubId)/teams/$(activeTeamId)).data.status == 'active'
-        && get(/databases/$(database)/documents/clubs/$(activeClubId)/teams/$(activeTeamId)).data.affiliationStatus == 'approved'
-        && get(/databases/$(database)/documents/clubs/$(activeClubId)/teams/$(activeTeamId)).data.approvedClubSlug == activityClubId;
+        && hasUserProfile()
+        && activeUserProfile().lastActiveClubId is string
+        && activeUserProfile().lastActiveTeamId is string
+        && exists(memberPath(activeUserProfile().lastActiveClubId, activeUserProfile().lastActiveTeamId))
+        && get(activeUserTeamRef()).data.status == 'active'
+        && get(activeUserTeamRef()).data.affiliationStatus == 'approved'
+        && get(activeUserTeamRef()).data.approvedClubSlug is string
+        && get(activeUserTeamRef()).data.approvedClubSlug != 'independent';
+    }
+
+    function hasActiveApprovedTeamInClub(activityClubId) {
+      return hasActiveApprovedTeamContext()
+        && get(activeUserTeamRef()).data.approvedClubSlug == activityClubId;
+    }
+
+    function canViewApprovedClubTeam(clubId, teamId) {
+      let targetTeamRef = /databases/$(database)/documents/clubs/$(clubId)/teams/$(teamId);
+
+      return hasActiveApprovedTeamContext()
+        && get(targetTeamRef).data.approvedClubSlug == get(activeUserTeamRef()).data.approvedClubSlug;
     }
 
     function hasActiveTeamInClub(clubId) {
-      let profile = userProfileDoc(request.auth.uid);
-      let activeTeamId = profile.data.lastActiveTeamId;
-
       return signedIn()
-        && profile.data.lastActiveClubId == clubId
-        && activeTeamId is string
-        && exists(memberPath(clubId, activeTeamId));
+        && hasUserProfile()
+        && activeUserProfile().lastActiveClubId == clubId
+        && activeUserProfile().lastActiveTeamId is string
+        && exists(memberPath(clubId, activeUserProfile().lastActiveTeamId));
+    }
+
+    function canReadClubNews(clubId) {
+      return isPlatformAdmin()
+        || hasActiveTeamInClub(clubId)
+        || hasActiveApprovedTeamInClub(clubId);
     }
 
     function safeSelfMembershipUpdate(uid) {
@@ -822,14 +848,14 @@ service cloud.firestore {
       }
 
       match /newsPosts/{postId} {
-        allow read: if hasActiveTeamInClub(clubId) || isPlatformAdmin();
+        allow read: if canReadClubNews(clubId);
         allow create: if request.resource.data.teamSlug is string
           && isTeamMember(clubId, request.resource.data.teamSlug)
           && request.resource.data.authorUid == request.auth.uid
           && request.resource.data.createdByUid == request.auth.uid;
         allow update: if isPlatformAdmin()
           || (
-            hasActiveTeamInClub(clubId)
+            canReadClubNews(clubId)
             && resource.data.authorUid == request.auth.uid
             && request.resource.data.authorUid == resource.data.authorUid
             && request.resource.data.createdByUid == resource.data.createdByUid
@@ -837,16 +863,16 @@ service cloud.firestore {
           );
         allow delete: if isPlatformAdmin()
           || (
-            hasActiveTeamInClub(clubId)
+            canReadClubNews(clubId)
             && resource.data.authorUid == request.auth.uid
           );
 
         match /comments/{commentId} {
-          allow read: if hasActiveTeamInClub(clubId) || isPlatformAdmin();
-          allow create: if hasActiveTeamInClub(clubId)
+          allow read: if canReadClubNews(clubId);
+          allow create: if canReadClubNews(clubId)
             && request.resource.data.authorUid == request.auth.uid
             && request.resource.data.createdBy == request.auth.uid;
-          allow update: if hasActiveTeamInClub(clubId)
+          allow update: if canReadClubNews(clubId)
             && (resource.data.authorUid == request.auth.uid || resource.data.createdBy == request.auth.uid)
             && request.resource.data.updatedBy == request.auth.uid
             && request.resource.data.body is string
@@ -857,15 +883,15 @@ service cloud.firestore {
             ]);
           allow delete: if isPlatformAdmin()
             || (
-              hasActiveTeamInClub(clubId)
+              canReadClubNews(clubId)
               && resource.data.authorUid == request.auth.uid
             );
         }
 
         match /reactions/{uid} {
-          allow read: if hasActiveTeamInClub(clubId) || isPlatformAdmin();
+          allow read: if canReadClubNews(clubId);
           allow create, update: if isSelf(uid)
-            && hasActiveTeamInClub(clubId)
+            && canReadClubNews(clubId)
             && request.resource.data.uid == uid
             && request.resource.data.type in ['like', 'love', 'thumbsUp', 'thumbsDown', 'laugh', 'cry', 'angry'];
           allow delete: if isSelf(uid)
@@ -958,7 +984,7 @@ service cloud.firestore {
         allow delete: if isPlatformAdmin();
 
         match /members/{uid} {
-          allow read: if isSelf(uid) || isTeamMember(clubId, teamId) || isAdminContext() || hasActiveApprovedTeamInClub(clubId);
+          allow read: if isSelf(uid) || isTeamMember(clubId, teamId) || isAdminContext() || canViewApprovedClubTeam(clubId, teamId);
           allow create: if isPlatformAdmin()
             || (
               signedIn()
@@ -982,7 +1008,7 @@ service cloud.firestore {
         }
 
         match /players/{playerId} {
-          allow read: if isTeamMember(clubId, teamId) || isAdminContext() || hasActiveApprovedTeamInClub(clubId);
+          allow read: if isTeamMember(clubId, teamId) || isAdminContext() || canViewApprovedClubTeam(clubId, teamId);
           allow create: if safeSelfPlayerWrite(playerId, teamId) || isPlatformAdmin();
           allow update: if safeManagerPlayerTeamUpdate(clubId, teamId)
             || safeSelfPlayerProfileUpdate(playerId, clubId, teamId)
