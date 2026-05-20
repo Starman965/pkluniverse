@@ -2611,6 +2611,30 @@ ul {
   border-color: rgba(255, 97, 97, 0.22);
 }
 
+.firestore-debug {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgba(255, 97, 97, 0.22);
+  border-radius: 0.75rem;
+  background: rgba(8, 12, 20, 0.72);
+  color: #d9e5f5;
+  font-size: 0.82rem;
+}
+
+.firestore-debug summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.firestore-debug pre {
+  margin: 0.75rem 0 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
 .notice--success {
   background: rgba(53, 204, 143, 0.12);
   border-color: rgba(53, 204, 143, 0.24);

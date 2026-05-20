@@ -2307,6 +2307,28 @@ export async function getTeam(clubSlug, teamSlug) {
   return snapshot.data();
 }
 
+export async function readTeamMembership(clubSlug, teamSlug, uid) {
+  requireDb();
+
+  if (!uid || !clubSlug || !teamSlug) {
+    return null;
+  }
+
+  const snapshot = await getDoc(doc(db, 'clubs', clubSlug, 'teams', teamSlug, 'members', uid));
+
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  const data = snapshot.data();
+
+  if (data.status === 'inactive') {
+    return null;
+  }
+
+  return data;
+}
+
 export async function getMembership(clubSlug, teamSlug, uid, user = null) {
   requireDb();
 

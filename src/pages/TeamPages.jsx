@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Cropper from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import FirestoreDebugPanel from '../components/FirestoreDebugPanel';
 import { useAuth } from '../context/AuthContext';
+import { createFirestoreStepError, extractFirestoreDebugInfo } from '../lib/firestoreDebug';
 import { markScheduleViewed } from '../lib/scheduleAttention';
 import { ACTIVITY_ICON_BY_TYPE } from '../lib/activityIcons';
 import { normalizeStoredHeadshotUrl, resolvePlayerAvatarUrl, resolveProfileAvatarUrl } from '../lib/profilePhotos';
@@ -37,6 +39,7 @@ import {
   declineChallenge,
   getMembership,
   getTeam,
+  readTeamMembership,
   getUserProfileData,
   getUserProfileAvatarsByUid,
   isPlatformAdmin,
@@ -5315,17 +5318,98 @@ export function NewsPage() {
   const [reactingPostId, setReactingPostId] = useState('');
   const [isAppAdmin, setIsAppAdmin] = useState(false);
   const [feedError, setFeedError] = useState('');
+  const [feedDebug, setFeedDebug] = useState(null);
   const [communityError, setCommunityError] = useState('');
+  const [communityDebug, setCommunityDebug] = useState(null);
+  const [accessDebug, setAccessDebug] = useState(null);
   const [actionError, setActionError] = useState('');
   const [message, setMessage] = useState('');
 
+  function buildHomeDebugContext(extra = {}) {
+    return {
+      clubSlug,
+      email: user?.email ?? '',
+      teamSlug,
+      uid: user?.uid ?? '',
+      ...extra,
+    };
+  }
+
+  async function runHomeFirestoreStep(step, context, task) {
+    try {
+      return await task();
+    } catch (error) {
+      throw createFirestoreStepError(step, error, context);
+    }
+  }
+
+  function repairMembershipInBackground(membershipData) {
+    if (!user?.uid || !membershipData) {
+      return;
+    }
+
+    getMembership(clubSlug, teamSlug, user.uid, user).catch((error) => {
+      const debugInfo = extractFirestoreDebugInfo(error, {
+        step: 'getMembershipRepair',
+        ...buildHomeDebugContext({ membershipFound: true }),
+      });
+      console.warn('[NewsPage:membershipRepair]', debugInfo, error);
+      setAccessDebug(debugInfo);
+    });
+  }
+
   async function loadNewsAccess() {
+    const context = buildHomeDebugContext();
+
     const [membershipData, platformAdmin] = await Promise.all([
-      user?.uid ? getMembership(clubSlug, teamSlug, user.uid, user) : Promise.resolve(null),
+      user?.uid
+        ? runHomeFirestoreStep('readTeamMembership', context, () =>
+            readTeamMembership(clubSlug, teamSlug, user.uid),
+          )
+        : Promise.resolve(null),
       user?.uid ? isPlatformAdmin(user.uid, user.email) : Promise.resolve(false),
     ]);
+
     if (user?.uid && membershipData) {
-      await ensureUserActiveTeamContext({ clubSlug, teamSlug, uid: user.uid });
+      repairMembershipInBackground(membershipData);
+      try {
+        const activeTeamSaved = await runHomeFirestoreStep(
+          'ensureUserActiveTeamContext',
+          { ...context, membershipFound: true },
+          () => ensureUserActiveTeamContext({ clubSlug, teamSlug, uid: user.uid }),
+        );
+
+        if (!activeTeamSaved) {
+          setAccessDebug({
+            step: 'ensureUserActiveTeamContext',
+            ...context,
+            membershipFound: true,
+            message: 'Active team context was not saved.',
+            activeTeamSaved: false,
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          setAccessDebug({
+            step: 'readTeamMembership',
+            ...context,
+            membershipFound: true,
+            role: membershipData.role ?? '',
+            activeTeamSaved: true,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch (error) {
+        setAccessDebug(extractFirestoreDebugInfo(error, { ...context, membershipFound: true }));
+        throw error;
+      }
+    } else {
+      setAccessDebug({
+        step: 'readTeamMembership',
+        ...context,
+        membershipFound: Boolean(membershipData),
+        role: membershipData?.role ?? '',
+        timestamp: new Date().toISOString(),
+      });
     }
 
     setMembership(membershipData);
@@ -5333,36 +5417,59 @@ export function NewsPage() {
   }
 
   async function loadCommunityOverview() {
+    const context = buildHomeDebugContext();
+
     const membershipData = user?.uid
-      ? await getMembership(clubSlug, teamSlug, user.uid, user)
+      ? await runHomeFirestoreStep('readTeamMembership', context, () =>
+          readTeamMembership(clubSlug, teamSlug, user.uid),
+        )
       : null;
 
     if (membershipData) {
-      await ensureUserActiveTeamContext({ clubSlug, teamSlug, uid: user.uid });
+      repairMembershipInBackground(membershipData);
+      await runHomeFirestoreStep(
+        'ensureUserActiveTeamContext',
+        { ...context, membershipFound: true },
+        () => ensureUserActiveTeamContext({ clubSlug, teamSlug, uid: user.uid }),
+      );
     }
 
-    const teamData = await getTeam(clubSlug, teamSlug);
+    const teamData = await runHomeFirestoreStep('getTeam', context, () => getTeam(clubSlug, teamSlug));
     const activeClubSlug =
       teamData?.affiliationStatus === 'approved' && teamData?.approvedClubSlug
         ? teamData.approvedClubSlug
         : clubSlug;
-    const teams =
-      activeClubSlug && activeClubSlug !== 'independent'
-        ? await listApprovedClubTeams(activeClubSlug)
-        : [
-            {
-              clubSlug,
-              logoUrl: teamData?.logoUrl ?? '',
-              name: teamData?.name ?? teamSlug,
-              teamSlug,
-            },
-          ];
+    const teams = await runHomeFirestoreStep(
+      'listApprovedClubTeams',
+      { ...context, activeClubSlug, membershipFound: Boolean(membershipData) },
+      () =>
+        activeClubSlug && activeClubSlug !== 'independent'
+          ? listApprovedClubTeams(activeClubSlug)
+          : Promise.resolve([
+              {
+                clubSlug,
+                logoUrl: teamData?.logoUrl ?? '',
+                name: teamData?.name ?? teamSlug,
+                teamSlug,
+              },
+            ]),
+    );
     const teamEntries = await Promise.all(
       teams.map(async (clubTeam) => {
+        const teamPath = `${clubTeam.clubSlug}/${clubTeam.teamSlug}`;
         const [members, players, games] = await Promise.all([
-          listTeamMembers(clubTeam.clubSlug, clubTeam.teamSlug).catch(() => []),
-          listPlayers(clubTeam.clubSlug, clubTeam.teamSlug).catch(() => []),
-          listGames(clubTeam.clubSlug, clubTeam.teamSlug).catch(() => []),
+          listTeamMembers(clubTeam.clubSlug, clubTeam.teamSlug).catch((error) => {
+            console.warn('[NewsPage:communityTeamLoad]', teamPath, 'listTeamMembers', error);
+            return [];
+          }),
+          listPlayers(clubTeam.clubSlug, clubTeam.teamSlug).catch((error) => {
+            console.warn('[NewsPage:communityTeamLoad]', teamPath, 'listPlayers', error);
+            return [];
+          }),
+          listGames(clubTeam.clubSlug, clubTeam.teamSlug).catch((error) => {
+            console.warn('[NewsPage:communityTeamLoad]', teamPath, 'listGames', error);
+            return [];
+          }),
         ]);
         const playersById = new Map(players.map((player) => [player.id, player]));
         const rosterPlayers = members
@@ -5462,16 +5569,27 @@ export function NewsPage() {
         },
         (subscribeError) => {
           if (isMounted) {
+            const debugInfo = extractFirestoreDebugInfo(subscribeError, {
+              step: 'subscribeNewsPosts',
+              ...buildHomeDebugContext(),
+            });
             setFeedError(subscribeError.message ?? 'Unable to listen for community feed updates.');
+            setFeedDebug(debugInfo);
           }
         },
       );
     }
 
     setFeedError('');
+    setFeedDebug(null);
     connectNewsFeed().catch((loadError) => {
       if (isMounted) {
+        const debugInfo = extractFirestoreDebugInfo(loadError, {
+          step: 'connectNewsFeed',
+          ...buildHomeDebugContext(),
+        });
         setFeedError(loadError.message ?? 'Unable to load community feed yet.');
+        setFeedDebug(debugInfo);
       }
     });
 
@@ -5525,6 +5643,7 @@ export function NewsPage() {
 
     setCommunityLoading(true);
     setCommunityError('');
+    setCommunityDebug(null);
     loadCommunityOverview()
       .then(({ players, rankings, teams }) => {
         if (!ignore) {
@@ -5532,11 +5651,17 @@ export function NewsPage() {
           setCommunityPlayers(players);
           setCommunityRankings(rankings);
           setCommunityError('');
+          setCommunityDebug(null);
         }
       })
       .catch((loadError) => {
         if (!ignore) {
+          const debugInfo = extractFirestoreDebugInfo(loadError, {
+            step: 'loadCommunityOverview',
+            ...buildHomeDebugContext(),
+          });
           setCommunityError(loadError.message ?? 'Unable to load the community directory.');
+          setCommunityDebug(debugInfo);
           setCommunityTeams([]);
           setCommunityPlayers([]);
           setCommunityRankings([]);
@@ -5853,7 +5978,11 @@ export function NewsPage() {
         />
 
         {feedError ? <div className="notice notice--error">{feedError}</div> : null}
+        <FirestoreDebugPanel debugInfo={feedDebug} label="Feed permission debug" />
         {actionError ? <div className="notice notice--error">{actionError}</div> : null}
+        {accessDebug && (feedError || communityError) ? (
+          <FirestoreDebugPanel debugInfo={accessDebug} label="Team access debug" />
+        ) : null}
         {message ? <div className="notice notice--success">{message}</div> : null}
 
         {isComposerOpen ? (
@@ -5958,6 +6087,7 @@ export function NewsPage() {
         </div>
 
         {communityError ? <div className="notice notice--error">{communityError}</div> : null}
+        <FirestoreDebugPanel debugInfo={communityDebug} label="Community directory debug" />
 
         {communityLoading ? (
           <div className="state-panel">
